@@ -125,7 +125,7 @@ export default function DesignAgentPanel({ project, onProject, onBusy, disabled 
       <div className="design-agent-heading">
         <div>
           <h2 id="design-agent-title">Workstation layout</h2>
-          <p>Meta proposes a layout within one supported pipetting architecture. Geometry checks protect the accepted project.</p>
+          <p>OpenAI proposes a layout within one supported pipetting architecture. Geometry checks protect the accepted project.</p>
         </div>
         {run && (
           <span className={`design-agent-status design-agent-status-${run.status}`}>
@@ -153,7 +153,7 @@ export default function DesignAgentPanel({ project, onProject, onBusy, disabled 
           onClick={() => void develop()}
           disabled={pending || disabled || instruction.trim() === ''}
         >
-          {pending ? 'Developing design…' : hasAccepted ? 'Revise design with Meta' : 'Develop design with Meta'}
+          {pending ? 'Developing design…' : hasAccepted ? 'Revise design with OpenAI' : 'Develop design with OpenAI'}
         </button>
       </div>
 
@@ -161,7 +161,7 @@ export default function DesignAgentPanel({ project, onProject, onBusy, disabled 
         <div className="design-progress" aria-live="polite">
           <div className="design-progress-heading">
             <strong>{layoutReady ? 'Layout accepted' : 'Developing your workstation'}</strong>
-            <span>{layoutReady ? 'Opening the 3D view…' : 'Waiting for Meta and geometry checks…'}</span>
+            <span>{layoutReady ? 'Opening the 3D view…' : 'Waiting for OpenAI and geometry checks…'}</span>
           </div>
           <div
             className={`design-progress-track${layoutReady ? ' complete' : ' waiting'}`}
@@ -170,7 +170,7 @@ export default function DesignAgentPanel({ project, onProject, onBusy, disabled 
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={layoutReady ? 100 : undefined}
-            aria-valuetext={layoutReady ? 'Layout accepted. Opening the 3D view.' : 'Waiting for Meta and geometry checks.'}
+            aria-valuetext={layoutReady ? 'Layout accepted. Opening the 3D view.' : 'Waiting for OpenAI and geometry checks.'}
           ><span ref={progressFillRef} /></div>
         </div>
       )}

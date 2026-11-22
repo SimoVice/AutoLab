@@ -52,7 +52,7 @@ flowchart TD
     G --> K[Software and protocol guidance]
 ```
 
-Meta models handle discovery, explanation and supported design proposals.
+OpenAI models handle discovery, explanation and supported design proposals.
 Application code validates the structured updates, applies workflow-specific
 checks and derives the supported outputs. Source identity and project revisions
 connect those outputs. A rejected design update preserves the accepted project.

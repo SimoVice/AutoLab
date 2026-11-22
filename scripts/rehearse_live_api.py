@@ -1,4 +1,4 @@
-"""Bounded, opt-in Meta rehearsal using synthetic needs through the real local API.
+"""Bounded, opt-in OpenAI rehearsal using synthetic needs through the real local API.
 
 Without --live this prints the scenarios and makes no model requests. Example:
     .venv/Scripts/python scripts/rehearse_live_api.py --live --routes 1
@@ -235,7 +235,7 @@ class Rehearsal:
             "evidence_mode": self.mode,
             "physical_provider_calls": len(self.calls) if self.mode == "live" else 0,
             "token_usage_scope": ("Reported usage for this live run" if self.mode == "live"
-                                  else "Historical recorded usage; no new Meta consumption"),
+                                  else "Historical recorded usage; no new OpenAI consumption"),
             "code_sha256": self.code_sha256,
             "max_model_calls": self.max_calls,
             "provider_calls": self.calls,
@@ -431,7 +431,7 @@ def dry_run(args):
                 "model": DEFAULT_MODEL,
                 "max_model_calls": args.max_model_calls,
                 "scenarios": selected,
-                "note": "Add --live to send synthetic inputs to Meta.",
+                "note": "Add --live to send synthetic inputs to OpenAI.",
             },
             indent=2,
         )
@@ -464,7 +464,7 @@ async def main(args):
         configured = ModelSettings("offline-replay", "https://replay.invalid/v1", DEFAULT_MODEL)
     else:
         configured = ModelSettings.load()
-    # Explicitly use Contributor even when local application configuration selects another model.
+    # Use the rehearsal default even when local application configuration selects another model.
     settings = ModelSettings(configured.api_key, configured.base_url, DEFAULT_MODEL)
     output = (
         ROOT
@@ -535,7 +535,7 @@ async def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--live", action="store_true", help="Explicitly permit real Contributor calls"
+        "--live", action="store_true", help="Explicitly permit real OpenAI calls"
     )
     parser.add_argument("--routes", type=int, choices=(1, 2, 3), default=3)
     parser.add_argument("--start-route", type=int, choices=(1, 2, 3), default=1)
@@ -549,7 +549,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--replay-results",
         type=Path,
-        help="Replay recorded provider responses offline; makes no real Meta calls",
+        help="Replay recorded provider responses offline; makes no real OpenAI calls",
     )
     arguments = parser.parse_args()
     if arguments.start_route + arguments.routes > 4:

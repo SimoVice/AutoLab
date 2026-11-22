@@ -137,7 +137,6 @@ body { overflow: hidden; }
 .software-workspace .software-preview .operating-preview { padding: 10px 12px; }
 .software-workspace .software-editor, .software-workspace .software-output { padding: 16px; }
 .software-panel-switch { display: none; }
-.software-workspace > .meta-attribution { flex: 0 0 auto; }
 .software-workspace .software-scene { height: clamp(180px, 34dvh, 380px); }
 .software-tabs { flex-wrap: wrap; }
 @media (max-width: 1099px), (max-height: 700px) {

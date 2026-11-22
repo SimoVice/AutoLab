@@ -18,6 +18,7 @@ from app.assembly import build_document_files
 from app.domain import new_project
 from app.foundation_design import foundation_sourcing
 from app.instructions import build_instruction_guide
+from app.openai_models import DEFAULT_MODEL
 
 
 def project_fixture():
@@ -87,7 +88,7 @@ def estimate(project, rows=None, report=None, *, http_status=200, finish="stop",
         return httpx.Response(
             http_status,
             json={
-                "model": prices.ESTIMATE_MODEL,
+                "model": DEFAULT_MODEL,
                 "choices": [
                     {"finish_reason": finish, "message": {"content": json.dumps({"rows": rows})}}
                 ],
@@ -102,19 +103,19 @@ def estimate(project, rows=None, report=None, *, http_status=200, finish="stop",
                 report,
                 client=client,
                 settings=SimpleNamespace(
-                    api_key="offline-only", base_url="https://unit.invalid/v1"
+                    api_key="offline-only", base_url="https://unit.invalid/v1", model=DEFAULT_MODEL
                 ),
             )
 
     return asyncio.run(run()), calls
 
 
-def test_one_spark_call_and_revision_bound_group_total_without_mutation():
+def test_one_model_call_and_revision_bound_group_total_without_mutation():
     project = project_fixture()
     original = deepcopy(project)
     result, calls = estimate(project)
     assert project == original and len(calls) == 1
-    assert calls[0]["model"] == prices.ESTIMATE_MODEL
+    assert calls[0]["model"] == DEFAULT_MODEL
     assert calls[0]["max_completion_tokens"] == 4800
     assert result["status"] == "ready" and result["project_revision"] == project["revision"]
     assert result["summary"]["project_total_low_usd"] == 20

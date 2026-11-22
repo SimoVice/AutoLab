@@ -1,4 +1,4 @@
-"""Strict local audio bounds and single-request, sanitized Meta dictation."""
+"""Strict local audio bounds and single-request, sanitized OpenAI dictation."""
 
 import asyncio
 import io
@@ -13,7 +13,7 @@ import app.api as api
 import app.transcription as voice
 from app.model_client import ModelSettings
 
-SETTINGS = ModelSettings("synthetic-test-key", "https://api.meta.ai/v1", "muse-wonder-1.0")
+SETTINGS = ModelSettings("synthetic-test-key", "https://api.openai.com/v1", "gpt-6.1-sol")
 
 
 def wav(*, rate=16000, channels=1, width=2, seconds=0.1):
@@ -70,20 +70,18 @@ def test_official_request_and_transcript_response(caplog):
     async def respond(request):
         requests.append(request)
         body = await request.aread()
-        assert request.url.path == "/v1/asr/transcribe"
+        assert request.url == "https://api.openai.com/v1/audio/transcriptions"
         assert request.headers["Authorization"] == "Bearer synthetic-test-key"
-        assert b'"model": "muse-voice-transcribe-1.0"' in body
-        assert b'"mode": "PUSH_TO_TALK"' in body
-        assert b'name="audio"' in body
-        return httpx.Response(
-            200, json={"transcript": "  Private test words  ", "audioDurationMs": 100, "turns": []}
-        )
+        assert b'name="model"' in body and voice.VOICE_MODEL.encode() in body
+        assert b'name="file"; filename="recording.wav"' in body
+        assert wav() in body
+        return httpx.Response(200, json={"text": "  Private test words  "})
 
     async def run():
         async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
             result = await voice.transcribe_audio(wav(), settings=SETTINGS, client=client)
         assert result["text"] == "Private test words"
-        assert result["model"] == "muse-voice-transcribe-1.0"
+        assert result["model"] == "gpt-transcribe"
         assert result["duration_ms"] == 100
         assert result["request_id"].startswith("dictation-")
 
@@ -100,7 +98,7 @@ def test_official_request_and_transcript_response(caplog):
         (403, {"error": "secret provider details"}, 503),
         (429, {"error": "secret provider details"}, 429),
         (500, {"error": "secret provider details"}, 502),
-        (200, {"transcript": {"bad": "schema"}}, 502),
+        (200, {"text": {"bad": "schema"}}, 502),
         (200, ["bad schema"], 502),
     ],
 )

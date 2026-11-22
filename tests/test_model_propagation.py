@@ -17,9 +17,9 @@ from app.model_client import DEFAULT_MODEL, ChatAction, ExtractedTurn, ModelSett
 
 @pytest.fixture(autouse=True)
 def local_configuration(monkeypatch):
-    monkeypatch.setenv("MODEL_API_KEY", "synthetic-test-key")
-    monkeypatch.setenv("META_API_BASE_URL", "https://api.meta.ai/v1")
-    monkeypatch.setenv("META_MODEL", DEFAULT_MODEL)
+    monkeypatch.setenv("OPENAI_API_KEY", "synthetic-test-key")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+    monkeypatch.setenv("OPENAI_MODEL", DEFAULT_MODEL)
     api._sessions.clear()
     jobs._jobs.clear()
     jobs._cache.clear()
@@ -57,6 +57,8 @@ def test_real_chat_design_and_extension_payloads_share_session_selection(monkeyp
 
     def handler(request):
         payload = json.loads(request.content)
+        assert request.url == "https://api.openai.com/v1/chat/completions"
+        assert payload["reasoning_effort"] == "low" and payload["store"] is False
         name = payload["response_format"]["json_schema"]["name"]
         calls.append((name, payload["model"]))
         if name == "layout_proposal":
@@ -72,7 +74,7 @@ def test_real_chat_design_and_extension_payloads_share_session_selection(monkeyp
         return response(content, payload["model"])
 
     install_transport(monkeypatch, handler)
-    session = api.ProjectSession(project=project, model="muse-wonder-1.0")
+    session = api.ProjectSession(project=project, model="gpt-6.1-sol")
     api._sessions[project["id"]] = session
     with TestClient(api.app) as client:
         path = f"/api/projects/{project['id']}"
@@ -84,17 +86,17 @@ def test_real_chat_design_and_extension_payloads_share_session_selection(monkeyp
             },
         )
         assert designed.status_code == 200, designed.text
-        assert designed.json()["design_run"]["model"] == "muse-wonder-1.0"
+        assert designed.json()["design_run"]["model"] == "gpt-6.1-sol"
         chat = client.post(path + "/messages", json={"message": "Add inspection camera."})
         assert chat.status_code == 200, chat.text
         result = chat.json()
-        assert result["usage"]["model"] == "muse-wonder-1.0"
-        assert result["action_runs"][0]["model"] == "muse-wonder-1.0"
-        assert result["project"]["inspection_extension"]["provenance"]["model"] == "muse-wonder-1.0"
+        assert result["usage"]["model"] == "gpt-6.1-sol"
+        assert result["action_runs"][0]["model"] == "gpt-6.1-sol"
+        assert result["project"]["inspection_extension"]["provenance"]["model"] == "gpt-6.1-sol"
     assert calls == [
-        ("layout_proposal", "muse-wonder-1.0"),
-        ("requirement_turn", "muse-wonder-1.0"),
-        ("inspection_proposal", "muse-wonder-1.0"),
+        ("layout_proposal", "gpt-6.1-sol"),
+        ("requirement_turn", "gpt-6.1-sol"),
+        ("inspection_proposal", "gpt-6.1-sol"),
     ]
     assert project == original
     assert ModelSettings.load().model == DEFAULT_MODEL
@@ -110,23 +112,23 @@ def test_background_vision_captures_model_and_deduplicates_per_model(monkeypatch
 
     install_transport(monkeypatch, handler)
     project = layout_project()
-    session = api.ProjectSession(project=project, model="muse-wonder-1.0")
+    session = api.ProjectSession(project=project, model="gpt-6.1-sol")
     api._sessions[project["id"]] = session
     with TestClient(api.app) as client:
         base = f"/api/projects/{project['id']}/inspections"
         body = {"project_revision": project["revision"], "image_data_url": _make_data_url()}
         first = client.post(base, json=body).json()
         one = _wait_job(client, base + "/" + first["id"])
-        assert one["result"]["model"] == "muse-wonder-1.0"
-        assert one["result"]["usage"]["model"] == "muse-wonder-1.0"
+        assert one["result"]["model"] == "gpt-6.1-sol"
+        assert one["result"]["usage"]["model"] == "gpt-6.1-sol"
         repeated = client.post(base, json=body).json()
         assert repeated["id"] == first["id"]
-        session.model = "muse-spark-1.3"
+        session.model = "gpt-6.1-terra"
         second = client.post(base, json=body).json()
         two = _wait_job(client, base + "/" + second["id"])
         assert second["id"] != first["id"]
-        assert two["result"]["model"] == "muse-spark-1.3"
-    assert observed == ["muse-wonder-1.0", "muse-spark-1.3"]
+        assert two["result"]["model"] == "gpt-6.1-terra"
+    assert observed == ["gpt-6.1-sol", "gpt-6.1-terra"]
 
 
 def test_child_task_retains_selection_after_parent_scope_ends():
@@ -137,10 +139,10 @@ def test_child_task_retains_selection_after_parent_scope_ends():
             await gate.wait()
             return ModelSettings.load().model
 
-        with using_model("muse-wonder-1.0"):
+        with using_model("gpt-6.1-sol"):
             task = asyncio.create_task(child())
         gate.set()
-        assert await task == "muse-wonder-1.0"
+        assert await task == "gpt-6.1-sol"
         assert ModelSettings.load().model == DEFAULT_MODEL
 
     asyncio.run(run())

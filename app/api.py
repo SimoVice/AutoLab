@@ -202,6 +202,8 @@ def session_for(project_id: str) -> ProjectSession:
     if session is None:
         saved = project_library.load(project_id)
         if saved is not None:
+            if saved.get("model") not in AGENT_MODELS:
+                saved["model"] = configured_model()
             session = ProjectSession(**saved)
             _sessions[project_id] = session
     if session is None:
@@ -378,7 +380,7 @@ class ModelSelectionRequest(BaseModel):
 async def select_project_model(project_id: str, request: ModelSelectionRequest) -> dict:
     session = session_for(project_id)
     if request.model not in AGENT_MODELS:
-        raise HTTPException(status_code=422, detail="Choose a supported Spark or Wonder model.")
+        raise HTTPException(status_code=422, detail="Choose a supported OpenAI model.")
     status = availability(await discover_catalog(), request.model)
     if not status["available"]:
         raise HTTPException(status_code=409, detail=status["unavailable_reason"])
@@ -697,10 +699,12 @@ async def refresh_cost_estimate(
                     return {"estimate": cached, "state": "current"}
                 project = deepcopy(session.project)
                 report = deepcopy(session.procurement_report)
-            if cached and (not payload.force or cached.get("retry_required")):
-                estimate = await estimate_project_prices(project, report, previous=cached)
-            else:
-                estimate = await estimate_project_prices(project, report)
+                model = session.model
+            with using_model(model):
+                if cached and (not payload.force or cached.get("retry_required")):
+                    estimate = await estimate_project_prices(project, report, previous=cached)
+                else:
+                    estimate = await estimate_project_prices(project, report)
             async with session.model_lock():
                 _check_procurement_revision(session.project, payload.project_revision)
                 if session.procurement_report != report:
@@ -1168,7 +1172,7 @@ async def send_message(project_id: str, request: MessageRequest) -> dict:
                 else:
                     reply += (
                         f"\n\nRecorded a {width:g} mm maximum width. "
-                        "Develop a fresh layout with Meta to check the arrangement; "
+                        "Develop a fresh layout with OpenAI to check the arrangement; "
                         "this message has not generated a new machine."
                     )
             reply += _cooling_feedback(patch, updated)

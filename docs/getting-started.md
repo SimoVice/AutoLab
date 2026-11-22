@@ -95,7 +95,7 @@ These are **environment checks**. They do not launch the product, test browser/W
 
 Verified on 2026-10-27 on Windows x64: the primary environment and a separate clean reconstruction passed the Python/CAD/physics and frontend checks. The reconstruction installed from unchanged lockfiles, also accepted the hashed requirements export, and preserved the original configuration without copying credentials. This verifies the dependency baseline, not full application reproducibility.
 
-## Local Meta configuration
+## Local OpenAI configuration
 
 Create the local file without overwriting an existing configuration:
 
@@ -107,13 +107,29 @@ if (-not (Test-Path -LiteralPath .env)) {
 
 | Variable | Template value | Purpose |
 | --- | --- | --- |
-| `MODEL_API_KEY` | Empty | Your own Meta Model API key |
-| `META_API_BASE_URL` | `https://api.meta.ai/v1` | Provider endpoint |
-| `META_MODEL` | `muse-spark-1.3-contributor` | Default for suitable tests |
+| `OPENAI_API_KEY` | Empty | OpenAI API key, set on the backend |
+| `OPENAI_MODEL` | `gpt-6.1-terra` | Default conversation, design, cost estimation and photo model. The other supported choice is `gpt-6.1-sol`. |
+| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | OpenAI API endpoint. Hosted sessions, dictation and illustrations require the official endpoint. |
 
-The backend reads these variables; environment verification does not use them. Keep credentials server-side and out of browser bundles. Never commit `.env` or put an API key in a `VITE_` variable.
+For an existing installation, **add `OPENAI_API_KEY` to your existing `.env`** or
+set it in the backend environment. Keep it out of the browser, `VITE_` variables
+and source control. The old Meta variables and credentials are ignored. Recorded
+projects retain their original model provenance when opened.
 
-Contributor is the default for suitable tests; use `muse-wonder-1.0` when complexity or an observed quality failure justifies it. Account/model access and billing are external prerequisites. Contributor inputs/responses may be used for training: use shareable or synthetic inputs. Model access is not included in dependency setup.
+Open **Model & settings** in the workspace to check the account's model list.
+Dictation uses `gpt-transcribe` and illustrations use `gpt-image-2.6-flare`
+through the same server account.
+
+Open a new project and use this synthetic request to check a real conversation.
+
+> I photograph empty plates with a fixed camera. I have 300 mm of bench width.
+> Help me position each plate the same way. I haven't measured the plate yet.
+
+Check whether the brief retains the camera and bench width and the assistant
+asks for the missing plate measurements. Correct the width to 280 mm, then
+save and reopen the project. Check that the updated width and camera are still
+there. These two messages use the configured OpenAI account. Opening a saved
+file and listing account models can be checked separately.
 
 ## Locked dependency groups
 
@@ -174,4 +190,4 @@ Download the [recorded plate project](examples/software-protocol-project.json), 
 
 A saved design may reopen as a draft when its compiler version needs review. It restores project inputs and geometry, not previous server jobs. Use **Save project** before stopping the backend; browser resume is not a backup.
 
-To start from scratch, configure Meta above and follow the [conversation walkthrough](demo-guide.md). Live model responses and supplier listings can change even with unchanged dependency locks.
+To start from scratch, configure OpenAI above and follow the [conversation walkthrough](demo-guide.md). Live model responses and supplier listings can change even with unchanged dependency locks.

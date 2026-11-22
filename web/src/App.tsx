@@ -1,6 +1,5 @@
 import ProjectNotes from './ProjectNotes';
 import SoftwareWorkspace from './SoftwareWorkspace';
-import PoweredByMeta from './PoweredByMeta';
 import ProjectLibrary from './ProjectLibrary';
 import type { LibraryOpen, SavedEntry } from './ProjectLibrary';
 import BenchStationPanel from './BenchStationPanel';
@@ -619,7 +618,8 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
     setError(null);
     setInput('');
     setMessages((current) => [...current, { id: Date.now(), role: 'user', text: message }]);
-    const requestId = crypto.randomUUID();
+    const randomBytes = crypto.getRandomValues(new Uint8Array(16));
+    const requestId = Array.from(randomBytes, byte => byte.toString(16).padStart(2, '0')).join('');
     const stopActivity = watchChatActivity(project.id, requestId, controller.signal, activity => {
       if (sessionRef.current === session) setRequestActivity(activity);
     });
@@ -1060,7 +1060,6 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
             </form>
             {input.length > 3600 && <p className="draft-length" role="status">{input.length.toLocaleString()} / 4,000 characters{input.length > 4000 ? ' — shorten before sending.' : ''}</p>}
             {project && <VoiceDictation key={`${project.id}:${voiceEpoch}`} capability={voiceCapability} disabled={uiBusy} onBusyChange={setVoiceBusy} onTranscript={appendTranscript} />}
-            <PoweredByMeta />
           </div>
         </aside>
       </main>

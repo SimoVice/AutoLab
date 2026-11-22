@@ -102,7 +102,7 @@ def assembly_bounds(project: dict) -> dict:
 
 
 def adopt_foundation(project: dict, *, bed_drop_mm: float = 100) -> dict:
-    """Prepare source geometry without claiming that a Meta proposal was accepted."""
+    """Prepare source geometry before the layout proposal is accepted."""
     metadata = foundation_metadata(bed_drop_mm)
     result = deepcopy(project)
     design = result["design"]

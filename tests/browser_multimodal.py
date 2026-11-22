@@ -3,7 +3,7 @@
 Real UI, browser AudioWorklet and backend project lifecycle. Model catalogue,
 selection, transcription and chat transport are explicit fixtures: no provider
 request or private audio. This checks interaction, PCM format and stale guards;
-it does not establish Muse Voice transcription quality.
+it does not establish OpenAI dictation transcription quality.
 """
 
 import base64
@@ -61,7 +61,7 @@ def run(url):
         model_calls, transcripts, messages, pending = [], [], [], []
         image_requests, pending_images = [], []
         image_mode = "failure"
-        active_model = "muse-spark-1.3-contributor"
+        active_model = "gpt-6.1-terra"
         transcription_mode = "success"
         catalogue_available = True
         browser_errors = []
@@ -72,13 +72,13 @@ def run(url):
                 json={
                     "models": [
                         {
-                            "id": "muse-spark-1.3-contributor",
-                            "label": "Muse Spark Contributor",
+                            "id": "gpt-6.1-terra",
+                            "label": "GPT-6.1 Terra",
                             "available": catalogue_available,
                         },
                         {
-                            "id": "muse-wonder-1.0",
-                            "label": "Muse Wonder",
+                            "id": "gpt-6.1-sol",
+                            "label": "GPT-6.1 Sol",
                             "available": catalogue_available,
                         },
                         {
@@ -87,15 +87,15 @@ def run(url):
                             "available": False,
                         },
                     ],
-                    "default_model": "muse-spark-1.3-contributor",
+                    "default_model": "gpt-6.1-terra",
                     "active_model": active_model,
                     "capabilities": {
                         "voice": {
                             "available": True,
-                            "model": "muse-voice",
+                            "model": "gpt-transcribe",
                             "max_duration_seconds": 60,
                         },
-                        "image": {"available": True, "model": "muse-image"},
+                        "image": {"available": True, "model": "gpt-image-2.6-flare"},
                     },
                 }
             )
@@ -130,7 +130,7 @@ def run(url):
                 route.fulfill(
                     json={
                         "text": "Synthetic editable transcript.",
-                        "model": "muse-voice",
+                        "model": "gpt-transcribe",
                         "request_id": "offline-only",
                     }
                 )
@@ -185,19 +185,19 @@ def run(url):
             page.goto(url)
             page.wait_for_load_state("networkidle")
             model = page.get_by_label("Agent model", exact=True)
-            voice = page.get_by_role("button", name="Muse Voice", exact=True)
+            voice = page.get_by_role("button", name="Dictate", exact=True)
             composer = page.get_by_label("Describe your workflow or request a change")
             send = page.get_by_role("button", name="Send message")
             expect(voice).to_be_enabled()
             assert page.evaluate("window.syntheticMicCalls") == 0
-            model.select_option("muse-wonder-1.0")
-            expect(model).to_have_value("muse-wonder-1.0")
+            model.select_option("gpt-6.1-sol")
+            expect(model).to_have_value("gpt-6.1-sol")
             expect(page.locator("#model-data-note")).to_contain_text("not used to train")
-            model.select_option("muse-spark-1.3-contributor")
+            model.select_option("gpt-6.1-terra")
             expect(page.get_by_role("alert")).to_contain_text("Synthetic selection failure")
-            expect(model).to_have_value("muse-wonder-1.0")
-            model.select_option("muse-spark-1.3-contributor")
-            expect(model).to_have_value("muse-spark-1.3-contributor")
+            expect(model).to_have_value("gpt-6.1-sol")
+            model.select_option("gpt-6.1-terra")
+            expect(model).to_have_value("gpt-6.1-terra")
             expect(page.locator("#model-data-note")).to_be_visible()
             expect(model.locator('option[value="unavailable-model"]')).to_be_disabled()
             composer.fill("Keep this typed draft.")
@@ -284,7 +284,7 @@ def run(url):
             expect(page.get_by_role("button", name="Stop and transcribe")).to_be_visible()
             page.wait_for_timeout(250)
             page.get_by_role("button", name="Stop and transcribe").click()
-            expect(page.get_by_text("Transcribing with Muse Voice…")).to_be_visible()
+            expect(page.get_by_text("Transcribing with OpenAI…")).to_be_visible()
             page.get_by_role("button", name="New project", exact=True).click()
             expect(composer).to_have_value("")
             pending.pop().fulfill(json={"text": "Stale discarded transcript."})
@@ -365,20 +365,20 @@ def run(url):
             assert not panel.evaluate("el => el.open")
             assert not image_requests
             panel.locator(":scope > summary").click()
-            generate = page.get_by_role("button", name="Generate with Muse Image", exact=True)
+            generate = page.get_by_role("button", name="Generate with GPT Image", exact=True)
             generate.click()
             expect(panel.get_by_role("alert")).to_contain_text("Synthetic image failure")
             assert len(image_requests) == 1
             image_mode = "pending"
             generate.click()
-            expect(panel.get_by_text("Generating with Muse Image…", exact=True)).to_be_visible()
+            expect(panel.get_by_text("Generating with GPT Image…", exact=True)).to_be_visible()
             page.get_by_role("button", name="Cancel illustration").click()
             pending_route, pending_result = pending_images.pop()
             pending_route.fulfill(json=pending_result)
             expect(panel.locator(".illustration-result")).to_have_count(0)
             expect(generate).to_be_enabled()
             generate.click()
-            expect(panel.get_by_text("Generating with Muse Image…", exact=True)).to_be_visible()
+            expect(panel.get_by_text("Generating with GPT Image…", exact=True)).to_be_visible()
             harness.send_chat(page, "Set target to 20 mg/ml.", "Recorded an impossible target")
             pending_route, pending_result = pending_images.pop()
             pending_route.fulfill(json=pending_result)

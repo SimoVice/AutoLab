@@ -30,13 +30,13 @@ def run(url):
                 json={
                     "models": [
                         {
-                            "id": "muse-spark-1.3-contributor",
-                            "label": "Muse Spark",
+                            "id": "gpt-6.1-terra",
+                            "label": "GPT-6.1 Terra",
                             "available": True,
                         }
                     ],
-                    "active_model": "muse-spark-1.3-contributor",
-                    "default_model": "muse-spark-1.3-contributor",
+                    "active_model": "gpt-6.1-terra",
+                    "default_model": "gpt-6.1-terra",
                     "capabilities": {
                         "image": {"available": True, "model": "offline-image-fixture"},
                         "voice": {"available": False, "model": "", "max_duration_seconds": 60},

@@ -40,7 +40,7 @@ Start with the work you want to improve.
 
 ## One project, modular engineering support
 
-The conversation captures the researcher's needs. Meta models help explore options
+The conversation captures the researcher's needs. OpenAI models help explore options
 and propose changes; application checks determine which changes can become an
 engineering design. Supported adapters connect a selected machine foundation,
 components and task to the appropriate geometry, calculations, guides and exports.
@@ -88,16 +88,16 @@ set up a [hosted workspace with sign-in and a project library](docs/hosting.md).
 
 1. Follow the [Windows setup](docs/getting-started.md#setup-on-windows-powershell)
    and [start the two local servers](docs/getting-started.md#run-locally).
-2. Add your own [server-side Meta configuration](docs/getting-started.md#local-meta-configuration).
+2. Add your own [server-side OpenAI configuration](docs/getting-started.md#local-openai-configuration).
 3. Choose **New project** and describe the laboratory process you want to automate,
    the equipment you have and the constraints that matter. The available
    engineering depth depends on the task and supported adapters.
 
-Spark/Wonder selection, editable Muse Voice dictation and optional Muse Image
-presentation artwork are available through the configured account. Model-backed
-actions use your allowance; generated artwork does not replace engineering CAD.
+GPT-6.1 Terra handles project requests by default. Select GPT-6.1 Sol in model
+settings for more complex design work. Dictation and optional illustrations use
+separate OpenAI models when the account has access.
 
-For a look without configuring a Meta key, download the
+For a look without configuring an API key, download the
 [recorded liquid-handling project](docs/examples/software-protocol-project.json)
 and choose **Open project**. It uses synthetic laboratory inputs. Inspect the
 layout and guides, expand the 3D view and select **Selected part only**.

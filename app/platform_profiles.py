@@ -1,4 +1,4 @@
-"""Reviewed platform capabilities and procurement facts, separate from Meta advice."""
+"""Reviewed platform capabilities and procurement facts, separate from OpenAI advice."""
 
 from copy import deepcopy
 

@@ -272,16 +272,16 @@ def _design_provenance_html(project: dict) -> str:
     checks = provenance.get("checks", [])
     passed = sum(check.get("passed") is True for check in checks)
     if project.get("design", {}).get("platform"):
-        model_choices = "Meta proposed assignments of three labware proxies to deck slots. "
+        model_choices = "The model proposed assignments of three labware proxies to deck slots. "
     elif project.get("design", {}).get("foundation"):
         model_choices = (
-            "Meta proposed custom-insert dimensions, component positions and a digital bed pose. "
+            "The model proposed insert dimensions, component positions and a digital bed pose. "
             "The original source frame remains fixed. "
         )
     else:
-        model_choices = "Meta proposed the operating-deck dimensions and five component positions. "
+        model_choices = "The model proposed the deck dimensions and five component positions. "
     return (
-        '<div class="card"><h2>Meta layout decision</h2>'
+        '<div class="card"><h2>Model layout decision</h2>'
         f"<p>Model: {model}. {passed}/{len(checks)} recorded geometry checks passed.</p>"
         f"<p>{rationale}</p>"
         "<p>"
@@ -700,7 +700,7 @@ def build_readme(project: dict) -> bytes:
         provenance = engineering["provenance"]
         proposal = engineering["proposal"]
         text += (
-            "\n## Meta layout provenance\n\n"
+            "\n## Model layout provenance\n\n"
             f"Model: {provenance.get('model', 'not recorded')}.\n\n"
             f"{proposal['rationale']}\n\n"
             "The operating-deck dimensions and five component positions were proposed by "
@@ -955,7 +955,7 @@ def build_extensions_md(project: dict) -> bytes:
             "components retain their original IDs and geometry.\n\n"
             "## Image evidence and simulation\n\n"
             "The sweep is a geometric illustration, not a camera acquisition. Browser photo "
-            "capture/upload, Meta analysis and human review are separate actions. "
+            "capture/upload, OpenAI analysis and human review are separate actions. "
             + simulation_scope
             + "## Open design items\n\n"
             + "\n".join(f"- {v}" for v in extension["limitations"])

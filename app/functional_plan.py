@@ -13,6 +13,7 @@ from app.model_client import (
     _strict_schema,
     recorded_model,
 )
+from app.openai_models import chat_parameters
 
 Text = Annotated[str, Field(min_length=1, max_length=450)]
 
@@ -37,9 +38,7 @@ async def propose_plan(
 ) -> dict:
     settings = settings or ModelSettings.load()
     payload = {
-        "model": settings.model,
-        "reasoning_effort": "minimal",
-        "max_completion_tokens": 1600,
+        **chat_parameters(settings.model, 1600),
         "messages": [
             {
                 "role": "developer",

@@ -1,4 +1,4 @@
-"""Bounded recorded dictation through the official Meta speech-to-text endpoint."""
+"""Bounded recorded dictation through the official OpenAI speech-to-text endpoint."""
 
 import asyncio
 import io
@@ -94,9 +94,9 @@ async def transcribe_audio(
     try:
         settings = settings or ModelSettings.load()
     except ModelClientError:
-        raise TranscriptionError(503, "Configure MODEL_API_KEY on the server to use dictation.")
+        raise TranscriptionError(503, "Configure OPENAI_API_KEY on the server to use dictation.")
     if settings.base_url != DEFAULT_BASE_URL:
-        raise TranscriptionError(503, "Voice requires the official Meta Model API endpoint.")
+        raise TranscriptionError(503, "Voice requires the official OpenAI API endpoint.")
     if _active_requests >= 2:
         raise TranscriptionError(
             429, "Dictation is busy. Try again when the current clip finishes."
@@ -106,25 +106,15 @@ async def transcribe_audio(
     try:
 
         async def send(active: httpx.AsyncClient) -> dict:
-            files = {
-                "request": (
-                    None,
-                    json.dumps(
-                        {"model": VOICE_MODEL, "audioEncoding": "WAV", "mode": "PUSH_TO_TALK"}
-                    ),
-                    "application/json",
-                ),
-                "audio": ("recording.wav", audio, "audio/wav"),
-            }
             async with active.stream(
                 "POST",
-                f"{DEFAULT_BASE_URL}/asr/transcribe",
-                params={"sessionId": request_id},
+                f"{DEFAULT_BASE_URL}/audio/transcriptions",
+                data={"model": VOICE_MODEL},
+                files={"file": ("recording.wav", audio, "audio/wav")},
                 headers={
                     "Authorization": f"Bearer {settings.api_key}",
                     "Accept": "application/json",
                 },
-                files=files,
                 timeout=httpx.Timeout(40, connect=10),
             ) as response:
                 response.raise_for_status()
@@ -141,9 +131,9 @@ async def transcribe_audio(
                     body = await send(active)
             else:
                 body = await send(client)
-        if not isinstance(body, dict) or not isinstance(body.get("transcript"), str):
+        if not isinstance(body, dict) or not isinstance(body.get("text"), str):
             raise ValueError("Invalid transcription")
-        text = body["transcript"].strip()
+        text = body["text"].strip()
         if len(text) > 12000:
             raise ValueError("Invalid transcription")
         LOGGER.info(
@@ -159,20 +149,20 @@ async def transcribe_audio(
         code = exc.response.status_code
         if code in (401, 403, 404):
             raise TranscriptionError(
-                503, "Muse Voice is unavailable for the configured API account."
+                503, "Dictation is unavailable for the configured API account."
             )
         if code == 429:
-            raise TranscriptionError(429, "Meta's dictation limit was reached. Try again later.")
+            raise TranscriptionError(429, "OpenAI's dictation limit was reached. Try again later.")
         raise TranscriptionError(
-            502, f"Meta transcription failed (HTTP {code}). Your draft is intact."
+            502, f"OpenAI transcription failed (HTTP {code}). Your draft is intact."
         )
     except (httpx.TimeoutException, TimeoutError):
         raise TranscriptionError(504, "Transcription timed out. Your draft is intact; try again.")
     except httpx.RequestError:
-        raise TranscriptionError(502, "Could not reach Meta transcription. Check the connection.")
+        raise TranscriptionError(502, "Could not reach OpenAI transcription. Check the connection.")
     except (ValueError, TypeError):
         raise TranscriptionError(
-            502, "Meta returned an invalid transcription. Your draft is intact."
+            502, "OpenAI returned an invalid transcription. Your draft is intact."
         )
     finally:
         _active_requests -= 1

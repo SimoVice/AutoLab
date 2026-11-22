@@ -89,7 +89,7 @@ server_secrets = modal.Secret.from_name(
         "MUSEAUTOLAB_AUTH_USERNAME",
         "MUSEAUTOLAB_AUTH_PASSWORD_HASH",
         "MUSEAUTOLAB_AUTH_SIGNING_SECRET",
-        "MODEL_API_KEY",
+        "OPENAI_API_KEY",
     ],
 )
 

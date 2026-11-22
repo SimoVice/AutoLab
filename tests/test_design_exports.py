@@ -43,6 +43,6 @@ def test_continuous_layout_export_retains_actual_dimensions_and_decision(tmp_pat
     assert accepted["engineering_design"]["provenance"]["model"] == "offline-fixture"
     assert report["engineering_design"] == accepted["engineering_design"]
     documents = build_document_files(accepted)
-    assert b"Meta layout provenance" in documents["README.md"]
+    assert b"Model layout provenance" in documents["README.md"]
     assert b"offline-fixture" in documents["assembly-guide.html"]
     assert b"Synthetic accepted layout" in documents["assembly-guide.html"]

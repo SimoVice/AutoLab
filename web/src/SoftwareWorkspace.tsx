@@ -7,7 +7,6 @@ import OperatingPreview from './OperatingPreview';
 import { compileMotionPlan } from './motionPlan';
 import type { MotionMode } from './motionPlan';
 import type { Project } from './types';
-import PoweredByMeta from './PoweredByMeta';
 import AssistantMessage from './AssistantMessage';
 import './software-workspace.css';
 
@@ -513,7 +512,6 @@ export default function SoftwareWorkspace({ project, onProject, onConversation }
           </div>
         )}
       </div>
-      <PoweredByMeta />
     </main>
   );
 }

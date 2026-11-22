@@ -313,7 +313,7 @@ class Evaluation(shared.Evaluation):
                     raise shared.EvaluationAbort(self.abort_reason)
                 if json.loads(request.content).get("model") != MODEL:
                     self.abort_reason = (
-                        "Unexpected provider model; only Spark Contributor is allowed."
+                        "Unexpected provider model; only the default OpenAI model is allowed."
                     )
                     raise shared.EvaluationAbort(self.abort_reason)
             if str(request.url).startswith("http://evaluation.local/"):
@@ -398,7 +398,7 @@ class Evaluation(shared.Evaluation):
                 path: shared.digest(Path(path).read_bytes()) for path in self.own_hashes
             },
             fixture_sha256=getattr(self, "fixture_hashes", {}),
-            fixture_scope="Deterministic setup, not live Meta acceptance evidence.",
+            fixture_scope="Deterministic setup, not live OpenAI acceptance evidence.",
             replay_request_differences=self.replay_differences,
         )
         path.write_text(json.dumps(data, indent=2), encoding="utf-8")

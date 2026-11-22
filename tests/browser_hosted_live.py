@@ -129,7 +129,7 @@ def run():
                 "MUSEAUTOLAB_AUTH_USERNAME": username,
                 "MUSEAUTOLAB_AUTH_PASSWORD_HASH": hash_password(password),
                 "MUSEAUTOLAB_AUTH_SIGNING_SECRET": secret,
-                "MODEL_API_KEY": secrets.token_urlsafe(32),
+                "OPENAI_API_KEY": secrets.token_urlsafe(32),
             }
         )
         process = None

@@ -1,31 +1,21 @@
 # Model choice, dictation and project illustration
 
-These are implemented product paths using the configured Meta Model API account.
+These are implemented product paths using the configured OpenAI API account.
 They complement the existing engineering conversation and separate photo-inspection
 workflow. They do not add hardware control or replace the source CAD.
 
 ## Choose the conversation model
 
-The selector above chat offers Muse Spark 1.3 Contributor, Muse Spark 1.3 Standard
-and Muse Wonder 1.0. The backend checks the account's model catalogue and disables
-unavailable choices with an explanation. Catalogue presence is advertised access,
-not a successful-inference guarantee. A failed check can be retried explicitly.
-
-Selection keeps the accepted project and conversation intact. Subsequent chat,
-layout, extension and photo-analysis requests use the selected model, with its
-actual reported usage recorded. Selection belongs to the running session; opening
-a saved project uses the server's configured default again. Portable geometry and
-file formats are unchanged.
-
-Contributor is the default and may use content for Meta model training. Use
-shareable or synthetic inputs. Standard models have separate API usage; the
-interface explains the model's data policy and Wonder's greater cost. Account
-credit and actual charges are not inferred from the catalogue.
+Open **Model & settings** above chat to choose GPT-6.1 Terra or GPT-6.1 Sol.
+The backend checks which models the account advertises. The choice applies to
+new chat, layout, estimate and photo-analysis requests. Each request records the
+model reported by the provider when available. Prior results keep their original
+attribution. Opening a portable project starts a session with the configured default.
 
 ## Dictate, review, then send
 
-1. Select **Muse Voice**, allow microphone access, and speak for up to 60 seconds.
-2. Select **Stop and transcribe**. The recording is sent to Muse Voice Transcribe.
+1. Select **Dictate**, allow microphone access, and speak for up to 60 seconds.
+2. Select **Stop and transcribe**. The recording is sent to OpenAI for transcription with `gpt-transcribe`.
 3. Review the editable chat draft, especially numbers and units. Correct any
    transcription error, then select **Send** yourself.
 
@@ -50,9 +40,9 @@ speech or scientific-language understanding.
 ## Illustrate an assembly step
 
 Open **Assembly**, choose a step by title and select **Illustrate this step**.
-Muse Image receives the actions for that step and a reference derived from the
+GPT Image receives the actions for that step and a reference derived from the
 current project revision. For a plate holder, the reference shows the holder,
-the plate and the well layout. For a procedural check without geometry, Muse
+the plate and the well layout. For a procedural check without geometry, the model
 receives the written sequence.
 
 Select the resulting image to enlarge it, review its sources or download the PNG.
@@ -63,7 +53,7 @@ Follow the written guide and source drawings when assembling the hardware.
 ## Create an optional presentation image
 
 With an accepted design, open **Project details → Project illustration** and
-select **Generate with Muse Image**. The app captures the actual current 3D view,
+select **Generate with GPT Image**. The app captures the actual current 3D view,
 sends that reference once and displays the resulting image beside a comparison
 with the original view. The result is downloadable as PNG and clearly labelled
 **AI-generated illustration — not a technical drawing**.
@@ -72,10 +62,9 @@ Generation has a real waiting state, cancellation and a revision guard. It makes
 no automatic retry, project edit or CAD export. Images are not inserted into the
 portable project, engineering package or assembly instructions. Reopening or
 changing the project clears a stale illustration. The backend accepts bounded
-PNG/JPEG data only, strips metadata and disables provider web/image search and
-shell tools for this request.
+PNG/JPEG data only, strips metadata and sends the reference and prompt to the OpenAI image edits endpoint.
 
-The observed results preserved the recognizable overall composition but changed
+The historical Meta example below preserved the recognizable overall composition but changed
 small mechanical details. They are useful presentation illustrations; source CAD,
 the deterministic model and engineering instructions remain authoritative.
 
@@ -105,12 +94,5 @@ request counts and the distinction between live inference and offline fixtures.
 
 ## Provider references
 
-Official documentation consulted on 2026-10-30:
-[models](https://dev.meta.ai/docs/models),
-[speech to text](https://dev.meta.ai/docs/speech-to-text),
-[transcription endpoint](https://dev.meta.ai/docs/api-reference/voice/transcribe),
-[image generation](https://dev.meta.ai/docs/image-generation),
-[structured output](https://dev.meta.ai/docs/structured-output) and
-[pricing](https://dev.meta.ai/docs/pricing-rate-limits).
-Provider documentation describes capabilities; this account's bounded observations
-are recorded separately and do not establish general model reliability.
+OpenAI provides the API contracts for [recorded dictation](https://developers.openai.com/api/docs/guides/speech-to-text) and [image edits](https://developers.openai.com/api/reference/resources/images/methods/edit).
+The screenshot pair above records the previous provider's behavior.

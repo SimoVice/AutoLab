@@ -1,4 +1,4 @@
-"""Tests for the bounded Meta layout-design loop and its API endpoint."""
+"""Tests for the bounded OpenAI layout-design loop and its API endpoint."""
 
 import asyncio
 import json
@@ -15,7 +15,7 @@ from app.model_client import ModelClientError, ModelSettings
 TEST_SETTINGS = ModelSettings(
     api_key="test-only-key",
     base_url="https://example.invalid/v1",
-    model="muse-spark-1.3-contributor",
+    model="gpt-6.1-terra",
 )
 
 CANDIDATE = {
@@ -59,7 +59,7 @@ def _project(revision=3):
     }
 
 
-def _design_response(candidate, *, model="muse-spark-1.3-contributor"):
+def _design_response(candidate, *, model="gpt-6.1-terra"):
     return {
         "model": model,
         "choices": [{"finish_reason": "stop", "message": {"content": json.dumps(candidate)}}],
@@ -87,13 +87,13 @@ def test_propose_layout_payload_and_usage():
 
     candidate, usage = _run_propose(handler)
     assert candidate == CANDIDATE
-    assert usage["model"] == "muse-spark-1.3-contributor"
+    assert usage["model"] == "gpt-6.1-terra"
     assert usage["input_tokens"] == 10
     assert usage["output_tokens"] == 20
     payload = captured["body"]
-    assert payload["model"] == "muse-spark-1.3-contributor"
+    assert payload["model"] == "gpt-6.1-terra"
     assert payload["max_completion_tokens"] == 2400
-    assert payload["reasoning_effort"] in {"minimal", "low"}
+    assert payload["reasoning_effort"] == "none"
     schema = payload["response_format"]["json_schema"]["schema"]
     assert isinstance(schema, dict)
     assert captured["auth"] == "Bearer test-only-key"
@@ -247,7 +247,7 @@ def test_develop_design_transport_error_aborts_without_retry(monkeypatch):
 
     async def failing_propose(project, instruction, feedback, **kwargs):
         calls["count"] += 1
-        raise ModelClientError("Could not reach Meta for the design request. Try again.")
+        raise ModelClientError("Could not reach OpenAI for the design request. Try again.")
 
     monkeypatch.setattr(design_agent, "propose_layout", failing_propose)
     with pytest.raises(ModelClientError):
@@ -366,7 +366,7 @@ def test_design_endpoint_requires_equipment_before_model(client, monkeypatch):
     _seed_session(source)
 
     async def forbidden_develop(current, instruction):
-        raise AssertionError("must not call Meta before equipment is recorded")
+        raise AssertionError("must not call OpenAI before equipment is recorded")
 
     monkeypatch.setattr(api, "develop_design", forbidden_develop)
     monkeypatch.setattr(api, "describe_workflow", lambda p: {"design_available": True})
@@ -425,7 +425,7 @@ def test_design_endpoint_model_error_is_502_without_history(client, monkeypatch)
     _seed_session(_project(revision=4))
 
     async def failing_develop(current, instruction):
-        raise ModelClientError("Could not reach Meta for the design request. Try again.")
+        raise ModelClientError("Could not reach OpenAI for the design request. Try again.")
 
     monkeypatch.setattr(api, "develop_design", failing_develop)
     monkeypatch.setattr(api, "describe_workflow", lambda p: {"design_available": True})
@@ -449,7 +449,7 @@ def test_failed_correction_retains_previous_usage_and_does_not_change_input(monk
         calls.append(feedback)
         if len(calls) == 1:
             return CANDIDATE, {"model": "test-meta", "input_tokens": 12, "output_tokens": 7}
-        error = ModelClientError("Meta returned an incomplete design response.")
+        error = ModelClientError("OpenAI returned an incomplete design response.")
         error.usage = {"model": "test-meta", "input_tokens": 15, "output_tokens": 9}
         raise error
 

@@ -5,7 +5,7 @@ platform choice, then designs. No automatic Jubilee adoption happens here.
 
 The parent supplies profile facts and links; this module never invents prices,
 suppliers, geometry, compatibility, or descriptions. It only tracks
-user-grounded requirements, staged Meta proposals, and explicit user choice.
+user-grounded requirements, staged OpenAI proposals, and explicit user choice.
 """
 
 from __future__ import annotations

@@ -13,10 +13,10 @@ from app.model_client import DEFAULT_BASE_URL
 def create_app() -> FastAPI:
     if os.environ.get("MUSEAUTOLAB_HOSTED") != "1":
         raise RuntimeError("The hosted entry point requires MUSEAUTOLAB_HOSTED=1.")
-    if not os.environ.get("MODEL_API_KEY", "").strip():
-        raise RuntimeError("Configure the Meta key in the hosting provider's secret store.")
-    if os.environ.get("META_API_BASE_URL", DEFAULT_BASE_URL).rstrip("/") != DEFAULT_BASE_URL:
-        raise RuntimeError("Hosted sessions require the official Meta API endpoint.")
+    if not os.environ.get("OPENAI_API_KEY", "").strip():
+        raise RuntimeError("Configure the OpenAI key in the hosting provider's secret store.")
+    if os.environ.get("OPENAI_BASE_URL", DEFAULT_BASE_URL).rstrip("/") != DEFAULT_BASE_URL:
+        raise RuntimeError("Hosted sessions require the official OpenAI API endpoint.")
     if not project_library.configured():
         raise RuntimeError("Configure persistent storage before starting a hosted workspace.")
     storage = Path(project_library.database_path() or project_library.library_directory())

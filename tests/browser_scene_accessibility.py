@@ -33,10 +33,10 @@ def run(url):
         page.route("**/assets/jubilee-*.glb", slow_source)
         page.route("**/api/models?*", lambda route: route.fulfill(json={
             "models": [{
-                "id": "muse-spark-1.3-contributor", "label": "Muse Spark", "available": True,
+                "id": "gpt-6.1-terra", "label": "Muse Spark", "available": True,
             }],
-            "default_model": "muse-spark-1.3-contributor",
-            "active_model": "muse-spark-1.3-contributor",
+            "default_model": "gpt-6.1-terra",
+            "active_model": "gpt-6.1-terra",
             "capabilities": {
                 "voice": {"available": False}, "image": {"available": True, "model": "offline"},
             },
@@ -85,7 +85,7 @@ def run(url):
             page.get_by_role("button", name="Specifications & files", exact=True).click()
             page.get_by_text("Project details", exact=True).click()
             page.locator(".illustration-panel > summary").click()
-            page.get_by_role("button", name="Generate with Muse Image").click()
+            page.get_by_role("button", name="Generate with GPT Image").click()
             expect(page.get_by_text("Offline capture test.")).to_be_visible()
             assert len(captured) == 1
             reference = Image.open(BytesIO(captured[0])).convert("RGB")

@@ -71,8 +71,8 @@ export default function StepIllustration({ projectId, revision, stepId, title, c
         </button>
         <small>
           {capability?.available
-            ? 'Optional · Muse Image · uses your provider allowance'
-            : capability?.unavailable_reason ?? 'Checking Muse Image availability…'}
+            ? 'Optional · GPT Image · uses your provider allowance'
+            : capability?.unavailable_reason ?? 'Checking GPT Image availability…'}
         </small>
       </>}
       {busy && <p role="status">

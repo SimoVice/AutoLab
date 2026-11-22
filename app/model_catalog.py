@@ -8,28 +8,8 @@ from copy import deepcopy
 import httpx
 
 from app.model_client import DEFAULT_BASE_URL, ModelClientError, ModelSettings, configured_model
+from app.openai_models import AGENT_MODELS, IMAGE_MODEL, VOICE_MODEL
 
-VOICE_MODEL = "muse-voice-transcribe-1.0"
-IMAGE_MODEL = "muse-image-1.0"
-AGENT_MODELS = {
-    "muse-spark-1.3-contributor": {
-        "label": "Muse Spark 1.3 Contributor",
-        "data_policy": (
-            "Contributor: content may be used to train Meta models. Use shareable input."
-        ),
-        "description": "Spark in Contributor mode; the project's original default.",
-    },
-    "muse-spark-1.3": {
-        "label": "Muse Spark 1.3",
-        "data_policy": "Standard: Meta states content is not used to train its models.",
-        "description": "Spark in Standard mode; separate Model API usage applies.",
-    },
-    "muse-wonder-1.0": {
-        "label": "Muse Wonder 1.0",
-        "data_policy": "Standard: Meta states content is not used to train its models.",
-        "description": "Higher-capability reasoning model; separate Model API usage applies.",
-    },
-}
 _cache: dict[str, tuple[float, dict]] = {}
 _catalog_lock = asyncio.Lock()
 CATALOG_TTL_SECONDS = 60
@@ -41,10 +21,10 @@ async def discover_catalog(
     """Catalog presence advertises access; it does not prove an inference succeeded."""
     try:
         settings = settings or ModelSettings.load()
-    except ModelClientError:
+    except ModelClientError as exc:
         return {
             "ids": [],
-            "reason": "Configure MODEL_API_KEY on the server to check access.",
+            "reason": str(exc),
             "verified": False,
         }
     fingerprint = hashlib.sha256((settings.base_url + "\0" + settings.api_key).encode()).hexdigest()
@@ -129,17 +109,18 @@ async def model_options(current: str | None = None) -> dict:
         if ModelSettings.load().base_url != DEFAULT_BASE_URL:
             voice.update(
                 available=False,
-                unavailable_reason="Voice requires the official Meta Model API endpoint.",
+                unavailable_reason="Voice requires the official OpenAI API endpoint.",
             )
             image.update(
                 available=False,
-                unavailable_reason="Illustrations require the official Meta Model API endpoint.",
+                unavailable_reason="Illustrations require the official OpenAI API endpoint.",
             )
     except ModelClientError:
         pass
     return {
         "models": [
-            {"id": model, **details, **availability(catalog, model)}
+            {"id": model, **details, "data_policy": "Model requests go to your OpenAI API account.",
+             **availability(catalog, model)}
             for model, details in AGENT_MODELS.items()
         ],
         "default_model": default,

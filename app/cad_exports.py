@@ -697,7 +697,7 @@ def build_cad_files(project: dict) -> dict[str, bytes]:
             else "Compound and component shapes checked."
         ),
         "layout_origin": (
-            "Meta-proposed, geometrically screened layout"
+            "Model-proposed, geometrically screened layout"
             if project.get("engineering_design")
             else "Built-in concept layout"
         ),

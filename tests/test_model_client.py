@@ -12,7 +12,7 @@ from app.model_client import ModelClientError, ModelSettings, generate_turn
 TEST_SETTINGS = ModelSettings(
     api_key="test-only-key",
     base_url="https://example.invalid/v1",
-    model="muse-spark-1.3-contributor",
+    model="gpt-6.1-terra",
 )
 
 
@@ -126,7 +126,7 @@ def test_expired_prices_remain_last_known_in_chat_context():
     assert facts["selected_items"][0]["last_known_price"] == 1200
 
 
-def test_request_uses_meta_schema_budget_and_preserves_zero_cost_usage():
+def test_request_uses_openai_schema_budget_and_preserves_zero_cost_usage():
     captured = {}
 
     def handler(request):
@@ -142,8 +142,8 @@ def test_request_uses_meta_schema_budget_and_preserves_zero_cost_usage():
     payload = captured["body"]
     assert captured["url"] == "https://example.invalid/v1/chat/completions"
     assert captured["authorization"] == "Bearer test-only-key"
-    assert payload["model"] == "muse-spark-1.3-contributor"
-    assert payload["reasoning_effort"] == "minimal"
+    assert payload["model"] == "gpt-6.1-terra"
+    assert payload["reasoning_effort"] == "none"
     assert payload["max_completion_tokens"] == 2400
     assert len(payload["messages"]) == 12  # Three instructions, eight history entries, user input.
     schema = payload["response_format"]["json_schema"]

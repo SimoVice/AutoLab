@@ -1,4 +1,4 @@
-"""Bounded Meta layout-design loop for the liquid preparation workstation.
+"""Bounded OpenAI layout-design loop for the liquid preparation workstation.
 
 The geometry contract lives in app.design_spec (owned by the geometry worker).
 This module only drives the model, validates candidates through check_candidate,
@@ -23,6 +23,7 @@ import httpx
 from app.design_sources import project_source_basis, reference_context
 from app.design_spec import apply_candidate, check_candidate, proposal_schema
 from app.model_client import ModelClientError, ModelSettings, _safe_usage
+from app.openai_models import chat_parameters
 
 LOGGER = logging.getLogger("museautolab.design")
 
@@ -183,7 +184,7 @@ async def propose_layout(
     client: httpx.AsyncClient | None = None,
     settings: ModelSettings | None = None,
 ) -> tuple[dict, dict]:
-    """Call the configured Meta endpoint once and return the raw candidate plus usage.
+    """Call the configured OpenAI endpoint once and return the raw candidate plus usage.
 
     The candidate is NOT validated here; semantic and schema diagnostics belong
     to check_candidate so the caller can run one bounded correction.
@@ -215,10 +216,8 @@ async def request_design_proposal(
         {"role": "user", "content": user_content},
     ]
     payload = {
-        "model": resolved.model,
+        **chat_parameters(resolved.model, max_tokens),
         "messages": messages,
-        "reasoning_effort": "minimal",
-        "max_completion_tokens": max_tokens,
         "response_format": {
             "type": "json_schema",
             "json_schema": {"name": schema_name, "strict": True, "schema": schema},
@@ -243,11 +242,11 @@ async def request_design_proposal(
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
         raise ModelClientError(
-            f"Meta design request failed (HTTP {exc.response.status_code}). Try again."
+            f"OpenAI design request failed (HTTP {exc.response.status_code}). Try again."
         ) from None
     except (httpx.RequestError, asyncio.TimeoutError):
         raise ModelClientError(
-            "Could not reach Meta for the design request. Try again."
+            "Could not reach OpenAI for the design request. Try again."
         ) from None
 
     body = None
@@ -274,14 +273,14 @@ async def request_design_proposal(
             raise TypeError("candidate must be a JSON object")
     except (ValueError, TypeError, AttributeError):
         error = ModelClientError(
-            "Meta returned an incomplete or invalid design response. The project was not changed.",
+            "OpenAI returned an incomplete or invalid design. The project was not changed.",
             failure_kind="design_format",
         )
         error.usage = _safe_design_usage(body, resolved) if isinstance(body, dict) else {}
         raise error from None
 
     usage = _safe_design_usage(body, resolved)
-    LOGGER.info("Meta design model=%s token_usage=%s", usage.get("model"), usage)
+    LOGGER.info("OpenAI design model=%s token_usage=%s", usage.get("model"), usage)
     return candidate, usage
 
 
@@ -432,7 +431,7 @@ async def develop_design(project: dict, instruction: str) -> tuple[dict, dict]:
             except (ModelClientError, asyncio.TimeoutError) as exc:
                 message = (
                     str(exc) if isinstance(exc, ModelClientError)
-                    else "The Meta design request timed out. The project was not changed."
+                    else "The OpenAI design request timed out. The project was not changed."
                 )
                 usage = getattr(exc, "usage", {})
                 error = ModelClientError(message)
@@ -517,7 +516,7 @@ async def develop_design(project: dict, instruction: str) -> tuple[dict, dict]:
         "instruction": instruction,
         "attempts": attempts,
         "message": (
-            f"Meta layout rejected after {len(attempts)} attempt(s). "
+            f"OpenAI layout rejected after {len(attempts)} attempt(s). "
             f"{failure_details} "
             "The project was not changed."
         ),

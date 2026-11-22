@@ -33,7 +33,7 @@ SCOPE = (
     "does not establish dimensions, compatibility, manufacturing readiness or hardware performance."
 )
 ATTRIBUTION = (
-    "Generated with Meta Muse Image from a MuseAutoLab project view. Original design and "
+    "Generated with OpenAI GPT Image from a MuseAutoLab project view. Original design and "
     "source credits remain in Project details and the engineering files."
 )
 PROMPT = """Create one clean presentation illustration based strictly on the supplied reference
@@ -56,17 +56,6 @@ add enclosures, cables, logos, screens, labels, dimension lines, people, equipme
 or text. Do not imply physical compatibility, cooling performance, motion validation,
 manufacturing readiness or successful laboratory operation. Return only the single illustration.
 """
-TOOL = {
-    "type": "image_generation",
-    "enable_web_search": False,
-    "enable_image_search": False,
-    "enable_shell": False,
-    "reasoning_strength": "low",
-    "size": "1536x1024",
-    "output_format": "png",
-}
-
-
 class IllustrationError(Exception):
     def __init__(self, status_code: int, detail: str):
         super().__init__(detail)
@@ -88,7 +77,7 @@ class ReferenceImage:
 def _canonical_png(raw: bytes, *, generated: bool) -> ReferenceImage:
     limit = MAX_IMAGE_BYTES if generated else MAX_REFERENCE_BYTES
     code = 502 if generated else 422
-    invalid = "Meta returned an invalid image." if generated else "Use a valid PNG or JPEG view."
+    invalid = "OpenAI returned an invalid image." if generated else "Use a valid PNG or JPEG view."
     if not raw or len(raw) > limit:
         raise IllustrationError(502 if generated else 413, "The image exceeds the size limit.")
     try:
@@ -156,29 +145,18 @@ def prepare_reference(data_url: str) -> ReferenceImage:
 
 
 def _extract_image(body: dict) -> tuple[ReferenceImage, dict]:
-    if not isinstance(body, dict) or body.get("status") != "completed":
-        raise IllustrationError(
-            502, "Meta did not complete the illustration. Your project is intact."
-        )
-    output = body.get("output")
-    if not isinstance(output, list) or len(output) > 16:
-        raise IllustrationError(502, "Meta returned an invalid illustration response.")
-    images = [
-        item
-        for item in output
-        if isinstance(item, dict) and item.get("type") == "image_generation_call"
-    ]
-    if len(images) != 1 or images[0].get("status") != "completed":
-        raise IllustrationError(502, "Meta did not return exactly one completed illustration.")
-    encoded = images[0].get("result")
+    images = body.get("data") if isinstance(body, dict) else None
+    if not isinstance(images, list) or len(images) != 1 or not isinstance(images[0], dict):
+        raise IllustrationError(502, "OpenAI did not return one illustration.")
+    encoded = images[0].get("b64_json")
     if not isinstance(encoded, str) or len(encoded) > 4 * ((MAX_IMAGE_BYTES + 2) // 3):
-        raise IllustrationError(502, "Meta returned an oversized or invalid illustration.")
+        raise IllustrationError(502, "OpenAI returned an oversized or invalid illustration.")
     try:
         raw = base64.b64decode(encoded, validate=True)
     except (binascii.Error, ValueError):
-        raise IllustrationError(502, "Meta returned invalid image data.") from None
+        raise IllustrationError(502, "OpenAI returned invalid image data.") from None
     if not raw.startswith(b"\x89PNG\r\n\x1a\n"):
-        raise IllustrationError(502, "Meta did not return a PNG illustration.")
+        raise IllustrationError(502, "OpenAI did not return a PNG illustration.")
     image = _canonical_png(raw, generated=True)
     raw_usage = body.get("usage")
     usage = {"model": IMAGE_MODEL, "images": 1}
@@ -203,31 +181,25 @@ async def generate_illustration(
     settings: ModelSettings | None = None,
     client: httpx.AsyncClient | None = None,
 ) -> dict:
-    """One bounded request; no project writes, saved responses, external tools or retries."""
+    """Request one edit of the canonical project view."""
     global _active_generations
     try:
         settings = settings or ModelSettings.load()
     except ModelClientError:
-        raise IllustrationError(503, "Configure MODEL_API_KEY on the server for illustrations.")
+        raise IllustrationError(503, "Configure OPENAI_API_KEY on the server for illustrations.")
     if settings.base_url != DEFAULT_BASE_URL:
-        raise IllustrationError(503, "Illustrations require the official Meta Model API endpoint.")
+        raise IllustrationError(503, "Illustrations require the official OpenAI API endpoint.")
     if _active_generations:
         raise IllustrationError(
             429, "An illustration is already generating. Wait for it to finish."
         )
     payload = {
         "model": IMAGE_MODEL,
-        "store": False,
-        "input": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "input_text", "text": prompt},
-                    {"type": "input_image", "image_url": reference.data_url},
-                ],
-            }
-        ],
-        "tools": [dict(TOOL)],
+        "prompt": prompt,
+        "size": "1536x1024",
+        "quality": "low",
+        "output_format": "png",
+        "n": "1",
     }
     _active_generations += 1
     try:
@@ -235,8 +207,9 @@ async def generate_illustration(
         async def send(active: httpx.AsyncClient):
             async with active.stream(
                 "POST",
-                f"{DEFAULT_BASE_URL}/responses",
-                json=payload,
+                f"{DEFAULT_BASE_URL}/images/edits",
+                data=payload,
+                files={"image": ("reference.png", reference.content, "image/png")},
                 headers={
                     "Authorization": f"Bearer {settings.api_key}",
                     "Accept": "application/json",
@@ -248,7 +221,7 @@ async def generate_illustration(
                 async for chunk in response.aiter_bytes():
                     if len(content) + len(chunk) > MAX_RESPONSE_BYTES:
                         raise IllustrationError(
-                            502, "Meta returned an oversized illustration response."
+                            502, "OpenAI returned an oversized illustration response."
                         )
                     content.extend(chunk)
                 return json.loads(content)
@@ -284,20 +257,20 @@ async def generate_illustration(
         code = exc.response.status_code
         if code in (401, 403, 404):
             raise IllustrationError(
-                503, "Muse Image is unavailable for the configured API account."
+                503, "GPT Image is unavailable for the configured API account."
             )
         if code == 429:
             raise IllustrationError(
-                429, "Meta's image generation limit was reached. Try again later."
+                429, "OpenAI's image generation limit was reached. Try again later."
             )
         raise IllustrationError(
-            502, f"Meta illustration failed (HTTP {code}). Your project is intact."
+            502, f"OpenAI illustration failed (HTTP {code}). Your project is intact."
         )
     except (httpx.TimeoutException, TimeoutError):
         raise IllustrationError(504, "Illustration timed out. Your project is intact.")
     except httpx.RequestError:
-        raise IllustrationError(502, "Could not reach Meta for the illustration.")
+        raise IllustrationError(502, "Could not reach OpenAI for the illustration.")
     except (ValueError, TypeError):
-        raise IllustrationError(502, "Meta returned an invalid illustration response.")
+        raise IllustrationError(502, "OpenAI returned an invalid illustration response.")
     finally:
         _active_generations -= 1

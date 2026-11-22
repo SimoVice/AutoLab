@@ -24,7 +24,7 @@ def test_default_rehearsal_needs_no_credentials_or_event_loop():
     payload = json.loads(result.stdout)
     assert payload["mode"] == "dry_run"
     assert len(payload["scenarios"]) == 1
-    assert payload["model"] == "muse-spark-1.3-contributor"
+    assert payload["model"] == "gpt-6.1-terra"
 
 
 def test_usage_includes_failed_responses_and_marks_missing_counts():

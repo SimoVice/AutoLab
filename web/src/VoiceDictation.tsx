@@ -94,14 +94,14 @@ export default function VoiceDictation({ capability, disabled, onBusyChange, onT
       {phase === 'idle' ? <button type="button" className="voice-start" onClick={() => void start()} disabled={disabled || !supported || !capability?.available}
         title={capability?.available && supported ? 'Record up to 60 seconds; transcription is added to your draft.' : unavailable} aria-describedby="voice-help">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8" /></svg>
-        Muse Voice
+        Dictate
       </button> : <>
-        <span className="voice-phase" role="status">{phase === 'recording' ? `Recording ${elapsed}s / ${limit}s` : phase === 'permission' ? 'Allow microphone access…' : 'Transcribing with Muse Voice…'}</span>
+        <span className="voice-phase" role="status">{phase === 'recording' ? `Recording ${elapsed}s / ${limit}s` : phase === 'permission' ? 'Allow microphone access…' : 'Transcribing with OpenAI…'}</span>
         {phase === 'recording' && <button type="button" className="voice-stop" onClick={() => void stop()}>Stop and transcribe</button>}
         <button type="button" className="voice-cancel" onClick={cancel}>Cancel</button>
       </>}
     </div>
-    <p id="voice-help" className="voice-help">{phase === 'idle' ? capability?.available && supported ? 'Dictate, review, then send. Audio goes to Meta for transcription.' : unavailable : 'Your typed draft is kept. Nothing is sent to the chat automatically.'}</p>
+    <p id="voice-help" className="voice-help">{phase === 'idle' ? capability?.available && supported ? 'Dictate, review, then send. Audio goes to OpenAI for transcription.' : unavailable : 'Your typed draft is kept. Nothing is sent to the chat automatically.'}</p>
     {notice && <p className="voice-notice" role="status">{notice}</p>}
     {error && <p className="voice-error" role="alert">{error}</p>}
     {recoveryTranscript !== null && <div className="voice-recovery"><label htmlFor="recovery-transcript">Transcript to copy</label><textarea id="recovery-transcript" value={recoveryTranscript} onChange={(event) => setRecoveryTranscript(event.target.value)} rows={3} /><button type="button" onClick={() => setRecoveryTranscript(null)}>Dismiss transcript</button></div>}

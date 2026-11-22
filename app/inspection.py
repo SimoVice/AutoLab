@@ -1,4 +1,4 @@
-"""Meta-proposed, checked inspection-arm extensions for an accepted workstation."""
+"""OpenAI-proposed, checked inspection-arm extensions for an accepted workstation."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ def _require_layout(project: dict) -> None:
         raise ValueError("Custom inspection-arm integration is not implemented for this "
                          "assembled platform. We can plan its requirements separately.")
     if not project.get("engineering_design") or project["workflow"]["kind"] != "liquid_preparation":
-        raise ValueError("Develop a workstation layout with Meta before adding the inspection arm.")
+        raise ValueError("Develop a workstation layout before adding the inspection arm.")
     if project["design"]["constraint_status"] == "infeasible":
         raise ValueError("Resolve the workspace width before adding the inspection arm.")
 
@@ -251,7 +251,7 @@ async def develop_inspection(project: dict, instruction: str) -> tuple[dict, dic
                 )
             except (ModelClientError, asyncio.TimeoutError) as exc:
                 error = ModelClientError(
-                    "The Meta inspection design request failed. "
+                    "The OpenAI inspection design request failed. "
                     "Your project was not changed; try again."
                 )
                 error.usage = getattr(exc, "usage", {})

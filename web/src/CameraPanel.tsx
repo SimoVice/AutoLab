@@ -620,7 +620,7 @@ export default function CameraPanel({ project, onSelect }: Props) {
         <span className="camera-status">{cameraOn ? 'Live preview' : job ? job.status : 'no photo yet'}</span>
       </div>
 
-      <p className="camera-notice">Only Analyze photo sends this image to Meta Contributor, where it may be used for training. Camera preview stays on this device.</p>
+      <p className="camera-notice">Camera preview stays on this device. Choose Analyze photo to send this image to OpenAI.</p>
 
       <div className="camera-grid">
         <div className="camera-preview">

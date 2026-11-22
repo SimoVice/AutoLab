@@ -1,10 +1,10 @@
 """Stubbed MuseAutoLab backend for the browser smoke test.
 
 This server runs the actual product FastAPI app and domain logic from
-``app.api`` / ``app.domain`` locally, but replaces the Meta model client
+``app.api`` / ``app.domain`` locally, but replaces the OpenAI model client
 (``app.api.generate_turn``) with a deterministic async fake and the layout
 model call (``app.design_agent.propose_layout``) with an explicit offline
-fixture. No Meta request is made and no API key is needed.
+fixture. No OpenAI request is made and no API key is needed.
 """
 
 from __future__ import annotations
@@ -250,7 +250,7 @@ def main(argv: list[str] | None = None) -> None:
 
     print(
         f"[stub-server] Starting stubbed MuseAutoLab API on http://{args.host}:{args.port} "
-        "(AI provider and layout model are stubbed; no Meta request will be made).",
+        "(AI provider and layout model are stubbed; no OpenAI request will be made).",
         flush=True,
     )
     uvicorn.run(app.api.app, host=args.host, port=args.port, log_level="info")

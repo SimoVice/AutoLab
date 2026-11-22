@@ -4,7 +4,6 @@ import json
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -14,6 +13,8 @@ from test_price_estimation import estimate, project_fixture, supplier_report
 import app.api as api
 from app import price_estimation as prices
 from app import procurement
+from app.model_client import ModelSettings, active_model
+from app.openai_models import REASONING_MODEL
 from app.project_storage import make_snapshot, restore_snapshot
 
 
@@ -111,7 +112,7 @@ def test_added_scope_get_post_contract_estimates_only_new_group(monkeypatch):
     added = deepcopy(new["sourcing"]["groups"][0])
     added["id"] = "inspection-support"
     new["sourcing"]["groups"].append(added)
-    session = api.ProjectSession(project=old, cost_estimate=original)
+    session = api.ProjectSession(project=old, cost_estimate=original, model=REASONING_MODEL)
     api._accept_project(session, new)
     seen = []
     actual_estimate = prices.estimate_project_prices
@@ -121,12 +122,13 @@ def test_added_scope_get_post_contract_estimates_only_new_group(monkeypatch):
 
         def provider(request):
             payload = json.loads(request.content)
+            assert payload["model"] == REASONING_MODEL
             rows = json.loads(payload["messages"][1]["content"])["rows"]
             seen.extend(r["group_id"] for r in rows)
             return httpx.Response(
                 200,
                 json={
-                    "model": prices.ESTIMATE_MODEL,
+                    "model": payload["model"],
                     "choices": [
                         {
                             "finish_reason": "stop",
@@ -160,7 +162,7 @@ def test_added_scope_get_post_contract_estimates_only_new_group(monkeypatch):
                 procurement_report,
                 previous=previous,
                 client=client,
-                settings=SimpleNamespace(api_key="offline", base_url="https://unit.invalid"),
+                settings=ModelSettings("offline", "https://unit.invalid", active_model()),
             )
 
     monkeypatch.setattr(prices, "estimate_project_prices", infer)
@@ -319,7 +321,7 @@ def test_new_scope_provider_failure_preserves_reused_ranges(monkeypatch):
                 new,
                 previous=seed,
                 client=client,
-                settings=SimpleNamespace(api_key="offline", base_url="https://unit.invalid"),
+                settings=ModelSettings("offline", "https://unit.invalid", active_model()),
             )
 
     import asyncio
@@ -346,7 +348,7 @@ def test_new_scope_provider_failure_preserves_reused_ranges(monkeypatch):
         return httpx.Response(
             200,
             json={
-                "model": prices.ESTIMATE_MODEL,
+                "model": payload["model"],
                 "choices": [
                     {
                         "finish_reason": "stop",
@@ -383,7 +385,7 @@ def test_new_scope_provider_failure_preserves_reused_ranges(monkeypatch):
                 report,
                 previous=previous,
                 client=client,
-                settings=SimpleNamespace(api_key="offline", base_url="https://unit.invalid"),
+                settings=ModelSettings("offline", "https://unit.invalid", active_model()),
             )
 
     monkeypatch.setattr(prices, "estimate_project_prices", retry)

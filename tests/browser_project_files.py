@@ -1,6 +1,6 @@
 """Offline export UI states; real application/compiler, fixture export responses.
 
-No CAD job or Meta request is sent. Checks costly-job reconnection, route scope,
+No CAD job or OpenAI request is sent. Checks costly-job reconnection, route scope,
 sandboxed HTML guide access and revision reset.
 """
 

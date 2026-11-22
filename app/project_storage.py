@@ -411,7 +411,7 @@ def restore_snapshot(snapshot: object) -> tuple[dict, list[dict]]:
         project["rebuild_notice"] = (
             "This older project retains its inputs and conversation, but its previous design "
             "and inspection extension cannot be carried over to the new CAD foundation. "
-            "Ask Meta in chat to develop a new workstation design and confirm it again."
+            "Ask OpenAI in chat to develop a new workstation design and confirm it again."
         )
     elif clearance_upgrade:
         drop = project["design"]["foundation"]["bed_drop_mm"]

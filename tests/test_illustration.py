@@ -1,11 +1,10 @@
-"""Bounded optional image generation with synthetic pixels and mocked Meta transport."""
+"""Bounded optional image generation with synthetic pixels and mocked OpenAI transport."""
 
 import asyncio
 import base64
 import hashlib
 import importlib
 import io
-import json
 from copy import deepcopy
 
 import httpx
@@ -19,7 +18,7 @@ import app.illustration as illustration
 import app.model_catalog as catalog
 from app.model_client import DEFAULT_MODEL, ModelSettings
 
-SETTINGS = ModelSettings("synthetic-test-key", "https://api.meta.ai/v1", DEFAULT_MODEL)
+SETTINGS = ModelSettings("synthetic-test-key", "https://api.openai.com/v1", DEFAULT_MODEL)
 
 
 def pixels(*, size=(96, 64), fmt="PNG", metadata=False):
@@ -40,15 +39,8 @@ def data_url(raw=None, mime="image/png"):
 
 def provider_body(raw=None):
     return {
-        "status": "completed",
-        "output": [
-            {"type": "reasoning", "summary": [{"text": "never expose provider narration"}]},
-            {
-                "type": "image_generation_call",
-                "status": "completed",
-                "result": base64.b64encode(raw or pixels()).decode("ascii"),
-            },
-        ],
+        "created": 1800000000,
+        "data": [{"b64_json": base64.b64encode(raw or pixels()).decode("ascii")}],
         "usage": {
             "input_tokens": 4,
             "output_tokens": 6,
@@ -60,9 +52,9 @@ def provider_body(raw=None):
 
 @pytest.fixture(autouse=True)
 def local_configuration(monkeypatch):
-    monkeypatch.setenv("MODEL_API_KEY", "synthetic-test-key")
-    monkeypatch.setenv("META_API_BASE_URL", "https://api.meta.ai/v1")
-    monkeypatch.setenv("META_MODEL", DEFAULT_MODEL)
+    monkeypatch.setenv("OPENAI_API_KEY", "synthetic-test-key")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+    monkeypatch.setenv("OPENAI_MODEL", DEFAULT_MODEL)
 
     async def discover(**kwargs):
         return {
@@ -140,18 +132,15 @@ def test_fixed_official_payload_and_safe_output_metadata(caplog):
 
     async def handler(request):
         requests.append(request)
-        payload = json.loads(await request.aread())
-        assert request.url == "https://api.meta.ai/v1/responses"
+        body = await request.aread()
+        assert request.url == "https://api.openai.com/v1/images/edits"
         assert request.headers["Authorization"] == "Bearer synthetic-test-key"
-        assert payload["model"] == catalog.IMAGE_MODEL
-        assert payload["store"] is False
-        assert payload["tools"] == [illustration.TOOL]
-        assert all(
-            payload["tools"][0][key] is False
-            for key in ("enable_image_search", "enable_web_search", "enable_shell")
-        )
-        assert payload["input"][0]["content"][1]["image_url"] == reference.data_url
-        assert "never send" not in str(payload)
+        assert request.headers["Content-Type"].startswith("multipart/form-data;")
+        assert catalog.IMAGE_MODEL.encode() in body
+        assert b'name="image"; filename="reference.png"' in body
+        assert reference.content in body
+        assert illustration.PROMPT.encode() in body
+        assert b"never send" not in body
         return httpx.Response(200, json=provider_body(pixels(metadata=True)))
 
     async def run():
@@ -174,7 +163,7 @@ def test_fixed_official_payload_and_safe_output_metadata(caplog):
         "total_tokens": 10,
     }
     assert "presentation only" in result["scope"]
-    assert "Meta Muse Image" in result["attribution"]
+    assert "OpenAI GPT Image" in result["attribution"]
     assert b"never send" not in returned
     assert "provider narration" not in str(result)
     assert "private provider" not in str(result)
@@ -213,11 +202,11 @@ def test_provider_failures_do_not_retry_or_expose_errors(status, expected):
 def test_invalid_provider_images_are_rejected(kind):
     body = provider_body()
     if kind == "incomplete":
-        body["status"] = "incomplete"
+        body["data"] = []
     elif kind == "multiple":
-        body["output"].append(deepcopy(body["output"][-1]))
+        body["data"].append(deepcopy(body["data"][0]))
     elif kind == "url":
-        body["output"][-1]["result"] = "https://example.test/image.png"
+        body["data"][0]["b64_json"] = "https://example.test/image.png"
     elif kind == "jpeg":
         body = provider_body(pixels(fmt="JPEG"))
     elif kind == "truncated":
@@ -400,7 +389,7 @@ def test_request_body_cap_is_checked_before_json_parse(monkeypatch):
 
 
 def test_account_and_endpoint_gates_disable_image(monkeypatch):
-    monkeypatch.setenv("META_API_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://example.test/v1")
     models = asyncio.run(catalog.model_options())
     assert models["capabilities"]["image"]["available"] is False
     assert "official" in models["capabilities"]["image"]["unavailable_reason"]
@@ -555,12 +544,11 @@ def test_step_prompt_uses_existing_official_transport_and_pins():
     prompt = step_prompt(context)
 
     async def handler(request):
-        payload = json.loads(await request.aread())
-        assert str(request.url) == "https://api.meta.ai/v1/responses"
-        assert payload["model"] == catalog.IMAGE_MODEL
-        assert payload["input"][0]["content"][0]["text"] == prompt
-        assert payload["tools"] == [illustration.TOOL]
-        assert payload["store"] is False
+        body = await request.aread()
+        assert request.url == "https://api.openai.com/v1/images/edits"
+        assert catalog.IMAGE_MODEL.encode() in body
+        assert b'name="prompt"' in body and prompt.encode() in body
+        assert b'name="image"; filename="reference.png"' in body and reference.content in body
         return httpx.Response(200, json=provider_body())
 
     async def run():

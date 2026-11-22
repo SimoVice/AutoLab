@@ -10,7 +10,7 @@ import pytest
 from app.domain import new_project
 from app.model_client import ModelClientError, ModelSettings, _strict_schema, generate_turn
 
-SETTINGS = ModelSettings("synthetic", "https://example.invalid/v1", "muse-wonder-1.0")
+SETTINGS = ModelSettings("synthetic", "https://example.invalid/v1", "gpt-6.1-sol")
 QUESTION = "In one short sentence, remind me which platform is selected. Do not change the project."
 
 

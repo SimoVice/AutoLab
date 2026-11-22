@@ -143,7 +143,7 @@ def _mock_client(payload_content: str, usage=None, status=200) -> httpx.AsyncCli
 
     def handler(request: httpx.Request) -> httpx.Response:
         sent = json.loads(request.content.decode())
-        assert sent["reasoning_effort"] == "minimal"
+        assert sent["reasoning_effort"] == "none"
         assert sent["max_completion_tokens"] == 6000
         assert sent["response_format"]["json_schema"]["strict"] is True
         dev = sent["messages"][0]["content"]

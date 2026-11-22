@@ -1,8 +1,8 @@
 # Host a private workspace
 
 MuseAutoLab serves the compiled interface, 3D assets and Python API at one HTTPS
-address. The server makes the Meta API requests. Everyone given the workspace
-login shares its project library and the configured Meta account's model allowance.
+address. The server makes the OpenAI API requests. Everyone given the workspace
+login shares its project library and the configured OpenAI account's model allowance.
 
 ## Using the workspace
 
@@ -40,7 +40,7 @@ request before a live presentation.
 
 2. Check the credits on **Usage & Billing**. To operate within credits, set the
    **Workspace spend limit** (net charges after credits) to **$0**, and confirm it
-   in the dashboard before creating resources. Model calls on the separate Meta
+   in the dashboard before creating resources. Model calls on the separate OpenAI
    account follow that account's allowance. [Modal budgets](https://modal.com/docs/guide/budgets)
 
 3. Create the private project volume once, in the same environment as the app:
@@ -55,7 +55,7 @@ request before a live presentation.
 
    | Secret key | Value |
    | --- | --- |
-   | `MODEL_API_KEY` | API key from the Meta account that will run the models |
+   | `OPENAI_API_KEY` | API key from the OpenAI account that will run the models |
    | `MUSEAUTOLAB_AUTH_USERNAME` | Workspace login name |
    | `MUSEAUTOLAB_AUTH_PASSWORD_HASH` | Output of `python -c "from getpass import getpass; from app.host_auth import hash_password; print(hash_password(getpass()))"` |
    | `MUSEAUTOLAB_AUTH_SIGNING_SECRET` | Output of `python -c "import secrets; print(secrets.token_urlsafe(48))"` |

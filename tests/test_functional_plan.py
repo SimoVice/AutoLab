@@ -74,7 +74,7 @@ def test_normal_endpoint_cache_revision_model_and_project_preservation(
             assert response.status_code == 200
             assert len(calls) == 2
             assert calls[-1]['process'] == 'Weigh sealed vials'
-            session.model = 'muse-wonder-1.0'
+            session.model = 'gpt-6.1-sol'
             assert (await post_plan(client, session)).status_code == 200
             assert len(calls) == 3
     asyncio.run(journey())
@@ -152,7 +152,7 @@ def test_provider_parses_plan_and_uses_bounded_strict_schema():
     assert result['model'] == 'synthetic-reported'
     assert result['usage'] == {'total_tokens': 42}
     assert captured['max_completion_tokens'] == 1600
-    assert captured['reasoning_effort'] == 'minimal'
+    assert captured['reasoning_effort'] == 'none'
     assert json.loads(captured['messages'][1]['content']) == {'objective': 'Weigh vials'}
     def strict(node):
         if isinstance(node, dict):

@@ -1,6 +1,6 @@
 """Bounded ordinary-chat tip-rack evaluation, dry run by default.
 
-One attempt per frozen case, eight physical Meta requests maximum, no retries.
+One attempt per frozen case, eight physical OpenAI requests maximum, no retries.
 Fixtures are deterministic setup, not live evidence. Strict replay has no network.
 Raw requests, responses, failures, source hashes and usage stay in ignored .local.
 """
@@ -258,7 +258,7 @@ class Evaluation(shared.Evaluation):
                 path: shared.digest(Path(path).read_bytes()) for path in self.own_hashes
             },
             fixture_sha256=getattr(self, "fixture_hashes", {}),
-            fixture_scope="Deterministic setup only; not live Meta evidence.",
+            fixture_scope="Deterministic setup only; not live OpenAI evidence.",
             reviewed_payload_manifest=getattr(self, "review_manifest", None),
             token_totals_interpretation="Sum of reported usage fields only; missing usage "
             "means actual consumption is unknown, never zero.",
@@ -295,7 +295,7 @@ class Evaluation(shared.Evaluation):
                     self.abort_reason = "One provider attempt per case; retry blocked before send."
                     raise shared.EvaluationAbort(self.abort_reason)
                 if body.get("model") != MODEL:
-                    self.abort_reason = "Only the approved Spark Contributor model is permitted."
+                    self.abort_reason = "Only the approved default OpenAI model is permitted."
                     raise shared.EvaluationAbort(self.abort_reason)
             return await tracked(client, request, *args, **kwargs)
 
@@ -440,7 +440,7 @@ class Evaluation(shared.Evaluation):
                         "http_status": accepted.status_code,
                         "response": accepted.json(),
                         "scope": "Explicit UI-choice API after the observed confirmation request; "
-                        "no Meta call or claim of live chat acceptance.",
+                        "no OpenAI call or claim of live chat acceptance.",
                     }
                     assert accepted.status_code == 200, "Explicit choice API failed"
                     applied = accepted.json()["project"]
@@ -617,9 +617,12 @@ async def prepare_requests(args, dataset):
     provider calls receive an offline 503 before any network transport runs.
     """
     import app.api as api
-    from app.model_client import ModelSettings
+    from app.model_client import DEFAULT_BASE_URL, ModelClientError, ModelSettings
 
-    configured = ModelSettings.load()
+    try:
+        configured = ModelSettings.load()
+    except ModelClientError:
+        configured = ModelSettings("", DEFAULT_BASE_URL, MODEL)
     settings = ModelSettings("offline-inspection-no-credential", configured.base_url, MODEL)
     output = args.output.resolve()
     if not output.is_relative_to((ROOT / ".local").resolve()):
@@ -759,7 +762,7 @@ def main(argv=None):
         "--prepare-requests",
         action="store_true",
         help="Capture prospective request bodies with external transport blocked; "
-        "no Meta consumption",
+        "no OpenAI consumption",
     )
     parser.add_argument("--max-calls", type=int, choices=range(1, MAX_CALLS + 1), default=MAX_CALLS)
     parser.add_argument("--output", type=Path)

@@ -221,8 +221,8 @@ def test_effective_spoken_edit_still_requires_confirmation_and_keeps_geometry():
 
 
 def test_real_chat_boundary_keeps_equivalent_spoken_project_confirmed(monkeypatch):
-    monkeypatch.setenv("MODEL_API_KEY", "synthetic-test-key")
-    monkeypatch.setenv("META_MODEL", DEFAULT_MODEL)
+    monkeypatch.setenv("OPENAI_API_KEY", "synthetic-test-key")
+    monkeypatch.setenv("OPENAI_MODEL", DEFAULT_MODEL)
     requests = []
 
     def handler(request):

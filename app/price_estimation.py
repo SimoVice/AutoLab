@@ -1,6 +1,6 @@
 """Bounded USD planning ranges, kept separate from observed supplier prices.
 
-One explicit estimation request makes at most one Spark call. Rendering, opening
+One explicit estimation request makes at most one model call. Rendering, opening
 and exporting only read a revision-bound sidecar. A range is a model estimate,
 never a supplier quotation, a compatibility decision or a complete machine BOM.
 """
@@ -22,7 +22,8 @@ from uuid import uuid4
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-ESTIMATE_MODEL = "muse-spark-1.3-contributor"
+from app.openai_models import chat_parameters
+
 ESTIMATE_TTL_SECONDS = 24 * 60 * 60
 MAX_GROUPS = 64
 EXCLUSIONS = [
@@ -467,7 +468,7 @@ async def estimate_project_prices(
     settings=None,
     previous: dict | None = None,
 ) -> dict:
-    """Make one bounded structured Spark call; retain honest failures and usage."""
+    """Make one bounded structured model call; retain honest failures and usage."""
     from app.model_client import (
         ModelClientError,
         ModelSettings,
@@ -485,7 +486,6 @@ async def estimate_project_prices(
         estimate_id=str(uuid4()),
         generated_at=_iso(at),
         expires_at=_iso(at + timedelta(seconds=ESTIMATE_TTL_SECONDS)),
-        model=ESTIMATE_MODEL,
     )
     if seed and seed.get("expires_at") and seed.get("status") != "stale":
         report["expires_at"] = min(report["expires_at"], seed["expires_at"])
@@ -507,6 +507,7 @@ async def estimate_project_prices(
     body = None
     try:
         settings = settings or ModelSettings.load()
+        report["model"] = settings.model
         context = price_context(project, procurement)
         inputs = {
             "currency": "USD",
@@ -515,9 +516,7 @@ async def estimate_project_prices(
             "fabrication_capabilities": context["fabrication_capabilities"],
         }
         payload = {
-            "model": ESTIMATE_MODEL,
-            "reasoning_effort": "minimal",
-            "max_completion_tokens": 4800,
+            **chat_parameters(settings.model, 4800),
             "messages": [
                 {
                     "role": "developer",
@@ -575,7 +574,7 @@ Ranges are unverified planning estimates, never exact catalog evidence.""",
             response = await send(client)
         response.raise_for_status()
         body = response.json()
-        report.update(usage=_safe_usage(body), model=recorded_model(body, ESTIMATE_MODEL))
+        report.update(usage=_safe_usage(body), model=recorded_model(body, settings.model))
         choice = body["choices"][0]
         if choice.get("finish_reason") != "stop":
             raise ValueError("Incomplete planning estimate")

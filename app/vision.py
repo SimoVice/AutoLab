@@ -1,4 +1,4 @@
-"""Labware photo preparation and Meta vision inspection."""
+"""Labware photo preparation and OpenAI vision inspection."""
 
 import base64
 import binascii
@@ -13,6 +13,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from app.model_client import ModelClientError, ModelSettings, recorded_model
+from app.openai_models import chat_parameters
 
 LOGGER = logging.getLogger("museautolab.vision")
 
@@ -239,14 +240,14 @@ async def analyze_image(
     client: httpx.AsyncClient | None = None,
     settings: ModelSettings | None = None,
 ) -> tuple[dict, dict]:
-    """Inspect a canonical image with the Meta model and validate the result."""
+    """Inspect a canonical image with the OpenAI model and validate the result."""
     if not isinstance(image, CanonicalImage) or not image.content:
         raise VisionError("A canonical image is required.", status_code=422)
     try:
         settings = settings or ModelSettings.load()
     except ModelClientError:
         raise VisionError(
-            "Set MODEL_API_KEY in the local .env before image analysis.", 503
+            "Set OPENAI_API_KEY in the local .env before image analysis.", 503
         ) from None
     messages = [
         {"role": "developer", "content": DEVELOPER_INSTRUCTIONS},
@@ -259,10 +260,8 @@ async def analyze_image(
         },
     ]
     payload = {
-        "model": settings.model,
+        **chat_parameters(settings.model, 6000),
         "messages": messages,
-        "reasoning_effort": "minimal",
-        "max_completion_tokens": 6000,
         "response_format": {
             "type": "json_schema",
             "json_schema": {

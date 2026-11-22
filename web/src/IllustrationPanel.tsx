@@ -57,13 +57,13 @@ export default function IllustrationPanel({ projectId, revision, capability, dis
   }
   return <details className="illustration-panel">
     <summary>Project illustration <span>Optional</span></summary>
-    <p>Generate a presentation image from the current 3D view with Muse Image. Engineering decisions and assembly steps remain in your project files.</p>
+    <p>Generate a presentation image from the current 3D view with GPT Image. Engineering decisions and assembly steps remain in your project files.</p>
     {!illustration && <div className="illustration-actions">
-      <button type="button" onClick={() => void generate()} disabled={disabled || busy || !capability?.available}>Generate with Muse Image</button>
+      <button type="button" onClick={() => void generate()} disabled={disabled || busy || !capability?.available}>Generate with GPT Image</button>
       {busy && <button type="button" onClick={cancel}>Cancel illustration</button>}
     </div>}
     {!capability?.available && <p className="illustration-note">{capability?.unavailable_reason ?? 'Checking illustration availability…'}</p>}
-    {busy && <p className="illustration-note" role="status">{phase === 'capturing' ? 'Capturing your current model view…' : 'Generating with Muse Image…'}</p>}
+    {busy && <p className="illustration-note" role="status">{phase === 'capturing' ? 'Capturing your current model view…' : 'Generating with GPT Image…'}</p>}
     {notice && <p className="illustration-note" role="status">{notice}</p>}
     {error && <p className="illustration-error" role="alert">{error}</p>}
     {illustration && <figure className="illustration-result">

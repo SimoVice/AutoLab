@@ -16,7 +16,7 @@ use the engineering references for the adapters relevant to your project.
 ## Understand the engineering
 
 - [Source-grounding policy](source-grounding.md) — what each adapter imports and what it proposes.
-- [Meta design integration](meta-design.md) — model proposals and application checks.
+- [Original Meta design integration](meta-design.md) records how the hackathon prototype proposed and checked layouts.
 - [Project evolution](project-evolution.md) — revision and extension behavior, with its recorded version scope.
 - [Models, voice and illustrations](multimodal-demo.md) — account access, editable dictation and presentation artwork.
 - [Verification](verification.md) — actual software, model, supplier and export outcomes with limitations.

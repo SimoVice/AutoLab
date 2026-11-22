@@ -82,16 +82,16 @@ export default function InspectionPanel({ project, busy, resetKey, onProject, on
   return <section className="inspection-panel" aria-labelledby="inspection-extension-title">
     <div className="design-agent-heading"><div>
       <h2 id="inspection-extension-title">{extension ? 'Inspection arm and camera' : 'Expand this workstation'}</h2>
-      <p>{extension ? 'Your workstation is preserved. Preview the camera sweep over the sample rack.' : 'Ask Meta to add a two-link inspection arm and camera to this project.'}</p>
+      <p>{extension ? 'Your workstation is preserved. Preview the camera sweep over the sample rack.' : 'Ask OpenAI to add a two-link inspection arm and camera to this project.'}</p>
     </div><span className="planning-status">{extension ? 'Concept module' : 'Next capability'}</span></div>
     <label className="design-agent-label" htmlFor="inspection-request">Expansion request</label>
     <textarea id="inspection-request" className="design-agent-input" value={instruction} maxLength={2000} rows={2} disabled={busy || pending} onChange={(event) => setInstruction(event.target.value)} />
     <div className="design-agent-row">
-      <button className="design-agent-button" type="button" disabled={busy || pending || !instruction.trim()} onClick={() => void develop()}>{pending ? 'Developing inspection module…' : extension ? 'Revise inspection module with Meta' : 'Add arm and camera with Meta'}</button>
+      <button className="design-agent-button" type="button" disabled={busy || pending || !instruction.trim()} onClick={() => void develop()}>{pending ? 'Developing inspection module…' : extension ? 'Revise inspection module with OpenAI' : 'Add arm and camera with OpenAI'}</button>
       {extension && <button className="new-project-button" type="button" disabled={busy || pending} onClick={() => void remove()}>Remove module</button>}
     </div>
     {pending && <div className="design-progress" aria-live="polite">
-      <div className="design-progress-heading"><strong>{accepted ? 'Inspection layout accepted' : 'Designing the inspection module'}</strong><span>{accepted ? 'Opening the expanded view…' : 'Waiting for Meta and reach checks…'}</span></div>
+      <div className="design-progress-heading"><strong>{accepted ? 'Inspection layout accepted' : 'Designing the inspection module'}</strong><span>{accepted ? 'Opening the expanded view…' : 'Waiting for OpenAI and reach checks…'}</span></div>
       <div className={`design-progress-track ${accepted ? 'complete' : 'waiting'}`} role="progressbar" aria-label="Inspection module progress" aria-valuemin={0} aria-valuemax={100} {...(accepted ? { 'aria-valuenow': 100 } : {})}><span ref={fill} /></div>
     </div>}
     {error && <p className="inline-error" role="alert">{error}</p>}

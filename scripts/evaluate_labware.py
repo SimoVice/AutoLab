@@ -1,7 +1,7 @@
 """Evaluate a frozen developer-defined rack dataset through actual product turns.
 
 Default execution only validates inputs and prints a plan. --live explicitly
-permits bounded Meta calls; --replay reuses all recorded responses with no new
+permits bounded OpenAI calls; --replay reuses all recorded responses with no new
 provider consumption. Neither mode is an independent held-out benchmark.
 
 The dataset supplies every prompt and at most one clarification per case. This
@@ -27,7 +27,7 @@ from unittest.mock import patch
 import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
-MODEL = "muse-spark-1.3-contributor"
+MODEL = "gpt-6.1-terra"
 MAX_CALLS = 16
 EXCLUDED_DIRECTORIES = {
     "node_modules",
@@ -318,7 +318,7 @@ class Evaluation:
                 return await original_send(client, request, *args, **kwargs)
             if str(request.url) != f"{settings.base_url}/chat/completions":
                 self.abort_reason = (
-                    "Unexpected external request; evaluation only permits Meta turns."
+                    "Unexpected external request; evaluation only permits OpenAI turns."
                 )
                 raise EvaluationAbort(self.abort_reason)
             self.guard()
@@ -630,7 +630,7 @@ def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument("--dataset", type=Path, required=True)
     mode = result.add_mutually_exclusive_group()
-    mode.add_argument("--live", action="store_true", help="Explicitly permit bounded Meta requests")
+    mode.add_argument("--live", action="store_true", help="Permit bounded OpenAI requests")
     mode.add_argument("--replay", type=Path, help="Replay a previous results.json without network")
     result.add_argument("--max-calls", type=int, choices=range(1, MAX_CALLS + 1), default=MAX_CALLS)
     result.add_argument(

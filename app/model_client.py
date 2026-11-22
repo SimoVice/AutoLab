@@ -1,4 +1,4 @@
-"""Extract bounded design requirements with the Meta Model API."""
+"""Extract bounded design requirements with the OpenAI API."""
 
 import json
 import logging
@@ -26,6 +26,7 @@ from app.engineering import (
 )
 from app.labware import LabwareUpdate
 from app.microplates import LabwareSelection
+from app.openai_models import AGENT_MODELS, DEFAULT_MODEL, chat_parameters
 from app.quantities import (
     has_spoken_quantity,
     normalize_concentration,
@@ -37,15 +38,14 @@ from app.workflows import describe_workflow
 
 ROOT = Path(__file__).resolve().parent.parent
 LOGGER = logging.getLogger("museautolab.model")
-DEFAULT_MODEL = "muse-spark-1.3-contributor"
-DEFAULT_BASE_URL = "https://api.meta.ai/v1"
+DEFAULT_BASE_URL = "https://api.openai.com/v1"
 _selected_model: ContextVar[str | None] = ContextVar("museautolab_selected_model", default=None)
 
 
 def configured_model() -> str:
     """Read the deployment default without requiring or returning credentials."""
     local = dotenv_values(ROOT / ".env")
-    return str(os.environ.get("META_MODEL", local.get("META_MODEL")) or DEFAULT_MODEL).strip()
+    return str(os.environ.get("OPENAI_MODEL", local.get("OPENAI_MODEL")) or DEFAULT_MODEL).strip()
 
 
 def active_model() -> str:
@@ -346,7 +346,7 @@ envelopes. It checks modeled motion and contacts; no liquid accuracy, real motor
 hardware validation is established. Do not claim a run has passed until the interface reports
 that result.
 The Labware photo check panel can analyze an uploaded photo or a captured camera frame using
-Meta vision. Only Analyze photo sends the image. It identifies visible tube/tip regions in image
+OpenAI vision. Only Analyze photo sends the image. It identifies visible tube/tip regions in image
 coordinates with human correction/review. It does not provide calibrated world coordinates,
 measure volumes/concentrations, verify absence or control hardware. Direct users to the panel;
 do not claim you have analyzed an image from chat alone.
@@ -360,7 +360,7 @@ Return actions=[] for discovery, advice, hypothetical future examples and parame
 When the user explicitly asks to develop, generate, modify or rearrange the machine, return a
 develop_layout action. Equipment and a liquid workflow are required; a dilution recipe is not.
 For a geometric change to an existing design also return develop_layout. It runs a separate
-bounded Meta proposal and geometric screening; never claim success before that action returns.
+bounded OpenAI proposal and geometric screening; never claim success before that action returns.
 Use add_inspection only when the user asks to add an arm/camera module NOW to an accepted
 design. A future example or possibility is not an instruction to add it. Use remove_inspection
 for an explicit removal, confirm for an explicit approval, and show_files, show_sources,
@@ -372,7 +372,7 @@ frame dimensions and permits a custom 240..300 by 260..300 mm insert, five fixed
 positions, and a proposed vertical pose of its original build-plate assembly. A roughly
 483 mm wide frame cannot fit a smaller width without a different mechanical design. No
 arbitrary remeshing, source-part rescaling or hardware-ready interface is supported.
-Save project downloads a portable file; Open project rebuilds it without a Meta call. The last
+Save project downloads a portable file. Open project rebuilds it locally. The last
 project is also remembered in this browser. Prior simulation/image jobs are not restored.
 After an accepted layout, add_inspection proposes a bounded two-link arm/camera concept and
 checks planar reach and recorded-pose width on the same project. Its sweep is kinematic,
@@ -927,12 +927,16 @@ class ModelSettings:
             return str(value or fallback).strip()
 
         settings = cls(
-            api_key=get_value("MODEL_API_KEY"),
-            base_url=get_value("META_API_BASE_URL", DEFAULT_BASE_URL).rstrip("/"),
+            api_key=get_value("OPENAI_API_KEY"),
+            base_url=get_value("OPENAI_BASE_URL", DEFAULT_BASE_URL).rstrip("/"),
             model=active_model(),
         )
         if not settings.api_key:
-            raise ModelClientError("Set MODEL_API_KEY in the local .env file before using chat.",
+            raise ModelClientError("Set OPENAI_API_KEY in the local .env file before using chat.",
+                                   failure_kind="provider_unavailable")
+        if settings.model not in AGENT_MODELS:
+            choices = ", ".join(AGENT_MODELS)
+            raise ModelClientError(f"Set OPENAI_MODEL to one of {choices}.",
                                    failure_kind="provider_unavailable")
         return settings
 
@@ -1111,7 +1115,7 @@ async def _check_semantic_platform_choice(
             or re.search(r"https?://|www\.", message, re.I)):
         return {}
     payload = {
-        "model": settings.model, "reasoning_effort": "minimal", "max_completion_tokens": 350,
+        **chat_parameters(settings.model, 350),
         "messages": [
             {"role": "system", "content": (
                 "Interpret whether the latest user text makes a definite platform selection NOW. "
@@ -1173,7 +1177,7 @@ async def _check_semantic_platform_choice(
         # An unavailable verifier cannot authorize a platform choice.
         pass
     usage = _safe_usage(body) if isinstance(body, dict) else {}
-    LOGGER.info("Meta semantic choice model=%s token_usage=%s",
+    LOGGER.info("OpenAI semantic choice model=%s token_usage=%s",
                 recorded_model(body, settings.model), usage)
     return usage
 
@@ -1342,10 +1346,8 @@ async def generate_turn(
             "quantities from container capacities. Discuss the reviewed alternatives and ask only "
             "a relevant hardware clarification; do not ask recipe quantities before approval."})
     payload = {
-        "model": settings.model,
+        **chat_parameters(settings.model, 2400),
         "messages": messages,
-        "reasoning_effort": "minimal",
-        "max_completion_tokens": 2400,
         "response_format": {
             "type": "json_schema",
             "json_schema": {
@@ -1372,11 +1374,11 @@ async def generate_turn(
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code
         raise ModelClientError(
-            f"Meta request failed (HTTP {status}). Check model access or try again."
+            f"OpenAI request failed (HTTP {status}). Check model access or try again."
         ) from None
     except httpx.RequestError:
         raise ModelClientError(
-            "Could not reach Meta. Check the network connection and try again.",
+            "Could not reach OpenAI. Check the network connection and try again.",
             failure_kind="provider_unavailable",
         ) from None
 
@@ -1507,10 +1509,10 @@ async def generate_turn(
             retry_usage["source_repair_requests"] = 1
             return repaired, retry_usage
         error = ModelClientError(
-            "Meta returned changes that could not be verified against your message and "
+            "OpenAI returned changes that could not be verified against your message and "
             "the recorded project. The project was not changed. Please retry this request."
             if failure_kind == "source_validation" else
-            "Meta returned an incomplete or invalid response. The project was not changed."
+            "OpenAI returned an incomplete or invalid response. The project was not changed."
         )
         error.failure_kind = failure_kind
         error.usage = {"model": recorded_model(body, settings.model),
@@ -1519,7 +1521,7 @@ async def generate_turn(
             if isinstance(value, int):
                 error.usage[key] = error.usage.get(key, 0) + value
         LOGGER.warning(
-            "Meta model=%s failure_kind=%s token_usage=%s",
+            "OpenAI model=%s failure_kind=%s token_usage=%s",
             settings.model, failure_kind, error.usage,
         )
         raise error from None
@@ -1529,7 +1531,7 @@ async def generate_turn(
         if isinstance(value, int):
             usage[key] = usage.get(key, 0) + value
     # Only counts/model ID are logged; prompts, responses and authentication are omitted.
-    LOGGER.info("Meta model=%s token_usage=%s", settings.model, usage)
+    LOGGER.info("OpenAI model=%s token_usage=%s", settings.model, usage)
     return result, usage
 
 
