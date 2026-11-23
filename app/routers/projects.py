@@ -750,3 +750,55 @@ async def bench_station_runner(project_id: str, revision: int) -> Response:
             media_type="text/x-python",
             headers={"Content-Disposition": 'attachment; filename="run.py"'},
         )
+
+
+@router.get("/api/lab-profile")
+async def get_lab_profile() -> dict:
+    from app.lab_profile import PRINTER_PRESETS, load_lab_profile
+
+    return {"profile": load_lab_profile(), "presets": PRINTER_PRESETS}
+
+
+@router.put("/api/lab-profile")
+async def update_lab_profile(payload: dict) -> dict:
+    from pydantic import ValidationError
+
+    from app.lab_profile import save_lab_profile
+
+    try:
+        saved = save_lab_profile(payload)
+    except (ValidationError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    return {"profile": saved}
+
+
+@router.post("/api/projects/{project_id}/apply-lab-profile")
+async def apply_lab_profile_route(
+    project_id: str, request: RevisionRequest | None = None
+) -> dict:
+    from app.lab_profile import (
+        apply_profile_to_project,
+        has_lab_profile_data,
+        load_lab_profile,
+    )
+
+    session = api_hook("session_for", session_for)(project_id)
+    accept_fn = api_hook("_accept_project", accept_project)
+    async with session.model_lock():
+        if request is not None:
+            check_revision(session.project, request.project_revision)
+        profile = load_lab_profile()
+        if not has_lab_profile_data(profile):
+            raise HTTPException(
+                status_code=409, detail="Configure a laboratory profile before applying it."
+            )
+        try:
+            updated = apply_profile_to_project(session.project, profile)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        accept_fn(session, updated)
+        return {
+            "project": deepcopy(session.project),
+            "profile": profile,
+            "assistant_message": "Applied laboratory bench constraints to this project.",
+        }

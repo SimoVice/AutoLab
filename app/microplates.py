@@ -642,6 +642,20 @@ def select_plate(project: dict, selection: LabwareSelection, message: str) -> tu
         "position_xz_mm": [x, z],
     }
     result = reapply_plate(result)
+    from app.lab_profile import record_dimension
+
+    for axis_key, axis_val in (
+        ("plate_holder_width_mm", compiled["size_mm"][0]),
+        ("plate_holder_height_mm", compiled["size_mm"][1]),
+        ("plate_holder_depth_mm", compiled["size_mm"][2]),
+    ):
+        result = record_dimension(
+            result,
+            axis_key,
+            axis_val,
+            provenance="reference",
+            source=PROFILE_ID,
+        )
     result["revision"] += 1
     result["status"] = "draft"
     compatibility = result["labware_plate"]["compatibility"]

@@ -1044,6 +1044,12 @@ async def generate_turn(
     if accepted_layout or state.get("bench_station") or state.get("custom_assembly"):
         state["parts_proposal"] = build_parts_proposal(project)
 
+    from app.lab_profile import has_lab_profile_data, lab_profile_prompt_context, load_lab_profile
+
+    lab_profile = load_lab_profile()
+    if has_lab_profile_data(lab_profile):
+        state["lab_profile"] = lab_profile_prompt_context(lab_profile)
+
     response_model = TipRackTurn if focused_tip_turn else ExtractedTurn
     prompt_parts = [CORE_SYSTEM_INSTRUCTIONS]
     if need_liquid_platforms:

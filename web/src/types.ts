@@ -438,3 +438,48 @@ export type SoftwareGuidance = {
   protocol_template: { status: 'needs_review' | 'needs_recipe'; execution_enabled: false;
     current_preparation: { target_count: number }; unresolved_parameters: string[] };
 };
+
+export type PrinterProfile = {
+  name: string | null;
+  build_volume_mm: [number, number, number] | null;
+  nozzle_mm: number | null;
+  materials: string[];
+};
+
+export type BenchEnvelope = {
+  width_mm: number | null;
+  depth_mm: number | null;
+  height_mm: number | null;
+  front_clearance_mm: number | null;
+  rear_clearance_mm: number | null;
+  side_clearance_mm: number | null;
+  notes: string | null;
+};
+
+export type LabProfile = {
+  schema_version: '1';
+  lab_name: string | null;
+  printer: PrinterProfile;
+  bench: BenchEnvelope;
+  measuring_tools: string[];
+  owned_equipment: string[];
+  notes: string | null;
+  updated_at: string | null;
+};
+
+export type PrinterPreset = {
+  id: string;
+  name: string;
+  build_volume_mm: [number, number, number];
+  nozzle_mm: number;
+  materials: string[];
+};
+
+export type DimensionMeasurement = {
+  key: string;
+  value_mm: number;
+  provenance: 'reference' | 'user_measured';
+  source?: string;
+  measured_with?: string;
+  recorded_at?: string;
+};

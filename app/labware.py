@@ -681,6 +681,22 @@ def develop_labware(project: dict) -> tuple[dict, dict]:
         },
     }
     result = reapply_labware(result)
+    from app.lab_profile import record_dimension
+
+    for spec_key, dim_key in (
+        ("body_diameter_max_mm", "tube_body_diameter_max_mm"),
+        ("rim_diameter_min_mm", "tube_rim_diameter_min_mm"),
+        ("cap_diameter_max_mm", "tube_cap_diameter_max_mm"),
+        ("below_rim_height_mm", "tube_below_rim_height_mm"),
+    ):
+        if spec_key in brief["spec"]:
+            result = record_dimension(
+                result,
+                dim_key,
+                brief["spec"][spec_key],
+                provenance="user_measured",
+                source=brief["sources"][spec_key]["literal"],
+            )
     result["revision"] += 1
     result["status"] = "draft"
     return result, {

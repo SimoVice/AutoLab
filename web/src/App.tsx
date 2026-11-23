@@ -33,6 +33,7 @@ import TipRackOptions, { tipDimensions } from './TipRackOptions';
 import ProjectFiles from './ProjectFiles';
 import CameraPanel from './CameraPanel';
 import DesignSources from './DesignSources';
+import LabProfilePanel from './LabProfilePanel';
 import './chat-workspace.css';
 import type { ConversationEntry, PreparationPlan, ProcurementReport, Project, ProjectBrief, ProjectResponse } from './types';
 
@@ -237,6 +238,7 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
     return () => { document.removeEventListener('visibilitychange', pauseWhenHidden); narrow.removeEventListener('change', pauseWhenHidden); };
   }, [mobileView, operationMode]);
   const [resetKey, setResetKey] = useState(0);
+  const [labProfileOpen, setLabProfileOpen] = useState(false);
   const [agentPhase, setAgentPhase] = useState<AgentPhase | null>(null);
   const [pendingActivityTitle, setPendingActivityTitle] = useState<string | null>(null);
   const [actionRuns, setActionRuns] = useState<ActionRun[]>([]);
@@ -847,6 +849,7 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
         <div className="topbar-end">
           <input ref={projectFile} tabIndex={-1} type="file" accept=".json,application/json" className="sr-only" aria-label="Open saved project" onChange={(event) => { const file = event.target.files?.[0]; if (file) void openProject(file); }} />
           {hosted && <ProjectLibrary projectId={project?.id} revision={project?.revision} title={savedTitle} disabled={uiBusy || initializing} onBusy={setStorageBusy} onOpen={acceptLibraryProject} onSaved={acceptSavedProject} onSignOut={onSignOut} hasUnsaved={Boolean(input.trim() || (!savedTitle && messages.length > 1))} />}
+          <button type="button" className="new-project-button" onClick={() => setLabProfileOpen(true)} disabled={uiBusy || initializing}>Lab profile</button>
           <button type="button" className="new-project-button" onClick={() => projectFile.current?.click()} disabled={uiBusy || initializing}>{hosted ? 'Import file' : 'Open project'}</button>
           <button type="button" className="new-project-button" onClick={() => void saveProject()} disabled={!project || uiBusy || initializing}>{hosted ? 'Export file' : 'Save project'}</button>
           <button type="button" className="new-project-button" onClick={() => void handleNewProject()} disabled={uiBusy || initializing}>New project</button>
@@ -1051,6 +1054,14 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
         </aside>
       </main>
       </>}
+      {labProfileOpen && (
+        <LabProfilePanel
+          project={project}
+          disabled={uiBusy || initializing}
+          onApplied={(updated, notice) => { setProject(updated); setStorageNotice(notice); }}
+          onClose={() => setLabProfileOpen(false)}
+        />
+      )}
     </div>
     </StepIllustrationProvider>
   );

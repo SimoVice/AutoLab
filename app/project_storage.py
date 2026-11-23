@@ -105,6 +105,7 @@ class Snapshot(StrictModel):
     tip_rack: SavedTipRack | None = None
     tip_rack_request: SavedTipRequest | None = None
     fabrication_capabilities: SavedCapabilities | None = None
+    dimension_provenance: dict[str, JsonValue] | None = None
     history: Annotated[list[HistoryEntry], Field(max_length=DISPLAY_HISTORY_LIMIT)]
 
 
@@ -199,6 +200,8 @@ def make_snapshot(project: dict, history: list[dict]) -> dict:
         ),
         "cold_transfer_extension": ({"compiler": "cold-transfer-v1"}
                                     if project.get("cold_transfer_extension") else None),
+        **({"dimension_provenance": deepcopy(project["dimension_provenance"])}
+           if project.get("dimension_provenance") else {}),
         "history": deepcopy(history[-DISPLAY_HISTORY_LIMIT:]),
     }
     if payload["compiler_version"] == "4":
@@ -429,5 +432,15 @@ def restore_snapshot(snapshot: object) -> tuple[dict, list[dict]]:
 
     if saved.machine_approval and not upgraded and not clearance_upgrade:
         project["machine_approval"] = saved.machine_approval
+    if saved.dimension_provenance:
+        from app.lab_profile import DimensionMeasurement
+
+        restored_prov = {}
+        for key, item in saved.dimension_provenance.items():
+            if not isinstance(item, dict):
+                raise ValueError("Invalid saved dimension provenance entry.")
+            validated = DimensionMeasurement.model_validate({**item, "key": key})
+            restored_prov[key] = validated.model_dump(mode="json", exclude_none=True)
+        project["dimension_provenance"] = restored_prov
     refresh_workflow(project)
     return project, [entry.model_dump() for entry in saved.history]
