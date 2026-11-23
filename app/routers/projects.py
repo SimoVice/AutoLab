@@ -433,6 +433,23 @@ async def generate_custom_project(project_id: str, request: ProcurementRefreshRe
         return {"project": deepcopy(project), "assistant_message": reply, "model_calls": calls}
 
 
+@router.get("/api/projects/{project_id}/concept/kinematics")
+async def get_concept_kinematics(project_id: str, revision: int) -> dict:
+    from app.kinematics_checks import evaluate_concept_kinematics
+
+    session = api_hook("session_for", session_for)(project_id)
+    async with session.model_lock():
+        check_revision(session.project, revision)
+        design = session.project.get("concept_design")
+        if design is None:
+            raise HTTPException(409, "Generate a custom assembly first.")
+        return {
+            "project_id": project_id,
+            "revision": revision,
+            **evaluate_concept_kinematics(design),
+        }
+
+
 @router.get("/api/projects/{project_id}/concept/{asset:path}")
 async def download_custom_asset(project_id: str, asset: str, revision: int) -> Response:
     from starlette.concurrency import run_in_threadpool

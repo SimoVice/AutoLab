@@ -456,7 +456,7 @@ def evaluate_spatial_fit(
 
     printable_checks = evaluate_printable_fit(project, lab_profile)
     status = "unconstrained" if not any_limit else ("infeasible" if violations else "fits")
-    return {
+    result: dict[str, Any] = {
         "status": status,
         "subject": subject,
         "axes": axes,
@@ -464,6 +464,15 @@ def evaluate_spatial_fit(
         "printable_checks": printable_checks,
         "violations": violations,
     }
+    if candidate_footprint is None and subject in (
+        "jubilee",
+        "opentrons-ot2",
+        "generic_workstation",
+    ):
+        from app.kinematics_checks import check_workstation_reach_and_transit
+
+        result["kinematics"] = check_workstation_reach_and_transit(project)
+    return result
 
 
 def refresh_spatial_fit(project: dict, *, lab_profile: dict | None = None) -> dict:

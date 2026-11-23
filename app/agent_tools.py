@@ -604,17 +604,37 @@ def _tool_check_spatial_fit(args: CheckSpatialFitArgs, ctx: ToolContext) -> Tool
         candidate_footprint=candidate_foot,
         platform_id=args.platform_id,
     )
+    diagnostics = [v["message"] for v in fit["violations"]]
+    data: dict[str, Any] = {"spatial_fit": fit}
     msg = (
         f"Spatial check ({fit['subject']}): status={fit['status']}. "
         + (format_spatial_violations(fit) if fit["violations"] else "No 3D violations.")
     )
+    if kin := fit.get("kinematics"):
+        diagnostics.extend(kin.get("issues") or [])
+        if kin.get("issues"):
+            msg += " Reach/transit issues: " + "; ".join(kin["issues"])
+    if concept := ctx.project.get("concept_design"):
+        from app.kinematics_checks import evaluate_concept_kinematics
+
+        concept_kin = evaluate_concept_kinematics(concept)
+        data["concept_kinematics"] = concept_kin
+        diagnostics.extend(concept_kin["issues"])
+        if concept_kin["issues"]:
+            msg += " Kinematics issues: " + "; ".join(concept_kin["issues"])
+        else:
+            msg += (
+                f" Kinematics passed (min_clearance="
+                f"{concept_kin['swept_clearances'].get('min_clearance_mm')}, "
+                f"mass~{concept_kin['payload_and_com']['total_estimated_mass_g']} g)."
+            )
     return ToolResult(
         tool="check_spatial_fit",
         ok=True,
         stage="verifying",
         summary=msg.strip(),
-        diagnostics=[v["message"] for v in fit["violations"]],
-        data={"spatial_fit": fit},
+        diagnostics=diagnostics,
+        data=data,
     )
 
 
