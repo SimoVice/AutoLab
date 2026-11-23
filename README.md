@@ -1,12 +1,12 @@
 <p align="center">
-  <img src="assets/readme/hero.svg" width="100%" alt="MuseAutoLab — custom laboratory automation. One project connects design, components and build guidance.">
+  <img src="assets/readme/hero.svg" width="100%" alt="AutoLab — custom laboratory automation. One project connects design, components and build guidance.">
 </p>
 
-# MuseAutoLab
+# AutoLab
 
 **Custom laboratory automation, designed around your needs.**
 
-MuseAutoLab is a platform for designing custom laboratory automation setups around
+AutoLab is a platform for designing custom laboratory automation setups around
 a researcher's tasks, equipment and constraints. Describe the process you want to
 automate, explore suitable approaches and develop the project through conversation.
 The goal is to connect the equipment design, component choices, assembly guidance
@@ -24,7 +24,7 @@ You do not need to choose a machine or specify a recipe before you begin.
 Start with the work you want to improve.
 
 1. **Describe the process.** Explain the task, materials, existing equipment,
-   working space and practical constraints. MuseAutoLab helps develop the brief
+   working space and practical constraints. AutoLab helps develop the brief
    and asks for task-specific details when they matter.
 2. **Explore a suitable approach.** Compare available foundations and tradeoffs,
    including building around an open design or using existing equipment. Review
@@ -93,7 +93,7 @@ set up a [hosted workspace with sign-in and a project library](docs/hosting.md).
    the equipment you have and the constraints that matter. The available
    engineering depth depends on the task and supported adapters.
 
-GPT-6.1 Terra handles project requests by default. Select GPT-6.1 Sol in model
+GPT-6.1 Terra handles project requests by default. Select GPT-6.2 Sol in model
 settings for more complex design work. Dictation and optional illustrations use
 separate OpenAI models when the account has access.
 
@@ -139,8 +139,8 @@ The pinned toolchain is **Python 3.12.14 · uv 0.13.6 · Node.js 24.14.1 · npm 
 Windows x64 is the verified target. With those tools installed, a fresh checkout starts with:
 
 ```powershell
-git clone https://github.com/SimoVice/MuseAutoLab.git
-Set-Location MuseAutoLab
+git clone https://github.com/SimoVice/AutoLab.git
+Set-Location AutoLab
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install "uv==0.13.6"
 .\.venv\Scripts\uv.exe sync --locked --all-extras
@@ -158,7 +158,7 @@ Then run each server in its own terminal from the repository root:
 **Terminal 2 — frontend website at `127.0.0.1:5173`.** Keep this terminal running too.
 
 ```powershell
-$env:MUSEAUTOLAB_API_TARGET = "http://127.0.0.1:8000"
+$env:AUTOLAB_API_TARGET = "http://127.0.0.1:8000"
 npm.cmd --prefix web run dev -- --port 5173 --strictPort
 ```
 
@@ -182,7 +182,7 @@ verification. For chat-only use, the CAD/simulation extras are optional.
 - [Third-party notices](THIRD_PARTY_NOTICES.md) and [software acknowledgements](docs/software-acknowledgements.md) — sources and their terms.
 
 Software checks, real model calls and supplier observations are recorded separately
-in the [verification record](docs/verification.md). Older videos and screenshots
+in the [verification record](docs/verification.md). Older screenshots
 retain the scope of the version they show.
 
 Jubilee is by Joshua Vasquez / Machine Agency, used under CC BY 4.0. Official

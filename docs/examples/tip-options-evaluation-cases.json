@@ -2,7 +2,7 @@
   "schema_version": 1,
   "scope": "Synthetic developer-defined bounded cases; not independent validation, generalization evidence, supplier purchase verification or physical fit evidence.",
   "baseline": "docs/examples/parametric-tube-rack-project.json",
-  "fixture_derivation": "Reopen the public synthetic accepted rack. Deterministically prepare comparison/printer context and a reviewed TipOne selection through product functions; these setup actions are not live Meta evidence. Every case receives one frozen ordinary message and at most one provider attempt.",
+  "fixture_derivation": "Reopen the public synthetic accepted rack. Deterministically prepare comparison/printer context and a reviewed TipOne selection through product functions; these setup actions are not live model evidence. Every case receives one frozen ordinary message and at most one provider attempt.",
   "max_model_calls": 8,
   "cases": [
     {"id": "T1_alternatives_unknown", "fixture": "original", "prompt": "Show me alternative tip rack products for this workstation.", "expected": {"outcome": "printer_question"}},

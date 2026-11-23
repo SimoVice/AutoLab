@@ -7,12 +7,12 @@ from app.host_auth import COOKIE, hash_password, install_host_auth
 
 @pytest.fixture
 def hosted(monkeypatch, tmp_path):
-    monkeypatch.setenv("MUSEAUTOLAB_AUTH_SESSION_DIRECTORY", str(tmp_path / "auth"))
-    monkeypatch.setenv("MUSEAUTOLAB_HOSTED", "1")
-    monkeypatch.setenv("MUSEAUTOLAB_AUTH_ORIGIN", "https://testserver")
-    monkeypatch.setenv("MUSEAUTOLAB_AUTH_USERNAME", "test-account")
-    monkeypatch.setenv("MUSEAUTOLAB_AUTH_PASSWORD_HASH", hash_password("test-password"))
-    monkeypatch.setenv("MUSEAUTOLAB_AUTH_SIGNING_SECRET", "test-only-signing-material-" * 2)
+    monkeypatch.setenv("AUTOLAB_AUTH_SESSION_DIRECTORY", str(tmp_path / "auth"))
+    monkeypatch.setenv("AUTOLAB_HOSTED", "1")
+    monkeypatch.setenv("AUTOLAB_AUTH_ORIGIN", "https://testserver")
+    monkeypatch.setenv("AUTOLAB_AUTH_USERNAME", "test-account")
+    monkeypatch.setenv("AUTOLAB_AUTH_PASSWORD_HASH", hash_password("test-password"))
+    monkeypatch.setenv("AUTOLAB_AUTH_SIGNING_SECRET", "test-only-signing-material-" * 2)
     app = FastAPI()
     install_host_auth(app)
 
@@ -39,7 +39,7 @@ def login(client):
 
 
 def test_default_local(monkeypatch):
-    monkeypatch.delenv("MUSEAUTOLAB_HOSTED", raising=False)
+    monkeypatch.delenv("AUTOLAB_HOSTED", raising=False)
     app = FastAPI()
     install_host_auth(app)
     assert TestClient(app).get("/api/auth/status").json() == {
@@ -49,8 +49,8 @@ def test_default_local(monkeypatch):
 
 
 def test_hosted_fails_closed(monkeypatch):
-    monkeypatch.setenv("MUSEAUTOLAB_HOSTED", "1")
-    monkeypatch.delenv("MUSEAUTOLAB_AUTH_ORIGIN", raising=False)
+    monkeypatch.setenv("AUTOLAB_HOSTED", "1")
+    monkeypatch.delenv("AUTOLAB_AUTH_ORIGIN", raising=False)
     with pytest.raises(RuntimeError):
         install_host_auth(FastAPI())
 

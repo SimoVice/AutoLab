@@ -1,5 +1,5 @@
 {
-  "format": "museautolab-project",
+  "format": "autolab-project",
   "schema_version": 1,
   "compiler_version": "5",
   "saved_at": "2026-10-30T15:05:58.819767+00:00",
@@ -85,7 +85,7 @@
     },
     "provenance": {
       "run_id": "design-0d4dcfec",
-      "model": "muse-spark-1.3-contributor",
+      "model": "gpt-6.1-terra",
       "source_revision": 5,
       "attempt_count": 1,
       "instruction": "Add a refrigerated cold-storage bay at a target of 8 C. Keep the existing component arrangement and bed pose.",
@@ -275,7 +275,7 @@
             }
           ],
           "usage": {
-            "model": "muse-spark-1.3-contributor",
+            "model": "gpt-6.1-terra",
             "input_tokens": 1703,
             "output_tokens": 551
           }
@@ -422,7 +422,7 @@
         }
       ],
       "usage": {
-        "model": "muse-spark-1.3-contributor",
+        "model": "gpt-6.1-terra",
         "input_tokens": 1703,
         "output_tokens": 551
       },
@@ -595,7 +595,7 @@
     },
     "provenance": {
       "run_id": "inspection-c4ead4d2",
-      "model": "muse-spark-1.3-contributor",
+      "model": "gpt-6.1-terra",
       "source_revision": 6,
       "instruction": "Add an inspection arm and camera to this same workstation now. Preserve the existing workstation and cold-storage bay.",
       "attempts": [
@@ -639,7 +639,7 @@
             }
           ],
           "usage": {
-            "model": "muse-spark-1.3-contributor",
+            "model": "gpt-6.1-terra",
             "input_tokens": 3399,
             "output_tokens": 660
           }
@@ -666,7 +666,7 @@
         }
       ],
       "usage": {
-        "model": "muse-spark-1.3-contributor",
+        "model": "gpt-6.1-terra",
         "input_tokens": 3399,
         "output_tokens": 660
       },
@@ -680,7 +680,7 @@
     },
     {
       "role": "assistant",
-      "content": "Adding an 8 C refrigerated bay concept while keeping your layout and bed pose. Developing the update now.\n\nMeta layout accepted using muse-spark-1.3-contributor after 1 attempt(s). All 23 geometry checks passed.\n\nDesign reasoning: Retains revision 5 arrangement and 120 mm bed pose while designating refrigerated cold-storage bay at 8 C target. Source/sample racks remain in rear two-column row, tip-rack front-left, tip-waste and controller front row; no rescaling, no rear exclusion applied, fixed frame width unchanged.\n\nRefrigerated bay enabled. Target 8 \u00b0C; manual sample transfer. Known parts subtotal: $44.90 USD. Unpriced parts, shipping and taxes are excluded. Cooling performance is unverified."
+      "content": "Adding an 8 C refrigerated bay concept while keeping your layout and bed pose. Developing the update now.\n\nModel layout accepted using gpt-6.1-terra after 1 attempt(s). All 23 geometry checks passed.\n\nDesign reasoning: Retains revision 5 arrangement and 120 mm bed pose while designating refrigerated cold-storage bay at 8 C target. Source/sample racks remain in rear two-column row, tip-rack front-left, tip-waste and controller front row; no rescaling, no rear exclusion applied, fixed frame width unchanged.\n\nRefrigerated bay enabled. Target 8 \u00b0C; manual sample transfer. Known parts subtotal: $44.90 USD. Unpriced parts, shipping and taxes are excluded. Cooling performance is unverified."
     },
     {
       "role": "user",

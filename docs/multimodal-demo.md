@@ -6,7 +6,7 @@ workflow. They do not add hardware control or replace the source CAD.
 
 ## Choose the conversation model
 
-Open **Model & settings** above chat to choose GPT-6.1 Terra or GPT-6.1 Sol.
+Open **Model & settings** above chat to choose GPT-6.1 Terra or GPT-6.2 Sol.
 The backend checks which models the account advertises. The choice applies to
 new chat, layout, estimate and photo-analysis requests. Each request records the
 model reported by the provider when available. Prior results keep their original
@@ -64,17 +64,9 @@ portable project, engineering package or assembly instructions. Reopening or
 changing the project clears a stale illustration. The backend accepts bounded
 PNG/JPEG data only, strips metadata and sends the reference and prompt to the OpenAI image edits endpoint.
 
-The historical Meta example below preserved the recognizable overall composition but changed
-small mechanical details. They are useful presentation illustrations; source CAD,
-the deterministic model and engineering instructions remain authoritative.
-
-| Actual project reference | Actual Muse Image result |
-| --- | --- |
-| ![Original rendered project](images/multimodal-reference.png) | ![AI-generated presentation illustration, not a technical drawing](images/multimodal-illustration.png) |
-
-This pair is from one recorded real request on confirmed revision 9. The original
-Jubilee design is by Joshua Vasquez / Machine Agency, CC BY 4.0; see
-[source attribution](../THIRD_PARTY_NOTICES.md). Image generation changes details.
+AI-generated presentation illustrations preserve recognizable overall composition
+while changing small mechanical details; source CAD, the deterministic model,
+and engineering instructions remain authoritative.
 
 ## Usability changes
 
@@ -95,4 +87,3 @@ request counts and the distinction between live inference and offline fixtures.
 ## Provider references
 
 OpenAI provides the API contracts for [recorded dictation](https://developers.openai.com/api/docs/guides/speech-to-text) and [image edits](https://developers.openai.com/api/reference/resources/images/methods/edit).
-The screenshot pair above records the previous provider's behavior.

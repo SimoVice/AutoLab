@@ -17,9 +17,9 @@ from app.project_storage import MAX_SNAPSHOT_BYTES, make_snapshot, restore_snaps
 def test_six_turn_chat_survives_hosted_and_portable_reopen_with_bounded_model_context(
     tmp_path, monkeypatch,
 ):
-    monkeypatch.setenv("MUSEAUTOLAB_DATABASE_PATH", str(tmp_path / "projects.sqlite3"))
-    monkeypatch.delenv("MUSEAUTOLAB_LIBRARY_DIRECTORY", raising=False)
-    monkeypatch.delenv("MUSEAUTOLAB_MODAL_VOLUME_NAME", raising=False)
+    monkeypatch.setenv("AUTOLAB_DATABASE_PATH", str(tmp_path / "projects.sqlite3"))
+    monkeypatch.delenv("AUTOLAB_LIBRARY_DIRECTORY", raising=False)
+    monkeypatch.delenv("AUTOLAB_MODAL_VOLUME_NAME", raising=False)
     api._sessions.clear()
     captured = []
 

@@ -131,7 +131,7 @@ def test_provider_retries_blocked_before_send(dataset, tmp_path):
         return httpx.Response(200, json={"usage": {}}, request=request)
 
     async def exercise():
-        settings = SimpleNamespace(base_url="https://meta.invalid/v1")
+        settings = SimpleNamespace(base_url="https://provider.invalid/v1")
         send = run.instrument(fake_send, settings)
         request = httpx.Request(
             "POST",
@@ -165,7 +165,7 @@ def test_actual_outbound_open_schema_is_blocked_before_any_provider_send(dataset
         pytest.fail("Invalid outbound schema reached the provider transport")
 
     async def exercise():
-        settings = SimpleNamespace(base_url="https://meta.invalid/v1")
+        settings = SimpleNamespace(base_url="https://provider.invalid/v1")
         request = httpx.Request(
             "POST",
             settings.base_url + "/chat/completions",

@@ -15,7 +15,7 @@ Checked **2026-10-27**. These are public USD list-price observations for a conce
 | DS18B20 bare sensor, item 374 | 3.95 | [Adafruit](https://www.adafruit.com/product/374) |
 | Opentrons Temperature Module GEN2 | From 3,975.00 | [Opentrons module catalogue](https://opentrons.com/products/categories/modules) |
 
-Prices do not establish availability in a particular country. Pololu permits backorders for the cited motors/drivers. Pico variant pages show inconsistent stock information; the Pico H listing shows out of stock. Check availability and request territory-specific pricing before procurement. No order or reservation is made by MuseAutoLab.
+Prices do not establish availability in a particular country. Pololu permits backorders for the cited motors/drivers. Pico variant pages show inconsistent stock information; the Pico H listing shows out of stock. Check availability and request territory-specific pricing before procurement. No order or reservation is made by AutoLab.
 
 ## What the comparison includes
 
@@ -25,9 +25,9 @@ The displayed subtotal includes only selected offers with known prices. Unspecif
 
 ## Cooling proposals
 
-The DIY candidate includes a Peltier element, heatsink and fan. Its supplier describes a roughly 90 × 90 mm heatsink, 78 mm total height, 12 V operation, 60 W nominal and 72 W maximum. The proposed **150 × 120 × 130 mm** enclosure shown in MuseAutoLab is an assumed integration envelope, including space for insulation and mounting. A suitable supply with margin, regulation, cold block and condensation management are still required and unpriced. No target-temperature performance is established.
+The DIY candidate includes a Peltier element, heatsink and fan. Its supplier describes a roughly 90 × 90 mm heatsink, 78 mm total height, 12 V operation, 60 W nominal and 72 W maximum. The proposed **150 × 120 × 130 mm** enclosure shown in AutoLab is an assumed integration envelope, including space for insulation and mounting. A suitable supply with margin, regulation, cold block and condensation management are still required and unpriced. No target-temperature performance is established.
 
-The alternative [Opentrons module](https://opentrons.com/products/temperature-module-gen2) is a complete commercial temperature module. Its manufacturer specifies a **194 × 90 × 84 mm** body and a 4–95 °C operating range. The [current product specifications](https://docs.opentrons.com/temperature-module/product-specs/) describe a choice of thermal block and distinguish plate temperature from sample temperature. Confirm the quoted configuration, included accessories and custom integration requirements; this module has not been validated with MuseAutoLab.
+The alternative [Opentrons module](https://opentrons.com/products/temperature-module-gen2) is a complete commercial temperature module. Its manufacturer specifies a **194 × 90 × 84 mm** body and a 4–95 °C operating range. The [current product specifications](https://docs.opentrons.com/temperature-module/product-specs/) describe a choice of thermal block and distinguish plate temperature from sample temperature. Confirm the quoted configuration, included accessories and custom integration requirements; this module has not been validated with AutoLab.
 
 In this prototype the cold bay is attached beside the preparation area and samples are transferred manually. The temperature is a requested/proposed target, not a sensor measurement or thermal simulation. The existing pipetting animation does not imply automatic sample transfer into cold storage.
 

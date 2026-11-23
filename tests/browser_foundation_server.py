@@ -1,4 +1,4 @@
-"""Chat-only source-CAD UI fixture; only the Meta transport is replaced."""
+"""Chat-only source-CAD UI fixture; only the model transport is replaced."""
 
 import asyncio
 import sys

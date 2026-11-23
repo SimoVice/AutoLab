@@ -11,8 +11,8 @@ from app.model_client import DEFAULT_BASE_URL
 
 
 def create_app() -> FastAPI:
-    if os.environ.get("MUSEAUTOLAB_HOSTED") != "1":
-        raise RuntimeError("The hosted entry point requires MUSEAUTOLAB_HOSTED=1.")
+    if os.environ.get("AUTOLAB_HOSTED") != "1":
+        raise RuntimeError("The hosted entry point requires AUTOLAB_HOSTED=1.")
     if not os.environ.get("OPENAI_API_KEY", "").strip():
         raise RuntimeError("Configure the OpenAI key in the hosting provider's secret store.")
     if os.environ.get("OPENAI_BASE_URL", DEFAULT_BASE_URL).rstrip("/") != DEFAULT_BASE_URL:

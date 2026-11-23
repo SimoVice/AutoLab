@@ -1,8 +1,8 @@
 {
   "date": "2026-10-31",
   "status": "passed",
-  "scope": "Two actual bounded Meta calls with a public synthetic saved project; local real API/compiler and standalone logical preview. Separate browser captures use synthetic offline model transports. No physical or hardware-control validation.",
-  "model": "muse-spark-1.3-contributor",
+  "scope": "Two actual bounded model calls with a public synthetic saved project; local real API/compiler and standalone logical preview. Separate browser captures use synthetic offline model transports. No physical or hardware-control validation.",
+  "model": "gpt-6.1-terra",
   "fixture": {
     "path": "docs/examples/presentation-flow-project.json",
     "public_baseline_commit": "b823415f4588bd3cdca6b9227c5175cb726f19c1",
@@ -16,7 +16,7 @@
       "http_status": 200,
       "elapsed_seconds": 10.75,
       "usage": {
-        "model": "muse-spark-1.3-contributor",
+        "model": "gpt-6.1-terra",
         "prompt_tokens": 26156,
         "completion_tokens": 1293,
         "total_tokens": 27449
@@ -38,7 +38,7 @@
       "http_status": 200,
       "elapsed_seconds": 9.219,
       "usage": {
-        "model": "muse-spark-1.3-contributor",
+        "model": "gpt-6.1-terra",
         "prompt_tokens": 26208,
         "completion_tokens": 1276,
         "total_tokens": 27484
@@ -51,7 +51,7 @@
       "action_runs": []
     }
   ],
-  "actual_meta_calls": 2,
+  "actual_model_calls": 2,
   "total_tokens": 54933,
   "local_tests": {
     "command": "python -m pytest tests/test_software_guidance.py tests/test_protocol_preview.py tests/test_software_guidance_integration.py tests/test_instructions.py tests/test_procurement_api.py tests/test_chat_foundation.py -q",

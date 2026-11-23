@@ -439,7 +439,7 @@ def build_instruction_guide(project: dict, procurement: dict | None = None) -> d
             "OT-2 first run",
             OT2_DOCS + "installation/first-run/",
             "Official app, power supply and connection instructions; "
-            "MuseAutoLab does not control the robot.",
+            "AutoLab does not control the robot.",
         )
         add(
             "ot2-first-run",
@@ -1091,7 +1091,7 @@ def build_instruction_guide(project: dict, procurement: dict | None = None) -> d
             "build/setup records for the actual configuration.",
             "Review preparation.csv and automation/preview.py as a "
             "logical liquid-transfer trace only. "
-            "MuseAutoLab has no control/physics adapter for the selected Jubilee or OT-2 route.",
+            "AutoLab has no control/physics adapter for the selected Jubilee or OT-2 route.",
             "Physical operation needs an approved hardware integration "
             "and process verification record.",
         ],

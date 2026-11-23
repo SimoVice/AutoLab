@@ -77,8 +77,8 @@ def run(url):
                             "available": catalogue_available,
                         },
                         {
-                            "id": "gpt-6.1-sol",
-                            "label": "GPT-6.1 Sol",
+                            "id": "gpt-6.2-sol",
+                            "label": "GPT-6.2 Sol",
                             "available": catalogue_available,
                         },
                         {
@@ -190,12 +190,12 @@ def run(url):
             send = page.get_by_role("button", name="Send message")
             expect(voice).to_be_enabled()
             assert page.evaluate("window.syntheticMicCalls") == 0
-            model.select_option("gpt-6.1-sol")
-            expect(model).to_have_value("gpt-6.1-sol")
+            model.select_option("gpt-6.2-sol")
+            expect(model).to_have_value("gpt-6.2-sol")
             expect(page.locator("#model-data-note")).to_contain_text("not used to train")
             model.select_option("gpt-6.1-terra")
             expect(page.get_by_role("alert")).to_contain_text("Synthetic selection failure")
-            expect(model).to_have_value("gpt-6.1-sol")
+            expect(model).to_have_value("gpt-6.2-sol")
             model.select_option("gpt-6.1-terra")
             expect(model).to_have_value("gpt-6.1-terra")
             expect(page.locator("#model-data-note")).to_be_visible()
@@ -258,7 +258,7 @@ def run(url):
             expect(composer).to_have_value("Preserve on cancel.")
 
             # New-project failure preserves the current conversation, draft and browser resume.
-            snapshot_before = page.evaluate("localStorage.getItem('museautolab.workspace.v1')")
+            snapshot_before = page.evaluate("localStorage.getItem('autolab.workspace.v1')")
             messages_before = page.locator(".message-row").count()
 
             def fail_new(route):
@@ -270,7 +270,7 @@ def run(url):
             expect(composer).to_have_value("Preserve on cancel.")
             assert page.locator(".message-row").count() == messages_before
             assert (
-                page.evaluate("localStorage.getItem('museautolab.workspace.v1')") == snapshot_before
+                page.evaluate("localStorage.getItem('autolab.workspace.v1')") == snapshot_before
             )
             page.unroute("**/api/projects", fail_new)
             page.get_by_role("button", name="New project", exact=True).click()
@@ -396,7 +396,7 @@ def run(url):
                 panel.get_by_text("AI-generated illustration — not a technical drawing", exact=True)
             ).to_be_visible()
             expect(panel.get_by_role("link", name="Download illustration PNG")).to_have_attribute(
-                "download", __import__("re").compile(r"museautolab-illustration-r\d+\.png")
+                "download", __import__("re").compile(r"autolab-illustration-r\d+\.png")
             )
             panel.get_by_text("Compare with original model view", exact=True).click()
             expect(panel.locator(".illustration-reference img")).to_be_visible()

@@ -26,13 +26,13 @@ def test_deployment_limits_and_existing_resources(monkeypatch):
     assert knobs["min_containers"] == knobs["buffer_containers"] == 0
     assert knobs["memory"] == 4096 and knobs["cpu"] == 1
     assert "gpu" not in knobs
-    assert knobs["env"]["MUSEAUTOLAB_HOSTED"] == "1"
+    assert knobs["env"]["AUTOLAB_HOSTED"] == "1"
     assert "create_if_missing" not in modal.Volume.from_name.call_args.kwargs
     modal.Image.from_dockerfile.assert_not_called()
     assert modal.App.call_args.kwargs["include_source"] is False
-    assert modal.asgi_app.call_args.kwargs["label"] == "museautolab"
+    assert modal.asgi_app.call_args.kwargs["label"] == "autolab"
     required = modal.Secret.from_name.call_args.kwargs["required_keys"]
-    assert "OPENAI_API_KEY" in required and "META_API_KEY" not in required
+    assert "OPENAI_API_KEY" in required and "LEGACY_API_KEY" not in required
 
 
 def test_allowlisted_context_uses_current_contents(monkeypatch, tmp_path):

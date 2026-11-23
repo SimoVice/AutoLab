@@ -1,4 +1,4 @@
-"""Two real compiler routes after a chat choice; Meta alone is an offline fixture."""
+"""Two real compiler routes after a chat choice; the model alone is an offline fixture."""
 
 import json
 import sys

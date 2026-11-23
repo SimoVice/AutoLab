@@ -85,8 +85,8 @@ def _write_step(encoded: str, world_coordinates: bool) -> bytes:
                 body = Compound(children=parts)
         body.label = component['name']
         groups.append(body)
-    assembly = Compound(children=groups, label='MuseAutoLab concept')
-    with TemporaryDirectory(prefix='muse-concept-step-') as temporary:
+    assembly = Compound(children=groups, label='AutoLab concept')
+    with TemporaryDirectory(prefix='autolab-concept-step-') as temporary:
         path = Path(temporary) / 'concept.step'
         if not export_step(assembly, path, unit=Unit.MM):
             raise RuntimeError('The STEP model could not be exported.')

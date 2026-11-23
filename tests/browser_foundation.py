@@ -1,6 +1,6 @@
 """Source CAD, chat-only revisions/modules, clean UI and portable state in Chrome.
 
-Uses the real application, source meshes and compiler with offline Meta fixtures.
+Uses the real application, source meshes and compiler with offline model fixtures.
 STEP reopening/regeneration is covered separately by test_foundation_exports.py.
 """
 
@@ -94,9 +94,9 @@ def run(url):
             page.get_by_label("Open saved project").set_input_files(saved)
             expect(page.locator(".storage-notice")).to_contain_text("rebuilt")
             expect(page.locator("canvas")).to_have_count(1)
-            if os.environ.get("MUSEAUTOLAB_BROWSER_SCREENSHOT"):
+            if os.environ.get("AUTOLAB_BROWSER_SCREENSHOT"):
                 page.locator(".project-details > summary").click()
-                page.screenshot(path=os.environ["MUSEAUTOLAB_BROWSER_SCREENSHOT"])
+                page.screenshot(path=os.environ["AUTOLAB_BROWSER_SCREENSHOT"])
             page.set_viewport_size({"width": 390, "height": 844})
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
             page.get_by_role("button", name="New project", exact=True).click()

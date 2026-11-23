@@ -13,7 +13,7 @@ import httpx
 from app.model_catalog import VOICE_MODEL
 from app.model_client import DEFAULT_BASE_URL, ModelClientError, ModelSettings
 
-LOGGER = logging.getLogger("museautolab.transcription")
+LOGGER = logging.getLogger("autolab.transcription")
 MAX_DURATION_SECONDS = 60
 MAX_AUDIO_BYTES = MAX_DURATION_SECONDS * 24000 * 2 + 65536
 TRANSCRIPTION_TIMEOUT_SECONDS = 45

@@ -37,7 +37,7 @@ for (let i = 0; i < vertices.length; i += 1) {
   max[axis] = Math.max(max[axis], vertices[i]);
 }
 const gltf = {
-  asset: { version: '2.0', generator: 'MuseAutoLab STEP tessellation' },
+  asset: { version: '2.0', generator: 'AutoLab STEP tessellation' },
   buffers: [{ byteLength: vertexBuffer.length + indexBuffer.length }],
   bufferViews: [
     { buffer: 0, byteOffset: 0, byteLength: vertexBuffer.length, target: 34962 },

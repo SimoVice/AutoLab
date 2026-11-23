@@ -1,6 +1,6 @@
 """Chat-only rack generation with real API, geometry, portable state and guides.
 
-Meta extraction is an explicit synthetic fixture; no supplier, model or CAD export
+Model extraction is an explicit synthetic fixture; no supplier, model or CAD export
 job is called. This is digital coherence evidence, not a printed fit result.
 """
 

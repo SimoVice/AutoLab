@@ -28,8 +28,8 @@ def misclassified(message):
 ])
 def test_normal_message_adopts_and_persists_without_approval(
         monkeypatch, tmp_path, active, message):
-    monkeypatch.delenv("MUSEAUTOLAB_DATABASE_PATH", raising=False)
-    monkeypatch.setenv("MUSEAUTOLAB_LIBRARY_DIRECTORY", str(tmp_path / "library"))
+    monkeypatch.delenv("AUTOLAB_DATABASE_PATH", raising=False)
+    monkeypatch.setenv("AUTOLAB_LIBRARY_DIRECTORY", str(tmp_path / "library"))
     project = plate_project()
     if active:
         project = apply_cold_transfer(project)

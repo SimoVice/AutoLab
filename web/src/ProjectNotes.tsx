@@ -54,8 +54,8 @@ export default function ProjectNotes({ project, busy, onSave }: {
       onCancel={event => { if (saving) event.preventDefault(); }}>
       <form onSubmit={save}>
         <h2 id="notes-title">Project notes</h2>
-        <p>Muse reads these notes alongside your design and recent conversation. Keep equipment you own, working preferences or constraints here.</p>
-        <label htmlFor="project-notes-field">What should Muse remember for this project?</label>
+        <p>AutoLab reads these notes alongside your design and recent conversation. Keep equipment you own, working preferences or constraints here.</p>
+        <label htmlFor="project-notes-field">What should AutoLab remember for this project?</label>
         <textarea id="project-notes-field" autoFocus rows={5} maxLength={2400} value={draft}
           placeholder="We share a printer with the microscopy room. Prefer holders we can print in one piece."
           onChange={event => setDraft(event.target.value)} disabled={saving} />

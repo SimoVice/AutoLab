@@ -1,6 +1,6 @@
 # Reviewer and demo guide
 
-Current product path, updated **2026-11-03**. MuseAutoLab helps a researcher turn
+Current product path, updated **2026-11-03**. AutoLab helps a researcher turn
 repetitive laboratory work into a sourced, editable automation proposal. The first
 engineering demonstrator is dilution and aliquot preparation. The result is a
 digital project with consistent geometry, calculations, source attribution and
@@ -16,16 +16,14 @@ records are not the script for the English demonstration.
 
 | Path | What you can inspect | Requirements |
 | --- | --- | --- |
-| Watch the core demo | [Three-minute MP4](https://raw.githubusercontent.com/SimoVice/MuseAutoLab/main/docs/video/museautolab-demo.mp4), recorded core product journey with English captions | No account or API key; latest pricing/instruction features are described below |
 | Read without installing | This guide, architecture below, source documentation and dated JSON examples | No account or API key |
 | Inspect the 96-well switch | [Confirmed plate project](examples/microplate-project.json), [small holder/reference CAD](examples/microplate/README.md) and [actual test record](examples/microplate-verification.json) | CAD and screenshots need no setup; reopen in the local app without inference |
 | Inspect the new tube rack | [Confirmed project](examples/parametric-tube-rack-project.json), [rack STEP](examples/tube-rack/tube-rack.step), [rack STL](examples/tube-rack/tube-rack.stl) and [fit coupon](examples/tube-rack/tube-rack-fit-coupon.stl) | CAD downloads need no account, setup or inference; the interactive viewer needs the local app |
-| Reopen a recorded project | Real 3D, accepted layout, cold bay, inspection sweep and local exports from the example below | Locked setup and local servers; no Meta key or new inference |
-| Run offline checks | Actual application/compiler/browser with explicitly substituted Meta responses | [Locked setup](getting-started.md#setup-on-windows-powershell), local Chrome for browser checks; no key or live inference |
-| Use the product with Meta | Natural conversation, platform choice, design and revisions | [Local configuration](getting-started.md#local-meta-configuration), your own account access/allowance, then [two local servers](getting-started.md#run-locally) |
+| Reopen a recorded project | Real 3D, accepted layout, cold bay, inspection sweep and local exports from the example below | Locked setup and local servers; no OpenAI key or new inference |
+| Run offline checks | Actual application/compiler/browser with explicitly substituted model responses | [Locked setup](getting-started.md#setup-on-windows-powershell), local Chrome for browser checks; no key or live inference |
+| Use the product with OpenAI | Natural conversation, platform choice, design and revisions | [Local configuration](getting-started.md#local-openai-configuration), your own account access/allowance, then [two local servers](getting-started.md#run-locally) |
 
-Use the [hosted workspace](https://simonevicentini02--museautolab.us-east.modal.run)
-with your assigned sign-in, or run the app locally. Offline fixtures test software behavior.
+Follow the [hosting guide](hosting.md) to deploy a private workspace, or run the app locally. Offline fixtures test software behavior.
 A saved project rebuilds
 locally without inference but does not restore export jobs or authenticate imported
 historical model metadata.
@@ -90,22 +88,21 @@ build instructions. Existing target count and liquid amounts are retained. Ask
 The named reference is based on pinned Opentrons software data, not manufacturer
 CAD or measured fit. A format-only switch from a 2 mL recipe stays a draft with
 a volume conflict. See [the demonstration sequence and scope](microplate-switching.md).
-The video has not yet been updated to include this feature.
 
 For a reproducible starting point, open the [synthetic 200 µL tube setup](examples/microplate-tube-setup.json)
 in the running app. The quantity-only setup was prepared deterministically from
 the recorded rack project; its older conversation still mentions the earlier 2 mL
 recipe. The current preparation plan is authoritative. Sending the switch message
-requires Meta access. Alternatively, open the [confirmed plate result](examples/microplate-project.json)
+requires OpenAI access. Alternatively, open the [confirmed plate result](examples/microplate-project.json)
 without a key and choose **Show plate in model → Selected part only**. This is the
-actual accepted result of a real Contributor request, subsequently confirmed.
+actual accepted result of a live reasoning-model request, subsequently confirmed.
 
 ![Actual plate result reopened in the app](images/microplate-switch.png)
 
 ## Inspect the parametric rack
 
 The new [confirmed rack project](examples/parametric-tube-rack-project.json) is
-revision 12, compiler 5. It extends the earlier Jubilee project using a real Meta
+revision 12, compiler 5. It extends the earlier Jubilee project using a live model
 response to **synthetic** dimensional inputs. Open it through **Open project** in
 the running application, then choose **Show rack in model** in the rack card.
 There are twelve holes in three rows and four columns, with three preparation
@@ -128,8 +125,8 @@ digital integration evidence, not independent model benchmarking or human time s
 
 ## Open the recorded example without a key
 
-The [portable video project](examples/demo-video-project.json) is a synthetic preparation project
-saved from a successful **real Contributor browser rehearsal on 2026-10-30**, compiler 4,
+The [portable saved project](examples/demo-video-project.json) is a synthetic preparation project
+saved from a successful **live model browser check on 2026-10-30**, compiler 4,
 revision 9. It contains the original Jubilee source identity, a 120 mm digital bed
 drop, a requested 8 °C cold-bay concept, an inspection-arm/camera proposal and a
 confirmed three-target dilution plan. It is recorded model output, not a new response
@@ -137,7 +134,7 @@ or a physical test. The temperature is requested, not measured.
 
 ![Real app reopening the recorded synthetic video project at revision 9](images/demo-video-project.png)
 
-Real app view after reopening the recorded synthetic Meta result. This capture made
+Real app view after reopening the recorded synthetic model result. This capture made
 no new inference; it shows the digital proposal, not assembled laboratory hardware.
 
 1. Follow the [locked setup](getting-started.md#setup-on-windows-powershell), then start the
@@ -151,14 +148,14 @@ no new inference; it shows the digital proposal, not assembled laboratory hardwa
    returns to the whole assembly. Inspect the separate kinematic sweep if useful.
 4. Open **Parts & pricing** and explicitly refresh US prices for current supplier
    observations. Open **Build instructions** for the immediate revision-specific
-   guide and HTML/Markdown/JSON downloads. Neither requires Meta inference; only
+   guide and HTML/Markdown/JSON downloads. Neither requires model inference; only
    the explicit price refresh contacts suppliers. See [pricing and instruction scope](procurement-and-instructions.md).
 5. Choose **Generate project files** to create an actual local package from the
-   reopened state. This uses local CAD/document generation, not Meta. The heavy
+   reopened state. This uses local CAD/document generation, not a model call. The heavy
    source export can take several minutes. Read the guide and download the ZIP after
    the job is ready; historical export jobs are not restored.
 
-Conversation edits or fresh model proposals require separately configured Meta
+Conversation edits or fresh model proposals require separately configured OpenAI
 access and allowance. Opening the example does not authenticate the historical model
 metadata supplied in that file. Its scope remains a digital engineering proposal;
 neither cooling nor the inspection module is hardware-validated.
@@ -169,18 +166,18 @@ per tube, producing 200/100/20 µL stock amounts. The earlier
 130 mm / 4 °C / 100-50-10 µL values. These are different recorded projects, both at
 revision 9; do not combine their evidence.
 
-## What Meta does
+## What the model does
 
-Meta interprets the task, extracts grounded requirements, proposes sourced platform
+The model interprets the task, extracts grounded requirements, proposes sourced platform
 options and reasons, and proposes bounded layouts/revisions. On the Jubilee route,
 it can propose inspection-arm dimensions after an explicit request. The application
 supplies the supported architectures, source catalogue, arithmetic, geometry compiler,
-checks and acceptance rules. Imported Jubilee geometry was not invented by Meta.
+checks and acceptance rules. Imported Jubilee geometry was not invented by the model.
 Development coding assistants are separate from these runtime requests.
 
 ```mermaid
 flowchart LR
-    U[Researcher: ordinary chat] --> M[Meta: requirements and proposals]
+    U[Researcher: ordinary chat] --> M[Model: requirements and proposals]
     M --> V[Typed validation and deterministic checks]
     S[Pinned source catalogue and CAD] --> V
     V -->|Accepted| P[Revisioned project]
@@ -188,7 +185,7 @@ flowchart LR
     P --> R[Interactive 3D and preparation arithmetic]
     P --> J[Portable project JSON]
     P --> E[CAD, guide, source records and archive]
-    I[Explicitly supplied photo] --> A[Separate Meta image analysis]
+    I[Explicitly supplied photo] --> A[Separate vision image analysis]
     A --> H[Human review of image regions]
 ```
 
@@ -239,7 +236,7 @@ questions before moving to the next step.
    preparation. Keep the selected platform, plate, tip rack, suppliers and layout
    unchanged.” Review A1/B1/C1 stock/diluent pairs 30/120, 6/144 and 3/147 µL,
    then download the new revision's program. Natural-language changes use the
-   configured Meta service; local playback and running the program do not.
+   configured OpenAI service; local playback and running the program do not.
 10. **Check the output.** Review available US prices, build instructions and the
     revision, then **Save project** and reopen it. Generate the full CAD package
     when needed; it can take several minutes. Check the actual pipette's range,
@@ -259,7 +256,7 @@ inventing them from tip volume. No printer access is assumed from this script.
 The longer foundation/layout/inspection journey follows:
 
 Use the ordinary chat throughout. Prompts below are synthetic examples, not commands
-that force an outcome. Actual Meta wording, latency and choices vary.
+that force an outcome. Actual model wording, latency and choices vary.
 
 1. **Start with the problem.** “I spend a lot of time preparing aliquots and dilutions
    by hand. I have a pipette and microcentrifuge tubes.” Discuss the needs that affect
@@ -300,7 +297,7 @@ virtual camera placement is not a real photograph or automatic inspection.
 | | Jubilee open-hardware route | OT-2 assembled route |
 | --- | --- | --- |
 | Source | Original pinned STEP, 809 unscaled solids, CC BY 4.0 | Schematic enclosure and official pinned deck-slot software data; not manufacturer CAD |
-| Meta design choices | Bounded insert/layout and digital bed pose | Three labware proxies in distinct deck slots |
+| Model design choices | Bounded insert/layout and digital bed pose | Three labware proxies in distinct deck slots |
 | Supported demo revisions | Bounded layout/bed, cold-bay concept, inspection sidecar | Bounded slot assignments; custom cooling/inspection rejected |
 | Guidance | Source build/BOM references plus unresolved tooling, actuation, mounting and calibration work | Configuration/quote, compatible instrument/labware and setup checklist |
 | Exports | Source-based assembly, custom geometry, provenance, documents | Schematic assembly, licensed deck data and setup documents; no executable robot protocol |
@@ -312,25 +309,18 @@ and [third-party notices](../THIRD_PARTY_NOTICES.md) for source identity and rig
 
 ## Evidence and verification scope
 
-The [multimodal walkthrough](multimodal-demo.md) covers the implemented account-checked
-Spark/Wonder selector, editable Muse Voice dictation and optional Muse Image
-illustration. The [curated verification appendix](examples/multimodal-verification.json)
-retains real request outcomes, failures and fixes. Agent usability checks improved
+The [multimodal walkthrough](multimodal-demo.md) covers the model selector, editable
+speech dictation and optional AI-generated project illustration. Agent usability checks improved
 reset recovery, keyboard view controls, mobile layout and discovery of plans/files.
 They are separate from the earlier core journey and from testing with external users.
 
 | Record | Date and scope |
 | --- | --- |
-| [Third complete live browser journey](examples/delivery-third-rehearsal.json) and [video project](examples/demo-video-project.json) | 2026-10-30; real browser conversation, third fresh completion and a live 450 mm rejection preserving the confirmed state; distinct from the earlier example below |
-| [Delivery verification](verification.md) | 2026-10-30; 539 regular tests and eight offline browser flows after multimodal fixes; historical source-CAD/reconstruction and actual revision-9 package evidence remain separately dated |
-| [Initial complete-path Meta rehearsals](examples/delivery-rehearsal-summary.json) | 2026-10-29, curated October 30; two complete fresh journeys, a recovered journey and failed/incomplete attempts; retained unchanged, with the third fresh completion recorded separately above |
-| [Three-minute video](video/README.md) | 2026-10-30; 180 s, 1080p30, synthetic English narration and timed captions; final media checks and labelled cuts in the video record |
-| [Current platform-choice example](examples/engineering-choice-live.json) | 2026-10-29; actual Contributor responses on synthetic needs, both routes and late quantities; retains earlier failures and reported usage |
-| [Source-CAD chat example](examples/chat-foundation-live.json) | 2026-10-28; actual Contributor source-layout, bed and inspection requests, with rejection evidence; predates the current needs/choice flow |
-| [Historical layout implementation](meta-design.md) and [project evolution](project-evolution.md) | 2026-10-28; older architecture/UI records, not instructions for today's interface |
+| [Saved synthetic project](examples/demo-video-project.json) | Recorded live browser run; confirmed state preserved across edits |
+| [Delivery verification](verification.md) | 539 regular tests and eight offline browser flows after multimodal fixes; historical source-CAD/reconstruction and revision-9 package evidence remain separately dated |
+| [Project evolution](project-evolution.md) | Earlier architecture/UI records, not instructions for today's interface |
 | [Product-check commands](development.md#verify-the-product) | Reproducible checks, explicitly separated into regular, heavy source export and offline browser scopes |
 
 These examples document particular integration runs, not a benchmark, current release
 certificate, physical experiment or reliability percentage. Run the relevant checks
-against the revision under review. The video is available publicly; authenticated
-form requirements and actual event submission remain separate delivery steps.
+against the revision under review.

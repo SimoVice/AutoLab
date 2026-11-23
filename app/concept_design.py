@@ -822,7 +822,7 @@ def _mesh_parts(design, component_key):
 
 def concept_obj(design: dict, component_key: str | None = None) -> bytes:
     """Export static complete geometry or one local component, coordinates in mm."""
-    lines = ['# MuseAutoLab conceptual geometry; units: mm; Y up; separate solid shells']
+    lines = ['# AutoLab conceptual geometry; units: mm; Y up; separate solid shells']
     offset = 1
     for name, vertices, faces in _mesh_parts(design, component_key):
         lines.append(f'o {name}')
@@ -843,5 +843,5 @@ def concept_stl(design: dict, component_key: str | None = None) -> bytes:
             norm = math.sqrt(sum(t * t for t in n))
             n = [t / norm for t in n]
             triangles.append(struct.pack('<12fH', *n, *a, *b, *c, 0))
-    header = b'MuseAutoLab concept; units mm; Y up; not fabrication validated'.ljust(80, b' ')
+    header = b'AutoLab concept; units mm; Y up; not fabrication validated'.ljust(80, b' ')
     return header + struct.pack('<I', len(triangles)) + b''.join(triangles)

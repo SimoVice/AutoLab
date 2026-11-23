@@ -77,7 +77,7 @@ service request or permission to buy anything.
 
 ## Verification
 
-Saved examples can be reopened through **Open project** without a Meta key:
+Saved examples can be reopened through **Open project** without an OpenAI key:
 [TipOne](examples/tip-rack-tipone-project.json),
 [Opentrons](examples/tip-rack-opentrons-project.json), and the
 [24-position printed holder](examples/tip-rack-printed-project.json).
@@ -85,7 +85,7 @@ The [plate plus Opentrons rack example](examples/tip-rack-plate-project.json)
 comes from the additional real Italian browser check and retains unknown printer
 availability for the next user to answer.
 They are draft review states from synthetic tests. TipOne and the holder were
-selected through real Meta chat; the Opentrons chat requested placement approval,
+selected through live model chat; the Opentrons chat requested placement approval,
 then an explicit deterministic choice accepted it. The
 [printed-holder guide](examples/tip-rack-printed-guide.html) is also directly
 readable, with a [Markdown version](examples/tip-rack-printed-guide.md).
@@ -99,7 +99,7 @@ dimensions, revision-specific instructions, Save/Open and mobile layout:
 .venv/Scripts/python.exe tests/browser_tip_options.py
 ```
 
-The browser's model extraction is a deterministic fixture; it is not live Meta
+The browser's model extraction is a deterministic fixture; it is not live model
 evidence. The separate bounded real-model evaluation records each provider call
 and its usage. CAD tests reopen actual solids and check openings and support
 material. These developer checks do not substitute for independent user research

@@ -4,7 +4,7 @@ Runs the actual product FastAPI app and domain code, keeps the chat
 ``generate_turn`` fake from ``browser_stub_server`` and replaces only
 ``app.vision.analyze_image`` with a deterministic fake and
 ``app.design_agent.propose_layout`` with the shared explicit offline layout
-fixture. No Meta call occurs.
+fixture. No model call occurs.
 """
 
 from __future__ import annotations
@@ -87,7 +87,7 @@ async def _fake_analyze_image(image, **kwargs) -> tuple[dict, dict]:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run the stubbed vision MuseAutoLab API for browser testing."
+        description="Run the stubbed vision AutoLab API for browser testing."
     )
     parser.add_argument(
         "--host", default="127.0.0.1", help="Loopback host to bind (default 127.0.0.1)."

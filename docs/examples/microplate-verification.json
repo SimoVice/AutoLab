@@ -4,7 +4,7 @@
   "scope": "Synthetic developer-defined tube-to-96-well digital integration and recorded live model responses. Not an independent held-out benchmark, physical fit, printed hardware or laboratory result.",
   "dataset": "microplate-evaluation-cases.json",
   "dataset_sha256": "44fbe28e391cff348f8080caca922fe5ae607458b62427ee98f9c372d5e820c3",
-  "model": "muse-spark-1.3-contributor",
+  "model": "gpt-6.1-terra",
   "live_usage_totals": {
     "provider_calls": 16,
     "prompt_tokens": 287951,

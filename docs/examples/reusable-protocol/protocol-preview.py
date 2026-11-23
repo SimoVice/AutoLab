@@ -20,7 +20,7 @@ def validate_protocol(configuration: dict) -> list[dict]:
         or configuration.get("kind") != "declarative_pipetting_protocol"
         or configuration.get("execution_enabled") is not False
     ):
-        raise ValueError("Expected a non-executable MuseAutoLab protocol template, schema 1.")
+        raise ValueError("Expected a non-executable AutoLab protocol template, schema 1.")
     binding = configuration.get("binding") or {}
     if not isinstance(binding, dict):
         raise ValueError("The hardware binding must be an object.")

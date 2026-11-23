@@ -100,7 +100,7 @@ def run(url):
         page.reload(wait_until="networkidle")
         expect(page.locator(".connection-dot.connected")).to_be_visible()
         assert (
-            page.evaluate("sessionStorage.getItem('museautolab.hosted.synthetic-account')")
+            page.evaluate("sessionStorage.getItem('autolab.hosted.synthetic-account')")
             == saved_project["id"]
         )
         with page.expect_download() as download:

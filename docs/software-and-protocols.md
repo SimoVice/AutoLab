@@ -2,7 +2,7 @@
 
 The hardware proposal and the current preparation recipe are separate. A new
 recipe can reuse compatible hardware; a different tool, vessel or working area
-may require a design revision. MuseAutoLab currently calculates direct dilutions
+may require a design revision. AutoLab currently calculates direct dilutions
 and guides upstream protocol programming. It does not run a physical robot.
 
 ## Approve and program
@@ -31,7 +31,7 @@ You can also ask in ordinary chat:
 > current design and preparation unchanged.
 
 A software-only question should preserve the recipe and hardware. Natural-language
-program changes use the configured Meta service and its allowance; entering a
+program changes use the configured OpenAI service and its allowance; entering a
 recipe in the form, local calculation and playback do not require a new model
 request. Assistant
 replies display headings, lists, emphasis, code and ordinary links as Markdown;
@@ -50,13 +50,13 @@ states do not report a measured completion percentage or physical operation.
 
 For a separately authored Opentrons Python protocol, the documented
 [simulation command](https://docs.opentrons.com/python-api/reference/execute-simulate/)
-is `opentrons_simulate protocol.py`. It does not accept MuseAutoLab's JSON template
+is `opentrons_simulate protocol.py`. It does not accept AutoLab's JSON template
 or turn the local preview into an executable robot protocol. Source pages were
 checked on 2026-10-31; follow their current installation/version requirements.
 
 Aliquoting, transfers and serial dilutions are useful upstream programming tasks.
 Support depends on the actual platform, tool, labware and authored protocol;
-their mention does not add those workflows to MuseAutoLab's arithmetic engine.
+their mention does not add those workflows to AutoLab's arithmetic engine.
 
 ## Download and preview the current recipe
 
@@ -106,10 +106,10 @@ The feature check passed **48 focused offline tests** and an isolated
 real-app browser flow, covering route guidance, second-recipe continuity,
 revision-bound downloads, standalone preview validation and preservation of the
 saved project while opening the guide. Desktop/mobile browser checks verified
-source links, downloads and no document overflow. Meta was not called in those
+source links, downloads and no document overflow. Live model inference was not called in those
 checks.
 
-The application also completed two actual Muse Spark Contributor calls through
+The application also completed two actual reasoning-model calls through
 its in-process API path: a software-only inquiry preserved the whole project,
 then the second recipe above produced revision 13 while preserving hardware
 geometry and suppliers. Calls took 10.750 and 9.219 seconds and consumed 54,933

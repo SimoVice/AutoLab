@@ -1,4 +1,4 @@
-"""Explicit offline proposals; these fixtures are not Meta or hardware evidence."""
+"""Explicit offline proposals; these fixtures are not live model or hardware evidence."""
 
 from app.domain import apply_update, new_project
 from app.engineering import EngineeringUpdate, apply_engineering_update

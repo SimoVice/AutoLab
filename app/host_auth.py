@@ -17,7 +17,7 @@ from urllib.parse import urlsplit
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-COOKIE = "__Host-museautolab-session"
+COOKIE = "__Host-autolab-session"
 SESSION_SECONDS = 8 * 3600
 MAX_LOGIN_BYTES = 4096
 
@@ -238,9 +238,9 @@ class HostAuth:
 
 def install_host_auth(app: FastAPI) -> None:
     """Install before serving. Invalid hosted configuration aborts startup."""
-    mode = os.environ.get("MUSEAUTOLAB_HOSTED", "0")
+    mode = os.environ.get("AUTOLAB_HOSTED", "0")
     if mode not in {"0", "1"}:
-        raise RuntimeError("MUSEAUTOLAB_HOSTED must be 0 or 1.")
+        raise RuntimeError("AUTOLAB_HOSTED must be 0 or 1.")
     if mode == "0":
 
         @app.get("/api/auth/status")
@@ -248,10 +248,10 @@ def install_host_auth(app: FastAPI) -> None:
             return {"enabled": False, "authenticated": True}
 
         return
-    origin = os.environ.get("MUSEAUTOLAB_AUTH_ORIGIN", "")
-    username = os.environ.get("MUSEAUTOLAB_AUTH_USERNAME", "")
-    verifier = os.environ.get("MUSEAUTOLAB_AUTH_PASSWORD_HASH", "")
-    secret = os.environ.get("MUSEAUTOLAB_AUTH_SIGNING_SECRET", "")
+    origin = os.environ.get("AUTOLAB_AUTH_ORIGIN", "")
+    username = os.environ.get("AUTOLAB_AUTH_USERNAME", "")
+    verifier = os.environ.get("AUTOLAB_AUTH_PASSWORD_HASH", "")
+    secret = os.environ.get("AUTOLAB_AUTH_SIGNING_SECRET", "")
     parsed = urlsplit(origin)
     if (
         parsed.scheme != "https"
@@ -266,11 +266,11 @@ def install_host_auth(app: FastAPI) -> None:
         or len(secret) < 32
     ):
         raise RuntimeError("Hosted authentication requires valid server-only configuration.")
-    session_directory = os.environ.get("MUSEAUTOLAB_AUTH_SESSION_DIRECTORY", "").strip()
+    session_directory = os.environ.get("AUTOLAB_AUTH_SESSION_DIRECTORY", "").strip()
     if not session_directory:
         storage = (
-            os.environ.get("MUSEAUTOLAB_LIBRARY_DIRECTORY", "").strip()
-            or os.environ.get("MUSEAUTOLAB_DATABASE_PATH", "").strip()
+            os.environ.get("AUTOLAB_LIBRARY_DIRECTORY", "").strip()
+            or os.environ.get("AUTOLAB_DATABASE_PATH", "").strip()
         )
         if not storage:
             raise RuntimeError("Hosted authentication requires private persistent session storage.")

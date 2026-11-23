@@ -136,7 +136,7 @@ Required deliverable: Measure the actual pipette and design its retention, actua
 Complete when: Review dimensioned adapter drawings, actuator selection and collision/force checks.
 
 Source: [Science Jubilee laboratory tools](<https://github.com/machineagency/science-jubilee/tree/bb918fa78f300f57cc379a80731cfca7bdb55c66>) · checked 2026-10-28
-No Science Jubilee control code or CAD is installed in MuseAutoLab. A reference workflow is not a compatible ready-made adapter or verified liquid-handling result.
+No Science Jubilee control code or CAD is installed in AutoLab. A reference workflow is not a compatible ready-made adapter or verified liquid-handling result.
 Attribution: Machine Agency; MIT (repository); upstream hardware has separate licensing.
 
 ## Review the tube envelope and custom rack geometry
@@ -405,7 +405,7 @@ Status: needs_design
 Prerequisites: source-parts, upstream-frame, frame, motion-pipette, rack-inputs, rack-print, rack-fit, rack-placement, tip-rack-coupon, printed-tip-rack, racks, controller, cold-bay, inspection-extension
 
 - Review every engineering task and retain the upstream build/setup records for the actual configuration.
-- Review preparation.csv and automation/preview.py as a logical liquid-transfer trace only. MuseAutoLab has no control/physics adapter for the selected Jubilee or OT-2 route.
+- Review preparation.csv and automation/preview.py as a logical liquid-transfer trace only. AutoLab has no control/physics adapter for the selected Jubilee or OT-2 route.
 - Physical operation needs an approved hardware integration and process verification record.
 
 Checks:

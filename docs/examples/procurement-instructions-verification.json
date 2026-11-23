@@ -3,10 +3,10 @@
   "checked_on": "2026-10-30",
   "scope": "US catalog retrieval and generated technical review instructions; digital software evidence only",
   "recorded_project": "demo-video-project.json",
-  "live_meta": {
+  "live_model": {
     "request_count": 1,
-    "model_selected": "muse-spark-1.3-contributor",
-    "interface": "Actual browser; real server-side Meta request",
+    "model_selected": "gpt-6.1-terra",
+    "interface": "Actual browser; real server-side model request",
     "prompt": "Using the refreshed US catalog report, explain the current partial subtotal, what remains unpriced, and the next three sourcing or build steps for this revision. Open the build instructions. Keep the machine layout and all preparation quantities unchanged.",
     "assistant_response": "Current US report 427984b8 (2026-10-30T13:02Z, expires 13:17Z) partial subtotal $591.86 fresh: 8 fresh-priced of 15 rows. Includes 6 Jubilee candidate kits + Peltier $34.95 + probe $9.95. Pinned CAD, pipette, fixtures, power, arm/mount/camera unpriced/missing - not full machine cost. Next: 1) Review revision 9 in Build instructions design-review step. 2) Verify frame/motor/motion/hardware kit variants vs pinned BOM. 3) Specify pipette, labware, power, cooling block and arm interfaces per needs_design tasks. Layout and prep unchanged.\n\nOpen Build instructions for this revision's sourced build/setup steps, required engineering tasks and immediate HTML, Markdown or JSON downloads. Parts & pricing shows US supplier prices, dates and unresolved items.",
     "accepted": true,

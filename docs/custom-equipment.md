@@ -1,10 +1,10 @@
 # Design and review custom laboratory equipment
 
-[Back to MuseAutoLab](../README.md) · [Platform and scope](platform.md)
+[Back to AutoLab](../README.md) · [Platform and scope](platform.md)
 
 Describe what happens to the samples, which items move, the equipment you already
 have and the space available. Explain what a successful operation looks like.
-MuseAutoLab uses that brief to propose an assembly you can inspect and revise.
+AutoLab uses that brief to propose an assembly you can inspect and revise.
 
 ## Develop the proposed assembly
 

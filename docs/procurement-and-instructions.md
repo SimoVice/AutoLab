@@ -1,6 +1,6 @@
 # US pricing and project instructions
 
-MuseAutoLab keeps an accepted design, supplier observations and build guidance
+AutoLab keeps an accepted design, supplier observations and build guidance
 connected to the same project revision. Pricing is a read-only check of reviewed
 public US supplier listings, in USD. It does not order parts.
 
@@ -63,7 +63,7 @@ The current guide is a technical review and setup aid. Custom mounting, actuatio
 loads, tolerances and hardware validation still require engineering work. **Review
 step**, **Follow source guide** and **Design required** distinguish these scopes.
 No invented fasteners, tightening values or calibrated operating instructions are
-inferred from a schematic. Muse Image is separate presentation artwork and does not
+inferred from a schematic. AI-generated illustration is separate presentation artwork and does not
 author the technical geometry or this guide.
 
 ![Revision-specific insert step, source links and concrete unresolved interface work](images/build-instructions-step.png)
@@ -93,7 +93,7 @@ there is no unrestricted web crawling or model-generated supplier URL. See
 
 ## Early project cost planning ranges
 
-When a design becomes available, the interface requests one revision-bound Spark
+When a design becomes available, the interface requests one revision-bound model
 cost estimate automatically. Unchanged purchase scopes retain their valid ranges
 across recipe edits; new or changed scopes receive new allowances. An explicit
 manual refresh can request a fresh estimate. Each request makes at most one model

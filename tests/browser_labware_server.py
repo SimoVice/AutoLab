@@ -1,4 +1,4 @@
-"""Offline Meta extraction for the real parametric rack browser journey."""
+"""Offline model extraction for the real parametric rack browser journey."""
 
 import sys
 from pathlib import Path

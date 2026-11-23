@@ -1,7 +1,7 @@
 """Pinned Jubilee foundation and its coordinate mapping.
 
 The upstream STEP is a rigid, unscaled reference assembly; it does not validate
-the interfaces or operation of a MuseAutoLab design. See the asset manifest.
+the interfaces or operation of an AutoLab design. See the asset manifest.
 """
 
 from __future__ import annotations

@@ -1,7 +1,7 @@
 """OpenAI models supported by the application and their chat request settings."""
 
 DEFAULT_MODEL = "gpt-6.1-terra"
-REASONING_MODEL = "gpt-6.1-sol"
+REASONING_MODEL = "gpt-6.2-sol"
 VOICE_MODEL = "gpt-transcribe"
 IMAGE_MODEL = "gpt-image-2.6-flare"
 
@@ -11,7 +11,7 @@ AGENT_MODELS = {
         "description": "Default for project conversations, design and photo inspection.",
     },
     REASONING_MODEL: {
-        "label": "GPT-6.1 Sol",
+        "label": "GPT-6.2 Sol",
         "description": "Optional reasoning model for complex design decisions.",
     },
 }

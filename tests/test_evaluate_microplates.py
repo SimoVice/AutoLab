@@ -1,4 +1,4 @@
-"""Offline harness safety and invariant audits; no frozen prompt rehearsals/Meta."""
+"""Offline harness safety and invariant audits; no frozen prompt rehearsals or live model calls."""
 
 import asyncio
 import json

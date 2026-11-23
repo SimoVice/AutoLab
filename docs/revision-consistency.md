@@ -1,12 +1,12 @@
 # Keeping a project consistent as it changes
 
-MuseAutoLab develops custom laboratory automation setups from a user's needs.
+AutoLab develops custom laboratory automation setups from a user's needs.
 This review exercises its liquid-handling adapter: the same project moves from
 tubes to a plate, changes a supplier product, takes another recipe and gains an
 inspection module. The question is whether the model, costs and instructions
 still describe the same accepted design after each edit.
 
-The check ran on 2026-11-01–02 with the real application, Muse Spark Contributor
+The check ran on 2026-11-01–02 with the real application, the reasoning model
 and public US supplier retrieval. Laboratory inputs were synthetic. Browser
 regression checks used controlled responses separately from the live flow.
 

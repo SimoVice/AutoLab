@@ -184,7 +184,7 @@ def run(url):
                 "0.25 mg/mL"
             )
             expect(page.get_by_role("cell", name="150", exact=True)).to_be_visible()
-            checks.append("typed-next-recipe-and-offline-muse-chat-update-canonical-protocol")
+            checks.append("typed-next-recipe-and-offline-model-chat-update-canonical-protocol")
             page.get_by_role("button", name="3D design", exact=True).click()
             expect(page.get_by_role("heading", name="Design assistant", exact=True)).to_be_visible()
             page.get_by_role("button", name="Software & protocols", exact=True).click()

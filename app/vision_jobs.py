@@ -698,7 +698,7 @@ async def inspection_archive(
             "The example was resized/recompressed, metadata removed and boxes added;\n"
             "the photograph and its adaptations remain under CC BY-SA 4.0.\n"
             "This attribution does not assign that license to other uploaded photos\n"
-            "or to the surrounding software. It is not MuseAutoLab hardware.\n"
+            "or to the surrounding software. It is not AutoLab hardware.\n"
         ).encode("utf-8"),
     }
     manifest = {name: hashlib.sha256(payload).hexdigest() for name, payload in files.items()}

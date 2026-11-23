@@ -33,7 +33,7 @@ def run(url):
         page.route("**/assets/jubilee-*.glb", slow_source)
         page.route("**/api/models?*", lambda route: route.fulfill(json={
             "models": [{
-                "id": "gpt-6.1-terra", "label": "Muse Spark", "available": True,
+                "id": "gpt-6.1-terra", "label": "GPT-6.1 Terra", "available": True,
             }],
             "default_model": "gpt-6.1-terra",
             "active_model": "gpt-6.1-terra",

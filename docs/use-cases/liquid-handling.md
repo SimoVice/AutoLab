@@ -2,10 +2,10 @@
 
 [Back to the platform](../platform.md) · [Documentation map](../README.md)
 
-MuseAutoLab's first deeply implemented use case is preparing aliquots and direct
+AutoLab's first deeply implemented use case is preparing aliquots and direct
 dilutions. It demonstrates how a laboratory task can connect to a sourced machine
 choice, editable layout, component selection, assembly guidance and software
-planning. These adapters and examples do not define every MuseAutoLab project.
+planning. These adapters and examples do not define every AutoLab project.
 
 ## Start from the process
 
@@ -79,7 +79,7 @@ control integration. See [software, recipes and remaining programming work](../s
 
 After [starting the app](../getting-started.md), download a JSON file and choose
 **Open project**. Recorded projects use synthetic laboratory inputs and can be
-inspected without configuring Meta. With a key configured, the app may request a
+inspected without configuring OpenAI. With a key configured, the app may request a
 fresh planning estimate; stored supplier observations remain dated.
 
 - [Plate project with a second recipe](../examples/software-protocol-project.json).

@@ -132,7 +132,7 @@ def project_source_basis(project: dict) -> dict:
             if project.get("design", {}).get("platform") else
             "Imported Jubilee platform CAD with a custom liquid-preparation insert"
             if project.get("design", {}).get("foundation") else
-            "MuseAutoLab legacy custom XYZ workstation; no imported base in this revision"
+            "AutoLab legacy custom XYZ workstation; no imported base in this revision"
             if supported
             else "Workflow discovery; no machine adapter chosen"
         ),

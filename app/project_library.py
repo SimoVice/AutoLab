@@ -18,14 +18,14 @@ _pending_commits: set[str] = set()
 
 
 def library_directory() -> str | None:
-    return os.environ.get("MUSEAUTOLAB_LIBRARY_DIRECTORY", "").strip() or None
+    return os.environ.get("AUTOLAB_LIBRARY_DIRECTORY", "").strip() or None
 
 
 def configured() -> bool:
     if database_path() and library_directory():
         raise RuntimeError("Choose either SQLite or a JSON project directory, not both.")
-    if os.environ.get("MUSEAUTOLAB_MODAL_VOLUME_NAME", "").strip() and not library_directory():
-        raise RuntimeError("Modal storage requires MUSEAUTOLAB_LIBRARY_DIRECTORY.")
+    if os.environ.get("AUTOLAB_MODAL_VOLUME_NAME", "").strip() and not library_directory():
+        raise RuntimeError("Modal storage requires AUTOLAB_LIBRARY_DIRECTORY.")
     return bool(database_path() or library_directory())
 
 
@@ -37,7 +37,7 @@ def _modal_volume(name: str):
 
 
 def _commit_volume() -> None:
-    name = os.environ.get("MUSEAUTOLAB_MODAL_VOLUME_NAME", "").strip()
+    name = os.environ.get("AUTOLAB_MODAL_VOLUME_NAME", "").strip()
     if name:
         _modal_volume(name).commit()
 
@@ -115,7 +115,7 @@ def _persist_file(payload: dict, title: str | None) -> dict:
 
 
 def database_path() -> str | None:
-    return os.environ.get("MUSEAUTOLAB_DATABASE_PATH", "").strip() or None
+    return os.environ.get("AUTOLAB_DATABASE_PATH", "").strip() or None
 
 
 @contextmanager

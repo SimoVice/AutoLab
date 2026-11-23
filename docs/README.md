@@ -1,8 +1,8 @@
-# MuseAutoLab documentation
+# AutoLab documentation
 
 [Back to the project](../README.md)
 
-MuseAutoLab is a platform for designing laboratory automation around a
+AutoLab is a platform for designing laboratory automation around a
 researcher's tasks, equipment and constraints. Start with the platform workflow;
 use the engineering references for the adapters relevant to your project.
 
@@ -16,7 +16,6 @@ use the engineering references for the adapters relevant to your project.
 ## Understand the engineering
 
 - [Source-grounding policy](source-grounding.md) — what each adapter imports and what it proposes.
-- [Original Meta design integration](meta-design.md) records how the hackathon prototype proposed and checked layouts.
 - [Project evolution](project-evolution.md) — revision and extension behavior, with its recorded version scope.
 - [Models, voice and illustrations](multimodal-demo.md) — account access, editable dictation and presentation artwork.
 - [Verification](verification.md) — actual software, model, supplier and export outcomes with limitations.
@@ -40,10 +39,3 @@ choices are not required inputs for other laboratory tasks.
 - [Jubilee CAD asset](jubilee-cad-asset.md) — pinned source, meshes, geometry and reproduction.
 - [Component sources](component-sources.md) — reviewed references and unresolved interfaces.
 - [Saved projects and CAD examples](use-cases/liquid-handling.md#open-an-example-or-follow-the-walkthrough) — synthetic inputs for inspecting the implemented path.
-
-## Earlier presentation material
-
-The [three-minute core video](https://raw.githubusercontent.com/SimoVice/MuseAutoLab/main/docs/video/museautolab-demo.mp4)
-shows an earlier liquid-handling milestone. Use the current README and platform
-guide for the product direction and current scope; historical recordings do not
-establish hardware operation.

@@ -39,7 +39,7 @@ import type { ConversationEntry, PhysicsView, PreparationPlan, ProcurementReport
 
 const WELCOME = 'What would you like to automate in your lab? Describe the task and what makes it difficult.';
 const LIQUID_NOTE = 'Develop a sequence of operations, or use this brief to design the equipment, model its moving parts and prepare assembly instructions.';
-const LOCAL_PROJECT = 'museautolab.workspace.v1';
+const LOCAL_PROJECT = 'autolab.workspace.v1';
 
 type OpenedProject = ProjectResponse & { conversation?: { role: 'user' | 'assistant'; content: string }[] };
 type ActionRun = { kind: string; status: 'accepted' | 'rejected' | 'failed' | 'ready'; message?: string; model?: string };
@@ -80,11 +80,11 @@ async function request(path: string, body?: unknown, signal?: AbortSignal, reque
   return data as ProjectResponse;
 }
 
-function Icon({ name, size = 18 }: { name: 'send' | 'rotate' | 'spark' | 'check' | 'cube'; size?: number }) {
+function Icon({ name, size = 18 }: { name: 'send' | 'rotate' | 'assistant' | 'check' | 'cube'; size?: number }) {
   const paths: Record<typeof name, React.ReactNode> = {
     send: <><path d="m4 12 15-8-5 16-3-6-7-2Z" /><path d="m11 14 8-10" /></>,
     rotate: <><path d="M20 12a8 8 0 1 1-2.3-5.7" /><path d="M20 4v5h-5" /></>,
-    spark: <><path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3Z" /><path d="m19 15 .7 2.3L22 18l-2.3.7L19 21l-.7-2.3L16 18l2.3-.7L19 15Z" /></>,
+    assistant: <><path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3Z" /><path d="m19 15 .7 2.3L22 18l-2.3.7L19 21l-.7-2.3L16 18l2.3-.7L19 15Z" /></>,
     check: <path d="m5 12 4 4L19 6" />,
     cube: <><path d="m12 3 8 4.5v9L12 21l-8-4.5v9L12 3Z" /><path d="m4 7.5 8 4.5 8-4.5M12 12v9" /></>,
   };
@@ -162,7 +162,7 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
     }
   };
   const [savedTitle, setSavedTitle] = useState('');
-  const runtimeKey = `museautolab.hosted.${account}`;
+  const runtimeKey = `autolab.hosted.${account}`;
   const [project, setProject] = useState<Project | null>(null);
   const [procurementReport, setProcurementReport] = useState<ProcurementReport | null>(null);
   const [messages, setMessages] = useState<ConversationEntry[]>([{ id: 0, role: 'assistant', text: WELCOME }]);
@@ -464,7 +464,7 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `museautolab-r${project.revision}.json`;
+      link.download = `autolab-r${project.revision}.json`;
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       setStorageNotice('Project saved to file, including the latest design and conversation.');
@@ -485,7 +485,7 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: raw,
       });
       const data = await response.json() as OpenedProject & { detail?: string };
-      if (!response.ok || !data.project) throw new Error(data.detail ?? 'Choose a valid MuseAutoLab project file.');
+      if (!response.ok || !data.project) throw new Error(data.detail ?? 'Choose a valid AutoLab project file.');
       sessionRef.current += 1;
       setAgentPhase(null);
       setActionRuns([]);
@@ -849,9 +849,9 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
     <StepIllustrationProvider scope={`${runtimeKey}:${project?.id ?? ''}:${project?.revision ?? ''}`}>
     <div className="app-shell">
       <header className="topbar">
-        <a className="brand" href="/" aria-label="MuseAutoLab home">
+        <a className="brand" href="/" aria-label="AutoLab home">
           <span className="brand-mark"><span /><span /><span /><span /></span>
-          <span>Muse<span className="brand-accent">Auto</span>Lab</span>
+          <span><span className="brand-accent">Auto</span>Lab</span>
         </a>
         <div className="topbar-center"><span className="topbar-divider" /> Workspace <span className="topbar-slash">/</span> <strong>{savedTitle || headerLabel}</strong></div>
         <div className="topbar-end">
@@ -1033,7 +1033,7 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
         </section>
 
         <aside id="chat-workspace" className="conversation-panel" aria-labelledby="conversation-title">
-          <div className="chat-heading"><div className="assistant-emblem"><Icon name="spark" size={19} /></div><div><h2 id="conversation-title">Design assistant</h2><p>Let’s make your workflow easier.</p></div><span className="chat-status">{project?.status === 'confirmed' ? 'Confirmed' : 'Draft'}</span>
+          <div className="chat-heading"><div className="assistant-emblem"><Icon name="assistant" size={19} /></div><div><h2 id="conversation-title">Design assistant</h2><p>Let’s make your workflow easier.</p></div><span className="chat-status">{project?.status === 'confirmed' ? 'Confirmed' : 'Draft'}</span>
             {project && <ProjectNotes key={project.id} project={project} busy={uiBusy}
               onSave={(id, notes) => setProject(current => current?.id === id ? { ...current, project_notes: notes } : current)} />}
           </div>
@@ -1041,8 +1041,8 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
           <div className="conversation-scroll" ref={conversation}>
             <div className="chat-date">Your design conversation</div>
             {messages.map((message, index) => <div key={message.id} className={`message-row ${message.role}`}>
-              {message.role === 'assistant' && <span className="message-avatar"><Icon name="spark" size={13} /></span>}
-              <div><span className="message-author">{message.role === 'assistant' ? 'MuseAutoLab' : 'You'}</span><div className="message-bubble">{message.role === 'assistant' ? <AssistantMessage text={message.text} /> : message.text}</div>{message.role === 'assistant' && index === messages.length - 1 && project?.cold_transfer_extension && /preview plate transfer|cold.transfer|refrigerator|fridge/i.test(message.text) && <button type="button" className="stage-expand-button chat-preview-button" title={coldPreviewUnavailable ? coldPreviewPlan?.message : undefined} disabled={uiBusy || coldPreviewUnavailable} onClick={previewPlateTransfer}>Preview plate transfer</button>}{message.references && message.references.length > 0 && <div className="message-references">{message.references.map((ref) => <a key={ref.id} href={ref.url} target="_blank" rel="noopener noreferrer">{ref.title} ↗</a>)}</div>}</div>
+              {message.role === 'assistant' && <span className="message-avatar"><Icon name="assistant" size={13} /></span>}
+              <div><span className="message-author">{message.role === 'assistant' ? 'AutoLab' : 'You'}</span><div className="message-bubble">{message.role === 'assistant' ? <AssistantMessage text={message.text} /> : message.text}</div>{message.role === 'assistant' && index === messages.length - 1 && project?.cold_transfer_extension && /preview plate transfer|cold.transfer|refrigerator|fridge/i.test(message.text) && <button type="button" className="stage-expand-button chat-preview-button" title={coldPreviewUnavailable ? coldPreviewPlan?.message : undefined} disabled={uiBusy || coldPreviewUnavailable} onClick={previewPlateTransfer}>Preview plate transfer</button>}{message.references && message.references.length > 0 && <div className="message-references">{message.references.map((ref) => <a key={ref.id} href={ref.url} target="_blank" rel="noopener noreferrer">{ref.title} ↗</a>)}</div>}</div>
             </div>)}
             {project?.tip_rack_request?.alternatives_requested && hasFoundation && (!agentPhase || agentPhase === 'ready') &&
               <button type="button" className="stage-expand-button chat-preview-button" onClick={() => openHardware('parts', true)}>Compare tip racks in Parts &amp; prices</button>}

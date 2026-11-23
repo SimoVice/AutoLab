@@ -1,6 +1,6 @@
 # Presentation flow: tubes, plate, suppliers and instructions
 
-Checked on 2026-10-31 with the actual browser, application, Muse Spark Contributor
+Checked on 2026-10-31 with the actual browser, application, reasoning model
 and public supplier retrieval. Laboratory inputs are synthetic; the replies and
 resulting application states were real. This is digital integration evidence,
 not a physical demonstration or an independent user study.

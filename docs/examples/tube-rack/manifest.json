@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "created_on": "2026-10-30",
-  "scope": "Synthetic declared tube dimensions; actual Meta interpretation and digitally verified CAD. No measured labware, printed fit or laboratory validation.",
+  "scope": "Synthetic declared tube dimensions; actual model interpretation and digitally verified CAD. No measured labware, printed fit or laboratory validation.",
   "project_file": "../parametric-tube-rack-project.json",
   "project_revision": 12,
   "count": 12,

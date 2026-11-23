@@ -4,8 +4,7 @@
 
 Actual application screenshot with explicit offline model fixtures. Source meshes,
 the API, geometry compilation and saved/reopened state are real; the screenshot
-is not a live Meta or hardware result. Live synthetic model outputs are recorded
-separately in [the chat example](examples/chat-foundation-live.json).
+is not a live model or hardware result.
 
 The pinned, losslessly compressed Jubilee V2.2.2 STEP in `app/assets` is the
 upstream work by Joshua Vasquez / Machine Agency, University of Washington,

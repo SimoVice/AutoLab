@@ -1,8 +1,8 @@
 # A platform for custom laboratory automation
 
-[Back to MuseAutoLab](../README.md) · [Documentation](README.md)
+[Back to AutoLab](../README.md) · [Documentation](README.md)
 
-MuseAutoLab is being built to help researchers turn repetitive laboratory work
+AutoLab is being built to help researchers turn repetitive laboratory work
 into automation setups designed around their own needs. The starting point is
 the work: what needs to happen, what the lab already has, and what would make
 the result useful. The machine follows from those requirements.
@@ -89,7 +89,7 @@ checks. The viewer, per-part models, parts list, guide and controller data deriv
 from the accepted design revision. Source links identify reviewed candidates;
 the generated solids remain custom geometry.
 
-Current designs are digital proposals. Jubilee and OT-2 have no MuseAutoLab
+Current designs are digital proposals. Jubilee and OT-2 have no AutoLab
 hardware-control or physics adapter. Custom assemblies have a real JSON/HTTP
 gateway client, but require a separately implemented, commissioned device
 gateway and explicit action mappings before hardware use. A logical simulation,

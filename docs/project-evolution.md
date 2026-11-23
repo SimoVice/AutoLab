@@ -2,35 +2,35 @@
 
 # Save, reopen and expand a workstation
 
-MuseAutoLab keeps a project useful beyond its first model. Save a workstation,
-reopen its accepted design, then ask Meta to add an inspection capability while
+AutoLab keeps a project useful beyond its first model. Save a workstation,
+reopen its accepted design, then ask the model to add an inspection capability while
 preserving the original machine components.
 
 ![Actual app view of the inspection extension](images/inspection-extension.png)
 
-The view reopens a synthetic cooled workstation and the recorded real Meta
+The view reopens a synthetic cooled workstation and the recorded real model
 extension proposal described below. Rendering it made no additional model call.
 
 ## Walkthrough
 
 1. Start with the general laboratory problem, such as time spent preparing aliquots
-   and dilutions by hand. Discuss equipment and choose quantities later with Meta.
-2. Use **Develop design with Meta**. The checked proposal appears after the design
+   and dilutions by hand. Discuss equipment and choose quantities later in chat.
+2. Use **Develop design**. The checked proposal appears after the design
    progress indicator completes.
 3. Request smaller-space or cooling revisions and develop a fresh accepted layout.
 4. Choose **Save project**. Use **Open project** to reopen that file, including after
    restarting the backend. Refresh also resumes the latest project on this browser.
 5. In **Expand this workstation**, describe the inspection request and choose
-   **Add arm and camera with Meta**. The accepted extension creates a draft revision;
+   **Add arm and camera**. The accepted extension creates a draft revision;
    the original workstation geometry and component IDs are preserved.
 6. Inspect the new parts, use **Preview inspection sweep** or its slider, and review
    the recorded model, rationale and checks. **Labware photo check** separately
-   analyzes an actual uploaded/captured image through Meta with human review.
+   analyzes an actual uploaded/captured image through the vision model with human review.
 7. Confirm the ready preparation design and generate project files. An extended
    package includes 24 files, adding `inspection-module.json` and
    `inspection-poses.csv` to the base 22-file package.
 
-## What Meta chooses
+## What the model chooses
 
 The runtime model proposes two link lengths (180–500 mm each), mast height
 (400–550 mm), rationale and assumptions. Application code supplies the two-link
@@ -58,7 +58,7 @@ the accepted workstation, increments revision and invalidates confirmation/files
 
 ## Portable state
 
-The JSON format is `museautolab-project`, schema 1, compiler 2, with a 256 KB cap.
+The JSON format is `autolab-project`, schema 1, compiler 2, with a 256 KB cap.
 Compiler-1 files are upgraded to a draft revision requiring reconfirmation after
 the [manufacturer-envelope update](source-grounding.md).
 It stores canonical brief/workflow/summary inputs, selected catalogue variants,
@@ -71,7 +71,7 @@ keys and non-finite values, and rebuilds derived data using the current compiler
 and geometry checks. Each opening receives a new runtime ID and preserves
 `lineage_id`, preventing an older runtime's jobs from attaching to a reopened
 project. Saved provenance is historical metadata supplied by the file; reopening
-does not authenticate its claimed model or call Meta again. The new geometry
+does not authenticate its claimed model or call the model again. The new geometry
 checks are computed locally. Outputs and photo reviews must be regenerated.
 
 The last snapshot is also stored in local browser storage. **New project** clears
@@ -84,20 +84,19 @@ file is incompatible, Open project or New project remains available.
 | Responsibility | Source |
 | --- | --- |
 | Snapshot validation and rebuild | `app/project_storage.py` |
-| Bounded runtime Meta extension loop | `app/inspection.py` |
+| Bounded runtime inspection extension loop | `app/inspection.py` |
 | Fixed architecture, inverse kinematics and shared primitives | `app/inspection_geometry.py` |
 | Same-revision viewer and CAD | `web/src/Scene.tsx`, `app/cad_exports.py` |
 | Extension documents and assembly review | `app/assembly.py` |
 | Workstation-only physics scope | `app/physics.py` |
 
-On 2026-10-28 one real Contributor request over a synthetic cooled workstation
+On 2026-10-28 one live model request over a synthetic cooled workstation
 fixture proposed 320 + 320 mm links and a 450 mm mast. It passed on its first
 attempt; reported usage was 856 input / 575 output tokens, with 7.203 seconds for
 the design operation in that run. Reopening reproduced its exact geometry; CAD
 export contained 20 components and the nominal **workstation-only** MuJoCo result
 passed. The base layout was a synthetic fixture; this check does not establish a
-live end-to-end machine-design benchmark. The [curated response](examples/inspection-extension-live.json)
-retains the actual proposal, checks and usage, without credentials or private records.
+live end-to-end machine-design benchmark.
 
 Run the meaningful offline checks in the locked environment:
 

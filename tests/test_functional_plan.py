@@ -74,7 +74,7 @@ def test_normal_endpoint_cache_revision_model_and_project_preservation(
             assert response.status_code == 200
             assert len(calls) == 2
             assert calls[-1]['process'] == 'Weigh sealed vials'
-            session.model = 'gpt-6.1-sol'
+            session.model = 'gpt-6.2-sol'
             assert (await post_plan(client, session)).status_code == 200
             assert len(calls) == 3
     asyncio.run(journey())

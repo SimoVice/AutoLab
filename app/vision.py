@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from app.model_client import ModelClientError, ModelSettings, recorded_model
 from app.openai_models import chat_parameters
 
-LOGGER = logging.getLogger("museautolab.vision")
+LOGGER = logging.getLogger("autolab.vision")
 
 MAX_DECODED_BYTES = 4 * 1024 * 1024
 MAX_MEGAPIXELS = 16_000_000

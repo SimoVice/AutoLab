@@ -180,7 +180,7 @@ async def execute_cad(project: dict) -> dict[str, bytes]:
     if len(raw) > MAX_INPUT_BYTES:
         raise CadWorkerError("The CAD project exceeds the 8 MB worker input limit.")
     async with _cad_slot():
-        with TemporaryDirectory(prefix="museautolab-cad-") as directory:
+        with TemporaryDirectory(prefix="autolab-cad-") as directory:
             root = Path(directory)
             source, result, diagnostic = (
                 root / "project.json",

@@ -13,9 +13,9 @@ from pathlib import Path
 
 import modal
 
-APP_NAME = "museautolab"
-SECRET_NAME = "museautolab-host"
-VOLUME_NAME = "museautolab-projects"
+APP_NAME = "autolab"
+SECRET_NAME = "autolab-host"
+VOLUME_NAME = "autolab-projects"
 ROOT = Path(__file__).resolve().parents[1]
 EXACT_FILES = {
     "Dockerfile",
@@ -77,7 +77,7 @@ def stage_context(root: Path, destination: Path) -> Path:
 app = modal.App(APP_NAME, include_source=False)
 image = None
 if modal.is_local():
-    _staging = tempfile.TemporaryDirectory(prefix="museautolab-modal-context-")
+    _staging = tempfile.TemporaryDirectory(prefix="autolab-modal-context-")
     context = stage_context(ROOT, Path(_staging.name))
     image = modal.Image.from_dockerfile(context / "Dockerfile", context_dir=context)
 
@@ -85,10 +85,10 @@ volume = modal.Volume.from_name(VOLUME_NAME)  # Existing Volume only; never auto
 server_secrets = modal.Secret.from_name(
     SECRET_NAME,
     required_keys=[
-        "MUSEAUTOLAB_AUTH_ORIGIN",
-        "MUSEAUTOLAB_AUTH_USERNAME",
-        "MUSEAUTOLAB_AUTH_PASSWORD_HASH",
-        "MUSEAUTOLAB_AUTH_SIGNING_SECRET",
+        "AUTOLAB_AUTH_ORIGIN",
+        "AUTOLAB_AUTH_USERNAME",
+        "AUTOLAB_AUTH_PASSWORD_HASH",
+        "AUTOLAB_AUTH_SIGNING_SECRET",
         "OPENAI_API_KEY",
     ],
 )
@@ -106,14 +106,14 @@ server_secrets = modal.Secret.from_name(
     secrets=[server_secrets],
     volumes={"/data": volume},
     env={
-        "MUSEAUTOLAB_HOSTED": "1",
-        "MUSEAUTOLAB_LIVE_PLATFORM_PRICES": "1",
-        "MUSEAUTOLAB_LIBRARY_DIRECTORY": "/data/projects",
-        "MUSEAUTOLAB_MODAL_VOLUME_NAME": VOLUME_NAME,
+        "AUTOLAB_HOSTED": "1",
+        "AUTOLAB_LIVE_PLATFORM_PRICES": "1",
+        "AUTOLAB_LIBRARY_DIRECTORY": "/data/projects",
+        "AUTOLAB_MODAL_VOLUME_NAME": VOLUME_NAME,
     },
 )
 @modal.concurrent(max_inputs=10)
-@modal.asgi_app(label="museautolab")
+@modal.asgi_app(label="autolab")
 def web():
     from app.hosted import create_app
 

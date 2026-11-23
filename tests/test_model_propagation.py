@@ -74,7 +74,7 @@ def test_real_chat_design_and_extension_payloads_share_session_selection(monkeyp
         return response(content, payload["model"])
 
     install_transport(monkeypatch, handler)
-    session = api.ProjectSession(project=project, model="gpt-6.1-sol")
+    session = api.ProjectSession(project=project, model="gpt-6.2-sol")
     api._sessions[project["id"]] = session
     with TestClient(api.app) as client:
         path = f"/api/projects/{project['id']}"
@@ -86,17 +86,17 @@ def test_real_chat_design_and_extension_payloads_share_session_selection(monkeyp
             },
         )
         assert designed.status_code == 200, designed.text
-        assert designed.json()["design_run"]["model"] == "gpt-6.1-sol"
+        assert designed.json()["design_run"]["model"] == "gpt-6.2-sol"
         chat = client.post(path + "/messages", json={"message": "Add inspection camera."})
         assert chat.status_code == 200, chat.text
         result = chat.json()
-        assert result["usage"]["model"] == "gpt-6.1-sol"
-        assert result["action_runs"][0]["model"] == "gpt-6.1-sol"
-        assert result["project"]["inspection_extension"]["provenance"]["model"] == "gpt-6.1-sol"
+        assert result["usage"]["model"] == "gpt-6.2-sol"
+        assert result["action_runs"][0]["model"] == "gpt-6.2-sol"
+        assert result["project"]["inspection_extension"]["provenance"]["model"] == "gpt-6.2-sol"
     assert calls == [
-        ("layout_proposal", "gpt-6.1-sol"),
-        ("requirement_turn", "gpt-6.1-sol"),
-        ("inspection_proposal", "gpt-6.1-sol"),
+        ("layout_proposal", "gpt-6.2-sol"),
+        ("requirement_turn", "gpt-6.2-sol"),
+        ("inspection_proposal", "gpt-6.2-sol"),
     ]
     assert project == original
     assert ModelSettings.load().model == DEFAULT_MODEL
@@ -112,15 +112,15 @@ def test_background_vision_captures_model_and_deduplicates_per_model(monkeypatch
 
     install_transport(monkeypatch, handler)
     project = layout_project()
-    session = api.ProjectSession(project=project, model="gpt-6.1-sol")
+    session = api.ProjectSession(project=project, model="gpt-6.2-sol")
     api._sessions[project["id"]] = session
     with TestClient(api.app) as client:
         base = f"/api/projects/{project['id']}/inspections"
         body = {"project_revision": project["revision"], "image_data_url": _make_data_url()}
         first = client.post(base, json=body).json()
         one = _wait_job(client, base + "/" + first["id"])
-        assert one["result"]["model"] == "gpt-6.1-sol"
-        assert one["result"]["usage"]["model"] == "gpt-6.1-sol"
+        assert one["result"]["model"] == "gpt-6.2-sol"
+        assert one["result"]["usage"]["model"] == "gpt-6.2-sol"
         repeated = client.post(base, json=body).json()
         assert repeated["id"] == first["id"]
         session.model = "gpt-6.1-terra"
@@ -128,7 +128,7 @@ def test_background_vision_captures_model_and_deduplicates_per_model(monkeypatch
         two = _wait_job(client, base + "/" + second["id"])
         assert second["id"] != first["id"]
         assert two["result"]["model"] == "gpt-6.1-terra"
-    assert observed == ["gpt-6.1-sol", "gpt-6.1-terra"]
+    assert observed == ["gpt-6.2-sol", "gpt-6.1-terra"]
 
 
 def test_child_task_retains_selection_after_parent_scope_ends():
@@ -139,10 +139,10 @@ def test_child_task_retains_selection_after_parent_scope_ends():
             await gate.wait()
             return ModelSettings.load().model
 
-        with using_model("gpt-6.1-sol"):
+        with using_model("gpt-6.2-sol"):
             task = asyncio.create_task(child())
         gate.set()
-        assert await task == "gpt-6.1-sol"
+        assert await task == "gpt-6.2-sol"
         assert ModelSettings.load().model == DEFAULT_MODEL
 
     asyncio.run(run())

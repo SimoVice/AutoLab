@@ -385,7 +385,7 @@ def _deck_model_source(components: list[dict], project_id, revision) -> str:
         + f"    return {pformat(plate_interfaces, width=88)}\n\n"
         + "def build():\n    return Compound(children=[_standalone_solid(c) "
         + "for c in COMPONENTS_MM], "
-        + 'label="MuseAutoLab concept")\n\n'
+        + 'label="AutoLab concept")\n\n'
         + "def build_deck():\n    return _build_solid(next(c for c in COMPONENTS_MM "
         + 'if c["id"] == "base"))\n\n'
         + 'if __name__ == "__main__":\n'
@@ -582,7 +582,7 @@ def build_cad_files(project: dict) -> dict[str, bytes]:
     # Export a separate root shape: a child attached to an assembly cannot be
     # exported alone by build123d's XDE writer without its parent hierarchy.
     deck_solid = _build_solid(deck)
-    workstation = Compound(children=solids, label="MuseAutoLab concept")
+    workstation = Compound(children=solids, label="AutoLab concept")
     if project["design"].get("foundation") is None and not workstation.is_valid:
         raise ValueError("Workstation compound is invalid.")
 

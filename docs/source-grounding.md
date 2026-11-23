@@ -1,6 +1,6 @@
 # Reviewed sources for models and recommendations
 
-MuseAutoLab now supplies Meta with a curated library of primary references and
+AutoLab supplies the model with a curated library of primary references and
 binds sourced dimensions to the actual geometry. Each record identifies its
 publisher, consulted date, supported facts, permitted interpretation and limits.
 Open projects also have an immutable repository revision and a license source.
@@ -36,7 +36,7 @@ Compatible instrument pipettes, labware, exact capacity and calibration must be
 confirmed. Prices, stock and delivery need an official configuration/quote.
 
 Ordinary chat first collects needs and compares curated alternatives. Only an
-explicit platform choice enables its design adapter. Meta supplies contextual
+explicit platform choice enables its design adapter. The model supplies contextual
 reasons/tradeoffs and bounded proposals; the application provides allowlisted
 source facts and performs checks. Purchase/assembly guidance follows the chosen
 route and links official BOM/configuration/setup material. This is a bounded
@@ -68,7 +68,7 @@ simulation is implemented for OT-2; failed requests preserve the previous projec
 
 ## Runtime advice and evidence
 
-Meta receives the reviewed library in chat, layout design and inspection expansion.
+The model receives the reviewed library in chat, layout design and inspection expansion.
 Chat recommendations have a bounded typed `reference_id` plus a reason. Unknown
 IDs are rejected; the server resolves the official title, link, revision and scope
 from its own library. The model cannot supply a replacement URL or license in that
@@ -87,11 +87,10 @@ pose. Version 1/2 inputs and conversation reopen, but their incompatible prior
 design/extension is cleared, creating a draft that asks for a new design in chat.
 Unknown compiler versions remain rejected. Old jobs/results are not restored.
 
-Before the source-CAD integration on 2026-10-28, one real Meta advice request recommended the two pinned open projects
-without inventing opening concentrations/volumes. A separate real layout request
+Before the source-CAD integration on 2026-10-28, one live model advice request recommended the two pinned open projects
+without inventing opening concentrations/volumes. A separate live layout request
 accepted on its first attempt and exported the documented motor geometry and the
-same source manifest to CAD. The [curated live example](examples/source-grounding-live.json)
-records the actual outputs/usage over shareable synthetic inputs. Two calls reported
+same source manifest to CAD. Two calls reported
 7,706 input and 1,686 output tokens; no billing/accuracy claim is inferred.
 
 ## Verification and maintenance
@@ -101,7 +100,7 @@ records the actual outputs/usage over shareable synthetic inputs. Two calls repo
 .venv/Scripts/python.exe tests/browser_foundation.py
 ```
 
-The browser fixture stubs Meta only; actual source resolution, API, geometry,
+The browser fixture stubs the model transport only; actual source resolution, API, geometry,
 selection, source-file download, saving and reopening run locally. Existing CAD,
 physics, photo and project-evolution suites remain regression checks.
 

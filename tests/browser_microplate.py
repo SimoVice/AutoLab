@@ -1,6 +1,6 @@
 """One-chat labware switching with real UI/compiler/state and offline extraction.
 
-No Meta, supplier request or heavy CAD generation. Conflicting recipe volumes
+No live model, supplier request or heavy CAD generation. Conflicting recipe volumes
 remain unchanged until the user explicitly changes them through ordinary chat.
 """
 

@@ -69,7 +69,7 @@ export default function IllustrationPanel({ projectId, revision, capability, dis
     {illustration && <figure className="illustration-result">
       <img src={illustration.image_data_url} alt={`AI-generated presentation illustration for project revision ${revision}`} />
       <figcaption><strong>AI-generated illustration — not a technical drawing</strong><span>Revision {revision} · {illustration.model}. Review against the original model view; visual details may differ.</span></figcaption>
-      <a className="illustration-download" href={illustration.image_data_url} download={`museautolab-illustration-r${revision}.png`}>Download illustration PNG</a>
+      <a className="illustration-download" href={illustration.image_data_url} download={`autolab-illustration-r${revision}.png`}>Download illustration PNG</a>
     </figure>}
     {reference && <details className="illustration-reference"><summary>Compare with original model view</summary><img src={reference} alt={`Original 3D model view for project revision ${revision}`} /><p>Original model view used for this request.</p></details>}
   </details>;

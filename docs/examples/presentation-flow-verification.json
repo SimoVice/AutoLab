@@ -1,13 +1,13 @@
 {
   "date": "2026-10-31",
-  "scope": "Actual Chromium browser, application/API/compiler, Muse Spark Contributor responses and supplier retrieval using synthetic shareable laboratory inputs. Bounded software integration evidence; no physical validation or external-user study.",
+  "scope": "Actual Chromium browser, application/API/compiler, reasoning model responses and supplier retrieval using synthetic shareable laboratory inputs. Bounded software integration evidence; no physical validation or external-user study.",
   "tested_source": {
     "baseline_commit": "807755bc9ab84d89bf4ed7966bbfadea02e0e9df",
     "patch_sha256": "b0f675033706778ccf2b03f337748c7e9d6c619115bf512cbd22f2514d34d96d",
     "patch_definition": "git diff --binary HEAD -- app/labware.py tests/test_labware_grounding.py",
     "scope": "Source and regression changes tested on the baseline; excludes unrelated local video work and packaging documentation."
   },
-  "model": "muse-spark-1.3-contributor",
+  "model": "gpt-6.1-terra",
   "inputs": {
     "stock_mg_ml": 5,
     "targets_mg_ml": [

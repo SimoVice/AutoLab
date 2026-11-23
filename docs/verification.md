@@ -2,8 +2,8 @@
 
 ## Original equipment from two research briefs, 2026-11-03
 
-Two synthetic briefs went through the ordinary design conversation with Muse
-Spark Contributor. One asked for a sliding optical reader for translucent
+Two synthetic briefs went through the ordinary design conversation with the
+reasoning model. One asked for a sliding optical reader for translucent
 strips on a 550 mm bench. The other asked for a rotating card carrier under a
 fixed camera on a 700 mm bench. Model responses from these runs were also
 replayed to reproduce failures and check corrections without new inference.
@@ -52,7 +52,7 @@ budget without another inference request.
 
 ## Cross-workflow check, 2026-11-02
 
-Four Muse Spark 1.3 Contributor responses used 36,534 reported tokens on
+Four reasoning model responses used 36,534 reported tokens on
 synthetic inputs. A request to receive sealed vials on an 800 mm bench produced
 weighing, label printing and barcode reading in that order. A second request put
 the barcode reader first. Both actual outputs went through the normal chat
@@ -109,11 +109,11 @@ liquid-handling or whole-application verification records below.
 ## Requests in the user's own words
 
 On 2026-11-02 we tried two previously untested requests in the browser with
-Muse Spark Contributor. Each started from a separate synthetic project.
+the reasoning model. Each started from a separate synthetic project.
 
 | Project at the start | User's words | Observed result |
 | --- | --- | --- |
-| Two platforms offered, 1.5 mL tubes, 800 mm bench | “I'll take the one our technicians can put together from parts. Lay it out for the microcentrifuge tubes we discussed, just for pipetting.” | Muse resolved the choice to Jubilee. The first run exposed an equipment-ownership check that discarded the choice. After the fix, the same interpretation and a new layout response produced a tube workstation with the width limit intact and no arm. Equipment ownership stayed unspecified. |
+| Two platforms offered, 1.5 mL tubes, 800 mm bench | “I'll take the one our technicians can put together from parts. Lay it out for the microcentrifuge tubes we discussed, just for pipetting.” | The model resolved the choice to Jubilee. The first run exposed an equipment-ownership check that discarded the choice. After the fix, the same interpretation and a new layout response produced a tube workstation with the width limit intact and no arm. Equipment ownership stayed unspecified. |
 | Jubilee with an accepted 96-well plate | “When the run is over, park the finished plate in its own chilled cabinet.” | The project added the dedicated refrigerator and plate gripper. The selected plate and preparation parameters stayed unchanged. |
 
 Four actual provider responses used 39,714 tokens in total. Replaying responses
@@ -132,7 +132,7 @@ The full foundation CAD export was outside this run.
 A fresh conversation compared buildable and assembled options for pipetting
 with 1.5 mL tubes on an 800 mm bench. In the next turn the user chose “the open
 platform” and requested a source rack, sample rack, tip rack and tip waste bin.
-With Muse Spark Contributor, the first turn kept both choices open. The second
+With the reasoning model, the first turn kept both choices open. The second
 accepted Jubilee and generated the requested tube workstation without adding
 an arm. The two chat responses and one layout response used 31,710 tokens.
 
@@ -192,7 +192,7 @@ animation-frame intervals of 8.3 ms and p95 of 8.8 ms, with no interval over
 50 ms or page error. This measures scheduling on the test computer while the
 scene moves, not rendered GPU frames or physical-device performance. Browser
 screenshots and numerical checks do not validate collisions, dispensing,
-calibration or machine operation. No new Meta response was required for these
+calibration or machine operation. No new model response was required for these
 deterministic checks or playback.
 
 ## Revision consistency and workspace review — 2026-11-02
@@ -222,7 +222,7 @@ failure/reset cleanup, supplier selection and unchanged canvas identity. Build,
 typecheck and Ruff passed. The final Impeccable source scan retained the same six
 context-reviewed findings, with no new finding.
 
-Two actual Muse Spark Contributor API calls passed through the isolated real
+Two actual reasoning model API calls passed through the isolated real
 application: a software question preserved the entire current recipe and design;
 a second recipe preserved hardware and suppliers while changing A1/B1/C1 to
 30/6/3 µL stock plus 120/144/147 µL diluent. Observed request times were 10.750 s
@@ -271,7 +271,7 @@ fixed before the final pass. Typecheck/production build and Ruff on the changed
 tests passed. The existing large JavaScript bundle advisory remains.
 
 These are developer browser checks with synthetic language/price responses and
-the real application/compiler, not new live Meta results, independent human-use
+the real application/compiler, not new live model results, independent human-use
 measurements or hardware validation. No backend, geometry or pricing algorithm
 changed. The refinement was accepted after a separate local trial; the previous
 version is retained for rollback.
@@ -291,7 +291,7 @@ the parked pipette intersected taller deck labware, the contextual answer
   Old layouts migrate to a draft and require reconfirmation. Source CAD is unchanged.
   This is geometric screening, not validated travel, pickup or physical collision testing.
 - Natural contextual yes/no replies are source-validated within the pending
-  printer question. The real Spark call for "Yes I do" passed with unchanged
+  printer question. The live model call for "Yes I do" passed with unchanged
   geometry and preparation values.
 - Missing hardware prices receive model planning ranges with declared scope and
   assumptions, separate from supplier observations. The first real call estimated
@@ -328,8 +328,8 @@ proposed rack-only movement is displayed before acceptance. See the
 [walkthrough and saved examples](tip-rack-options.md) and the
 [curated test record](examples/tip-rack-verification.json).
 
-The final frozen real-Meta round passed **8/8** developer-defined cases using
-Spark Contributor, followed by strict replay of the same responses with no new
+The final frozen live-model round passed **8/8** developer-defined cases using
+the reasoning model, followed by strict replay of the same responses with no new
 inference. It covers alternatives, contextual no, yes with missing measurements,
 both commercial references, a 24-position custom holder, an unsupported product
 and impossible dimensions. The Opentrons direct request asks for movement
@@ -388,7 +388,7 @@ without separate nested React roots. The repeatable mixed-module check verifies
 20/20 correct visible labels, camera alignment, pointer passthrough and no page
 errors or unmount warning. The existing presentation test also passed again on
 desktop/mobile, including resize and reduced motion. The final frontend build
-passed. These rendering changes did not alter the backend, geometry or Meta
+passed. These rendering changes did not alter the backend, geometry or model
 contract; their later workspace fingerprint is recorded separately.
 
 ## Latest interface: expanded 3D presentation
@@ -412,7 +412,7 @@ usability research or a claim of subjective preference.
 
 The focus, accessibility/capture, microplate and resources browser regressions also
 passed. The production frontend build (including TypeScript checks) and Ruff passed.
-No new Meta inference, catalog refresh or heavy CAD run was needed for this
+No new model inference, catalog refresh or heavy CAD run was needed for this
 presentation change; the earlier backend and CAD results below retain their own
 release scope. The build's existing large-bundle advisory remains.
 
@@ -442,11 +442,11 @@ preparations remain three preparations; a format change never silently changes
 their volume or creates 96 tasks. See the [demonstration sequence](microplate-switching.md)
 and [curated evidence](examples/microplate-verification.json).
 
-Two frozen rounds each made eight actual Spark Contributor requests. The first
+Two frozen rounds each made eight actual reasoning model requests. The first
 passed structural checks, but manual review found stale assistant prose describing
 an earlier 2 mL recipe when the canonical project contained 200 µL. The application
 now derives the bounded labware-change status reply from the accepted post-action
-state, while Meta still interprets the request. This distinction is recorded in
+state, while the model still interprets the request. This distinction is recorded in
 `assistant_message_origin`; unrelated conversation remains model-generated.
 
 The second round's original evaluator recorded **7/8**, with the PCR-plate negative
@@ -477,7 +477,7 @@ evaluation script defaults to no inference:
 ```
 
 An explicit `--live --max-calls 8 --output <new-output-directory>` uses separately
-configured Meta access. Source/input fingerprints and each actual attempt are
+configured model access. Source/input fingerprints and each actual attempt are
 retained. The synthetic 200 µL starting fixture is prepared deterministically;
 the recorded one-message switch itself uses the real model/API path.
 
@@ -540,7 +540,7 @@ portable state, and individual rack/fit-coupon CAD files. The
 [curated verification record](examples/parametric-rack-verification.json) retains
 the exact frozen dataset, working-tree fingerprints, failures, usage and limits.
 
-The **first frozen real-Meta round failed all six supported cases**: the dimensional
+The **first frozen live-model round failed all six supported cases**: the dimensional
 source validator rejected correct values quoted in ordinary multi-fact phrases.
 The impossible-rim case also returned an extraction error; the unsupported-capacity
 case preserved the project. None produced an accepted incorrect rack. The source
@@ -563,7 +563,7 @@ checked. No inference was made for browser screenshots or the final package.
 The evaluation harness defaults to a dry run. For reproduction from the repository
 root, run `.venv/Scripts/python.exe scripts/evaluate_labware.py --dataset docs/examples/labware-evaluation-cases.json`
 with the pinned environment. Adding `--live --max-calls 12 --output <new-output-directory>`
-makes actual requests using separately configured Meta access. Outputs are never
+makes actual requests using separately configured model access. Outputs are never
 overwritten. Each round freezes source and input hashes; recorded responses may
 also be replayed without new inference. Live model responses are not deterministic.
 
@@ -602,17 +602,16 @@ remain unverified. Custom fabrication is unpriced.
 ## Earlier core journey
 
 The earlier core digital demo passed the software and package checks below. Three varied
-fresh Meta journeys have now completed. The third completed through the actual browser
+fresh live-model journeys have now completed. The third completed through the actual browser
 on October 30 after explicit equipment clarification, followed by a real impossible-width
 rejection that preserved the confirmed project. The earlier incomplete attempt remains
 recorded. These are bounded integration observations, not a model-reliability benchmark
 or laboratory validation.
 
 Start with the [reviewer guide](demo-guide.md) and the
-[video project](examples/demo-video-project.json). Opening that project and generating
-its files need no API key. Fresh conversation requires separately configured Meta
-access. The [three-minute captioned video](video/README.md) is available publicly;
-the interactive product runs locally.
+[saved synthetic project](examples/demo-video-project.json). Opening that project and generating
+its files need no API key. Fresh conversation requires separately configured model
+access; the interactive product runs locally.
 
 ## Software and reconstruction
 
@@ -623,7 +622,7 @@ the interactive product runs locally.
 | Ruff | Passed | `app`, `tests`, `scripts` |
 | TypeScript / Vite production build | Passed | Production frontend compilation |
 | Three current browser flows | Passed | Pricing/instructions, both platform engineering routes, and project files; expiry, safe rereads, failed refresh, downloads, revision guards, chat navigation and mobile |
-| Eight earlier multimodal browser flows, October 30 | Passed at that milestone | Foundation, engineering choice, general platform, vision, scene focus, project files, multimodal lifecycle and scene accessibility; explicit offline Meta fixtures, real app/API where required by each test |
+| Eight earlier multimodal browser flows, October 30 | Passed at that milestone | Foundation, engineering choice, general platform, vision, scene focus, project files, multimodal lifecycle and scene accessibility; explicit offline model fixtures, real app/API where required by each test |
 | Isolated Windows reconstruction | Passed | New Python and JavaScript environments from unchanged locks; dependency/environment checks, production build and actual recorded-project open/re-save without credentials |
 | Recorded-project browser review | Passed | Revision 9, real local source meshes, retained accepted proposals and 100/50/10 µL stock volumes; no new model request or page error |
 
@@ -659,7 +658,7 @@ the bound procurement snapshot and Markdown guide.
 ## US catalogs, instructions and current package
 
 The [curated verification record](examples/procurement-instructions-verification.json)
-contains actual primary-source observations and the real Meta question/answer.
+contains actual primary-source observations and the live model question/answer.
 The full recorded revision-9 project retrieved **8 fresh prices across 15 groups**:
 six candidate Jubilee kits and two selected cooling components, totaling **USD
 591.86**. Seven groups remain unpriced. This is a dated partial subtotal, including
@@ -668,7 +667,7 @@ An independent smaller project returned six priced foundation candidates, USD 54
 The supplier registry contains fifteen exact SKU/variants; a selected project uses
 only applicable entries. No unrestricted search, supplier login or purchase occurred.
 
-One real Contributor request through the app explained the current report and opened
+One live model request through the app explained the current report and opened
 **Build instructions**. The response distinguished missing costs and unresolved
 interfaces; revision 9, confirmed state and all thirteen portable canonical fields
 remained unchanged. No additional model request was made. Token counters were not
@@ -695,7 +694,7 @@ suite and document/export tests cover the final source. See the [user flow and l
 ## Earlier video-project package evidence
 
 The app reopened the third fresh journey's own saved project and generated a new
-package with no Meta credentials configured. Exactly one export request ran. It
+package with no API credentials configured. Exactly one export request ran. It
 retained the same logical project, confirmed revision 9, 120 mm bed pose, 8 °C target,
 inspection extension and 200/100/20 µL stock volumes. This is separate from the
 earlier recorded example below.
@@ -711,7 +710,7 @@ earlier recorded example below.
 | STEP reopen time | 211.34 s; no independent regeneration of this exact final package |
 | Guide | Actual iframe and download; 9 SVGs × 19 legend entries within bounds |
 | Simulation | `not_run` |
-| Page errors / new Meta requests | 0 / 0 |
+| Page errors / new model requests | 0 / 0 |
 
 The uncut export recording is 151.16 s at 1440 × 1000, 25 fps and contains the entire
 real generation wait. The edited video identifies any omitted waits. Its portable
@@ -722,8 +721,8 @@ was unchanged and only one CAD export ran.
 
 ## Earlier verified package
 
-The app reopened the earlier recorded real-Meta project, confirmed revision **9**, and generated
-the package through its ordinary UI on October 30. No Meta call or export fixture was
+The app reopened the earlier recorded live-model project, confirmed revision **9**, and generated
+the package through its ordinary UI on October 30. No live model call or export fixture was
 used for this check.
 
 | Property | Observed value |
@@ -737,7 +736,7 @@ used for this check.
 | Source pose / expansion | 130 mm recorded bed drop; actual bed geometry and arm/camera group checked |
 | Assembly guide | All 19 legend entries inside each of 9 SVG view boxes; actual inline guide and HTML download exercised |
 | Standalone guide at 390 px | No horizontal page overflow |
-| Browser errors / new Meta calls | 0 / 0 |
+| Browser errors / new model calls | 0 / 0 |
 
 The final STEP reopen took 209.239 s. It did not independently regenerate that exact
 final package; standalone source regeneration is covered by the separate heavy suite.
@@ -750,85 +749,13 @@ contains the portable example and instructions needed to reproduce it. Raw test 
 original model responses, archives and detailed screenshots are retained locally;
 private workspace records and credentials are excluded from publication.
 
-## Real Meta rehearsals
+## Live-model and multimodal verification
 
-### October 30: third complete fresh journey
-
-The [new browser rehearsal](examples/delivery-third-rehearsal.json) completed on the
-published application code, using 11 Contributor calls: ten for the core journey and
-one for a 450 mm width request. That request was rejected with the entire confirmed
-project payload unchanged; conversation history retains the rejected request.
-
-The accepted project lowered the original bed from 100 to 120 mm, retained layout
-through an 8 °C cold-bay request, reopened correctly, added the arm/camera, calculated
-200/100/20 µL stock amounts and reached confirmed revision 9. The browser reported no
-JavaScript errors. Its [portable project](examples/demo-video-project.json) is separate
-from the earlier revision-9 example; revision numbers alone do not identify a project.
-
-New usage was 71,961 input plus 6,405 output tokens. Across the earlier and new runs,
-there were **68 physical attempts**, 67 provider responses and **480,928 reported tokens**
-(428,780 input / 52,148 output), plus the same one historical unknown consumption.
-The core chat turns totaled 72.437 s; the negative turn took 5.016 s. This excludes
-save/reopen/confirmation overhead and CAD export. The actual browser capture retained
-measured waits; its source recording is 108.8 s at 1440 × 1000.
-
-This satisfies the proposed count of three varied fresh complete journeys. The first
-preceded final parser hardening and was replayed offline through final checks; the
-second and third used the final backend live. It is not a claim of three independent
-fresh successes on identical historical code or a statistical reliability percentage.
-
-### October 29: initial rehearsals, retained unchanged
-
-The [curated rehearsal record](examples/delivery-rehearsal-summary.json) preserves the
-October 29 outcomes, failures, timings, code fingerprints and usage boundaries:
-
-- 57 physical Contributor attempts; 56 provider responses, all HTTP 200. A valid HTTP
-  response does not imply the application accepted its content or completed the journey.
-- 356,819 input and 45,743 output tokens reported. One interrupted request has unknown
-  consumption; the 402,562 reported total is a lower bound, not billing or credit balance.
-- Two complete fresh journeys and one recovered journey. The recovered one does not
-  count toward the proposed three-fresh-journey gate.
-- The first successful journey's ten recorded responses also passed an offline replay
-  through the final parser/compiler checks; replay makes no provider calls and its
-  historical token metadata is excluded from live totals. The second fresh run used
-  the final backend fingerprints.
-- The third fresh scenario omitted explicit equipment ownership. It remained incomplete
-  while the application requested clarification; no successful third run is claimed.
-
-Observed failures led to bounded source-text normalization, explicit current layout
-context and deterministic checks on requested layout preservation. These guards support
-a limited set of preserve/keep/retain/leave clauses, not universal language understanding.
-No Meta calls were made during the package/reconstruction checks. The separate October
-30 live browser rehearsal above accounts for its own 11 calls.
-
-## Multimodal completion and usability
-
-The account catalogue advertised Spark Contributor, Spark Standard, Wonder, Muse
-Voice Transcribe and Muse Image. Actual inference was checked separately. The
-[curated request record](examples/multimodal-verification.json) retains all twelve
-new calls: **6 text, 4 transcription and 2 image requests**, with no automatic
-provider retries. Text responses reported **61,249 tokens**; image responses
-reported **11,582 tokens** separately. The transcription endpoint exposes no token
-usage. These counts are not an invoice; remaining credit and actual charges were
-not inspected. Earlier core-journey totals remain historical and separate.
-
-| Live observation | Outcome and correction |
-| --- | --- |
-| Spark Standard selection and question about the saved project | Passed; actual reported model matched selection and project was unchanged |
-| Wonder saved-project question | Two responses failed strict source validation on ungrounded repeated values. Empty-update guidance was clarified; one subsequent live confirmation passed without changing the project. Validators remain strict; this is not a reliability benchmark |
-| Voice revision and silence probes | Correct 20 mm revision text; silence returned empty text. Neither transcription changed a project |
-| First browser voice-to-plan attempt | ASR preserved the quantities, but number words such as five and two invalidated the deterministic plan after Send. Added bounded English number/unit normalization with literal-source equivalence checks |
-| Final browser voice and explicit Send | Passed after visible removal of a duplicated phrase; plan ready, stock 200/100/20 µL, diluent 1800/1900/1980 µL, confirmed r9 and accepted geometry/arm unchanged; no engineering actions |
-| One image utility probe and one real app image | Both completed. App result downloaded byte-identically and retained its reference/revision. Small mechanical details differ, so images are presentation illustrations, not technical drawings |
-
-The final voice recording uses two declared segments: real synthetic microphone
-input through the actual AudioWorklet/ASR, then the actual transcript restored in
-a reopened copy of the same public r9 project, visibly corrected and sent once.
-The split was caused by the test script's narrow correction guard, not an app
-failure. There was no second ASR or hidden replacement of the failed earlier r10.
-The final ASR and Send observations took 4.297 s and 12.531 s respectively,
-including UI/checkpoint overhead. The real app image took 13.281 s. These are
-single-run observations, not latency guarantees or acoustic-recognition benchmarks.
+Historical end-to-end live rehearsals (2026-10-29 and 2026-10-30) exercised full
+conversational setup, width-limit rejection without altering confirmed projects,
+portable Save/Open recovery, voice dictation review before Send, and optional
+project illustration generation. Detailed private run logs are kept outside the
+public repository.
 
 Agent usability walkthroughs and offline browser tests verified:
 
@@ -843,29 +770,6 @@ Agent usability walkthroughs and offline browser tests verified:
   preserves an overlong transcript and stops microphone tracks.
 - Illustration cancellation, stale revision and error paths preserve the project;
   opening its section stops the sticky scene from obscuring the result.
-
-This is agent-driven usability testing, not external participant research. The
-full 539-test suite passed after quantity fixes. The last UI change was the scoped
-sticky-scene CSS rule; the full multimodal browser flow and production build passed
-again afterward. Other application source stayed unchanged during the final voice
-check. Source geometry and export logic are unchanged, so historical heavy-CAD
-checks were not repeated.
-
-## Three-minute demo video
-
-The publicly published MP4 records the earlier core journey with English captions.
-Final-video work is deferred until the product improvements are complete. The
-current website and verification include later capabilities that the historical
-video does not demonstrate. No newer video is claimed published in this update.
-
-## Remaining delivery work
-
-The requested selector, dictation, optional image integration, US catalog retrieval,
-instruction generation and usability fixes are implemented and verified in the
-scope above. Final-video work remains deferred. The [adaptable submission text](submission-draft.md)
-is prepared without entering Cerebral Valley, as requested. Actual form fields,
-entrant/track eligibility, declarations and accepted video hosting still require
-the entrant's check. No event login or submission has occurred.
 
 Current Jubilee and OT-2 routes have no physics or hardware-control adapter. CAD
 validity, layout checks, kinematic sweeps and dilution arithmetic do not establish

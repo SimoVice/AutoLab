@@ -1,5 +1,5 @@
 [project]
-name = "museautolab"
+name = "autolab"
 version = "0.1.0"
 description = "AI-assisted design of modular laboratory workstations"
 readme = "README.md"

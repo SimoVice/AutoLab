@@ -114,7 +114,10 @@ def run(url):
             # Drawers overlay the scene. Exclude their DOM focus rings so this
             # comparison observes the same WebGL frame and crop at each pose.
             value = page.locator("canvas").first.screenshot(
-                style=".stage-motion-disclosure, .engineering-inspector {visibility:hidden !important;}"
+                style=(
+                    ".stage-motion-disclosure, .engineering-inspector "
+                    "{visibility:hidden !important;}"
+                )
             )
             (OUTPUT / f"{name}.png").write_bytes(value)
             return hashlib.sha256(value).hexdigest()
@@ -285,7 +288,9 @@ def run(url):
             send(SWITCH_WITH_VOLUME)
             verify_motion("plate")
             send(ALTERNATIVES)
-            page.get_by_role("button", name="Compare tip racks in Parts & prices", exact=True).click()
+            page.get_by_role(
+                "button", name="Compare tip racks in Parts & prices", exact=True
+            ).click()
             panel = page.get_by_role("region", name="Tip rack alternatives")
             with page.expect_response(
                 lambda response: (
@@ -319,7 +324,9 @@ def run(url):
                 )
                 if mobile:
                     page.get_by_role("button", name="Chat", exact=True).click()
-                    entry = page.get_by_role("complementary").get_by_role("button", name="Preview plate transfer", exact=True)
+                    entry = page.get_by_role("complementary").get_by_role(
+                        "button", name="Preview plate transfer", exact=True
+                    )
                 else:
                     page.evaluate("window.scrollTo(0, 0)")
                     entry = page.locator(".stage-preview-button")
@@ -371,7 +378,9 @@ def run(url):
             bounds = cold["cold_transfer_extension"]["assembly_bounds"]
             width = bounds["max_mm"][0] - bounds["min_mm"][0]
             width_label = f"{width:,.1f}".removesuffix(".0")
-            expect(page.locator(".viewer-bottomline .footprint strong")).to_contain_text(f"{width_label} ×")
+            expect(
+                page.locator(".viewer-bottomline .footprint strong")
+            ).to_contain_text(f"{width_label} ×")
             expect(desktop.get_by_label("Operating sequence")).to_have_value("cold-transfer")
             details = desktop.locator("details", has=page.locator("#operation-time"))
             if details.get_attribute("open") is None:

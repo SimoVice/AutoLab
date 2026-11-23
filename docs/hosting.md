@@ -1,6 +1,6 @@
 # Host a private workspace
 
-MuseAutoLab serves the compiled interface, 3D assets and Python API at one HTTPS
+AutoLab serves the compiled interface, 3D assets and Python API at one HTTPS
 address. The server makes the OpenAI API requests. Everyone given the workspace
 login shares its project library and the configured OpenAI account's model allowance.
 
@@ -20,7 +20,7 @@ The hosted chat reads the Jubilee project's base-cost reference and the US Opent
 catalogue during liquid-handler discovery. Only the two public page addresses are requested.
 Successful readings are cached for six hours. When a site blocks access or its price cannot
 be identified, the chat uses the dated reviewed reference. For local operation, set
-`MUSEAUTOLAB_LIVE_PLATFORM_PRICES=1` to enable these reads.
+`AUTOLAB_LIVE_PLATFORM_PRICES=1` to enable these reads.
 
 ## Deploy on Modal
 
@@ -46,22 +46,22 @@ request before a live presentation.
 3. Create the private project volume once, in the same environment as the app:
 
    ```powershell
-   .\.local\modal\Scripts\modal.exe volume create museautolab-projects --version 2
+   .\.local\modal\Scripts\modal.exe volume create autolab-projects --version 2
    ```
 
-4. In Modal's **Secrets**, create `museautolab-host`. Fill in the following values
+4. In Modal's **Secrets**, create `autolab-host`. Fill in the following values
    through the private secret form. Generate the password verifier and signing value
    locally with the application Python environment, away from shared screens and logs.
 
    | Secret key | Value |
    | --- | --- |
    | `OPENAI_API_KEY` | API key from the OpenAI account that will run the models |
-   | `MUSEAUTOLAB_AUTH_USERNAME` | Workspace login name |
-   | `MUSEAUTOLAB_AUTH_PASSWORD_HASH` | Output of `python -c "from getpass import getpass; from app.host_auth import hash_password; print(hash_password(getpass()))"` |
-   | `MUSEAUTOLAB_AUTH_SIGNING_SECRET` | Output of `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
-   | `MUSEAUTOLAB_AUTH_ORIGIN` | Exact HTTPS origin for the endpoint, without a trailing slash |
+   | `AUTOLAB_AUTH_USERNAME` | Workspace login name |
+   | `AUTOLAB_AUTH_PASSWORD_HASH` | Output of `python -c "from getpass import getpass; from app.host_auth import hash_password; print(hash_password(getpass()))"` |
+   | `AUTOLAB_AUTH_SIGNING_SECRET` | Output of `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
+   | `AUTOLAB_AUTH_ORIGIN` | Exact HTTPS origin for the endpoint, without a trailing slash |
 
-   The endpoint label is `museautolab`. Use the full address printed by Modal,
+   The endpoint label is `autolab`. Use the full address printed by Modal,
    including its region when present. If the final hostname is unknown, use `https://unconfigured.invalid`
    for the first deployment. Sign-in stays closed to browser requests at the assigned
    domain until you replace this value and restart the app. [Modal endpoint URLs](https://modal.com/docs/guide/webhook-urls)
@@ -89,8 +89,8 @@ request before a live presentation.
 
 The root Dockerfile serves the same application. Use one process, one replica, HTTPS
 and a persistent volume mounted at `/data` writable by UID 10001. Configure the five
-secret values above, `MUSEAUTOLAB_HOSTED=1` and
-`MUSEAUTOLAB_DATABASE_PATH=/data/projects.sqlite3`. The image listens on
+secret values above, `AUTOLAB_HOSTED=1` and
+`AUTOLAB_DATABASE_PATH=/data/projects.sqlite3`. The image listens on
 `PORT` (default 7860) and exposes a minimal public readiness check at `/healthz`.
 Back up the volume privately. GitHub Pages can serve static files, while the full
 workspace requires a running Python backend and private storage.

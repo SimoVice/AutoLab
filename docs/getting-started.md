@@ -1,6 +1,6 @@
 # Getting started
 
-[Back to MuseAutoLab](../README.md) · [Development and checks](development.md)
+[Back to AutoLab](../README.md) · [Development and checks](development.md)
 
 ## Reproducible toolchain
 
@@ -28,8 +28,8 @@ Version authorities:
 Install Python 3.12.14 and Node.js 24.14.1 first, with npm 11.18.0. These commands assume the Python launcher `py` is available; otherwise substitute the full path to Python 3.12.14.
 
 ```powershell
-git clone https://github.com/SimoVice/MuseAutoLab.git
-Set-Location MuseAutoLab
+git clone https://github.com/SimoVice/AutoLab.git
+Set-Location AutoLab
 
 py -3.12 -c "import platform; assert platform.python_version() == '3.12.14'"
 node --version
@@ -108,12 +108,12 @@ if (-not (Test-Path -LiteralPath .env)) {
 | Variable | Template value | Purpose |
 | --- | --- | --- |
 | `OPENAI_API_KEY` | Empty | OpenAI API key, set on the backend |
-| `OPENAI_MODEL` | `gpt-6.1-terra` | Default conversation, design, cost estimation and photo model. The other supported choice is `gpt-6.1-sol`. |
+| `OPENAI_MODEL` | `gpt-6.1-terra` | Default conversation, design, cost estimation and photo model. The other supported choice is `gpt-6.2-sol`. |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | OpenAI API endpoint. Hosted sessions, dictation and illustrations require the official endpoint. |
 
 For an existing installation, **add `OPENAI_API_KEY` to your existing `.env`** or
 set it in the backend environment. Keep it out of the browser, `VITE_` variables
-and source control. The old Meta variables and credentials are ignored. Recorded
+and source control. Recorded
 projects retain their original model provenance when opened.
 
 Open **Model & settings** in the workspace to check the account's model list.
@@ -144,7 +144,7 @@ file and listing account models can be checked separately.
 
 ## Run locally
 
-After setup, open two PowerShell terminals **in the repository root** (the `MuseAutoLab` folder containing `web` and `.venv`). A Meta key is only needed for new conversation and other model-backed actions; opening a saved project and inspecting its 3D does not send inference.
+After setup, open two PowerShell terminals **in the repository root** (the `AutoLab` folder containing `web` and `.venv`). An OpenAI key is only needed for new conversation and other model-backed actions; opening a saved project and inspecting its 3D does not send inference.
 
 **Terminal 1 — backend API at `127.0.0.1:8000`.**
 
@@ -155,13 +155,13 @@ After setup, open two PowerShell terminals **in the repository root** (the `Muse
 **Terminal 2 — frontend website at `127.0.0.1:5173`.**
 
 ```powershell
-$env:MUSEAUTOLAB_API_TARGET = "http://127.0.0.1:8000"
+$env:AUTOLAB_API_TARGET = "http://127.0.0.1:8000"
 npm.cmd --prefix web run dev -- --port 5173 --strictPort
 ```
 
 Keep both terminals running, then **open [http://127.0.0.1:5173/](http://127.0.0.1:5173/) in your browser**. Port 8000 is the API, while port 5173 is the website you use. The frontend forwards `/api` requests to `http://127.0.0.1:8000`; the explicit target above also clears any different target inherited by that terminal. `--strictPort` makes the frontend stop with an error if 5173 is occupied instead of silently selecting another port.
 
-Meta requests consume the configured allowance; credentials stay in the backend. Active sessions and generated jobs are process-local. Save the project before stopping a server, then use Ctrl+C in its terminal.
+OpenAI requests consume the configured allowance; credentials stay in the backend. Active sessions and generated jobs are process-local. Save the project before stopping a server, then use Ctrl+C in its terminal.
 
 ### If a port is already in use
 
@@ -176,13 +176,13 @@ For example, if **8001 and 5174 are free**, start the backend in Terminal 1:
 Then set the matching API target **in the same PowerShell terminal that starts the frontend** (Terminal 2):
 
 ```powershell
-$env:MUSEAUTOLAB_API_TARGET = "http://127.0.0.1:8001"
+$env:AUTOLAB_API_TARGET = "http://127.0.0.1:8001"
 npm.cmd --prefix web run dev -- --port 5174 --strictPort
 ```
 
 Open [http://127.0.0.1:5174/](http://127.0.0.1:5174/). If only the website port changes, keep the API target at 8000. If the backend port changes, set the matching target before starting or restarting the frontend; an already running frontend does not pick up a changed terminal variable.
 
-To return to the standard ports, save the project and stop your alternative servers, then repeat the standard commands above. Explicitly setting `$env:MUSEAUTOLAB_API_TARGET = "http://127.0.0.1:8000"` before restarting the frontend resets its target to the backend on 8000.
+To return to the standard ports, save the project and stop your alternative servers, then repeat the standard commands above. Explicitly setting `$env:AUTOLAB_API_TARGET = "http://127.0.0.1:8000"` before restarting the frontend resets its target to the backend on 8000.
 
 ## Open an example first
 

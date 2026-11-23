@@ -1,4 +1,4 @@
-"""Bounded Meta proposal loop and same-project extension integration."""
+"""Bounded design proposal loop and same-project extension integration."""
 
 import asyncio
 from copy import deepcopy

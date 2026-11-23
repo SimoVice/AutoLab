@@ -36,7 +36,7 @@ def test_discovery_cache_and_credential_isolation():
 
     def respond(request):
         calls.append(request)
-        return httpx.Response(200, json={"data": [{"id": "gpt-6.1-sol"}]})
+        return httpx.Response(200, json={"data": [{"id": "gpt-6.2-sol"}]})
 
     async def run():
         async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
@@ -44,7 +44,7 @@ def test_discovery_cache_and_credential_isolation():
             first = await catalog.discover_catalog(settings=settings, client=client)
             first["ids"].clear()
             second = await catalog.discover_catalog(settings=settings, client=client)
-            assert second["ids"] == ["gpt-6.1-sol"]
+            assert second["ids"] == ["gpt-6.2-sol"]
             await catalog.discover_catalog(
                 settings=ModelSettings("test-key-2", settings.base_url, DEFAULT_MODEL),
                 client=client,
@@ -56,13 +56,13 @@ def test_discovery_cache_and_credential_isolation():
     assert all("test-key" not in fingerprint for fingerprint in catalog._cache)
 
 
-def test_existing_meta_configuration_cannot_supply_openai_credentials(monkeypatch):
+def test_legacy_provider_configuration_cannot_supply_openai_credentials(monkeypatch):
     for key in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL"):
         monkeypatch.delenv(key)
     monkeypatch.setattr(model_client, "dotenv_values", lambda path: {
-        "MODEL_API_KEY": "old-provider-secret",
-        "META_API_BASE_URL": "https://api.meta.ai/v1",
-        "META_MODEL": "muse-wonder-1.0",
+        "LEGACY_API_KEY": "old-provider-secret",
+        "LEGACY_API_BASE_URL": "https://legacy.invalid/v1",
+        "LEGACY_MODEL": "legacy-unsupported-model",
     })
     with pytest.raises(ModelClientError, match="OPENAI_API_KEY"):
         ModelSettings.load()
@@ -77,8 +77,8 @@ def test_old_server_session_changes_future_model_and_retains_provenance(monkeypa
     from evolution_fixtures import layout_project
 
     project = layout_project()
-    project["engineering_design"]["provenance"]["model"] = "muse-wonder-1.0"
-    saved = {"project": deepcopy(project), "history": [], "model": "muse-wonder-1.0"}
+    project["engineering_design"]["provenance"]["model"] = "legacy-unsupported-model"
+    saved = {"project": deepcopy(project), "history": [], "model": "legacy-unsupported-model"}
     monkeypatch.setattr(api.project_library, "load", lambda project_id: deepcopy(saved))
     session = api.session_for(project["id"])
     assert session.project == project
@@ -122,12 +122,12 @@ def test_selection_preserves_project_history_and_scope(monkeypatch):
         pid = original["id"]
         session = api._sessions[pid]
         before = deepcopy(session.project), deepcopy(session.history)
-        selected = client.post(f"/api/projects/{pid}/model", json={"model": "gpt-6.1-sol"})
+        selected = client.post(f"/api/projects/{pid}/model", json={"model": "gpt-6.2-sol"})
         assert selected.status_code == 200
         assert selected.json()["project"] == original
         assert (session.project, session.history) == before
         models = client.get("/api/models", params={"project_id": pid}).json()
-        assert models["active_model"] == "gpt-6.1-sol"
+        assert models["active_model"] == "gpt-6.2-sol"
         assert models["default_model"] == DEFAULT_MODEL
         assert models["capabilities"]["image"]["available"] is False
         assert "synthetic-test-key" not in str(models)
@@ -136,13 +136,13 @@ def test_selection_preserves_project_history_and_scope(monkeypatch):
             == 200
         )
         client.post(f"/api/projects/{other['id']}/messages", json={"message": "Help"})
-        assert observed == ["gpt-6.1-sol", DEFAULT_MODEL]
+        assert observed == ["gpt-6.2-sol", DEFAULT_MODEL]
         assert ModelSettings.load().model == DEFAULT_MODEL
 
 
 @pytest.mark.parametrize(
     "model,status",
-    [("arbitrary-provider-model", 422), ("gpt-image-2.6-flare", 422), ("gpt-6.1-sol", 409)],
+    [("arbitrary-provider-model", 422), ("gpt-image-2.6-flare", 422), ("gpt-6.2-sol", 409)],
 )
 def test_rejected_model_selection_does_not_mutate(monkeypatch, model, status):
     async def discover():
@@ -161,19 +161,19 @@ def test_rejected_model_selection_does_not_mutate(monkeypatch, model, status):
 
 def test_model_failure_preserves_selected_model_and_state(monkeypatch):
     async def fail(*args):
-        assert ModelSettings.load().model == "gpt-6.1-sol"
+        assert ModelSettings.load().model == "gpt-6.2-sol"
         raise ModelClientError("Synthetic provider failure")
 
     monkeypatch.setattr(api, "generate_turn", fail)
     with TestClient(api.app) as client:
         project = client.post("/api/projects").json()["project"]
         session = api._sessions[project["id"]]
-        session.model = "gpt-6.1-sol"
+        session.model = "gpt-6.2-sol"
         response = client.post(f"/api/projects/{project['id']}/messages", json={"message": "Help"})
         assert response.status_code == 502
         assert session.project == project
         assert session.history == []
-        assert session.model == "gpt-6.1-sol"
+        assert session.model == "gpt-6.2-sol"
         assert ModelSettings.load().model == DEFAULT_MODEL
 
 
@@ -184,12 +184,12 @@ def test_selection_is_task_local_and_exception_safe():
             return ModelSettings.load().model
 
     async def run():
-        assert await asyncio.gather(read("gpt-6.1-terra"), read("gpt-6.1-sol")) == [
+        assert await asyncio.gather(read("gpt-6.1-terra"), read("gpt-6.2-sol")) == [
             "gpt-6.1-terra",
-            "gpt-6.1-sol",
+            "gpt-6.2-sol",
         ]
         with pytest.raises(RuntimeError):
-            with using_model("gpt-6.1-sol"):
+            with using_model("gpt-6.2-sol"):
                 raise RuntimeError("synthetic failure")
         assert ModelSettings.load().model == DEFAULT_MODEL
 

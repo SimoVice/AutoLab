@@ -1,5 +1,5 @@
 {
-  "format": "museautolab-project",
+  "format": "autolab-project",
   "schema_version": 1,
   "compiler_version": "4",
   "saved_at": "2026-10-29T17:21:56.283601+00:00",
@@ -83,7 +83,7 @@
     },
     "provenance": {
       "run_id": "design-055b5176",
-      "model": "muse-spark-1.3-contributor",
+      "model": "gpt-6.1-terra",
       "source_revision": 5,
       "attempt_count": 1,
       "instruction": "Now add a refrigerated cold-storage bay with a target of 4 C. Keep the existing component arrangement and bed position.",
@@ -283,7 +283,7 @@
             }
           ],
           "usage": {
-            "model": "muse-spark-1.3-contributor",
+            "model": "gpt-6.1-terra",
             "input_tokens": 1706,
             "output_tokens": 469
           }
@@ -442,7 +442,7 @@
         }
       ],
       "usage": {
-        "model": "muse-spark-1.3-contributor",
+        "model": "gpt-6.1-terra",
         "input_tokens": 1706,
         "output_tokens": 469
       },
@@ -504,7 +504,7 @@
     },
     "provenance": {
       "run_id": "inspection-07b1e4f4",
-      "model": "muse-spark-1.3-contributor",
+      "model": "gpt-6.1-terra",
       "source_revision": 6,
       "instruction": "Now add an inspection arm and camera to this workstation. Preserve the workstation and cold-storage bay.",
       "attempts": [
@@ -548,7 +548,7 @@
             }
           ],
           "usage": {
-            "model": "muse-spark-1.3-contributor",
+            "model": "gpt-6.1-terra",
             "input_tokens": 3401,
             "output_tokens": 318
           }
@@ -575,7 +575,7 @@
         }
       ],
       "usage": {
-        "model": "muse-spark-1.3-contributor",
+        "model": "gpt-6.1-terra",
         "input_tokens": 3401,
         "output_tokens": 318
       },
@@ -589,7 +589,7 @@
     },
     {
       "role": "assistant",
-      "content": "Got it — lowering the existing Jubilee build plate by another 30 mm, keeping the same frame and layout. I'll regenerate the layout to check it still fits.\n\nMeta layout accepted using muse-spark-1.3-contributor after 1 attempt(s). All 24 geometry checks passed.\n\nDesign reasoning: Lowered build-plate subassembly by 30mm from 100 to 130mm, preserving source frame dimensions, 300x300 insert, and all five component placements verbatim."
+      "content": "Got it — lowering the existing Jubilee build plate by another 30 mm, keeping the same frame and layout. I'll regenerate the layout to check it still fits.\n\nModel layout accepted using gpt-6.1-terra after 1 attempt(s). All 24 geometry checks passed.\n\nDesign reasoning: Lowered build-plate subassembly by 30mm from 100 to 130mm, preserving source frame dimensions, 300x300 insert, and all five component placements verbatim."
     },
     {
       "role": "user",
@@ -597,7 +597,7 @@
     },
     {
       "role": "assistant",
-      "content": "Adding a 4 C refrigerated bay concept alongside your current layout, keeping arrangement and bed position. I'll regenerate to check fit — target is a setting, not validated cooling.\n\nMeta layout accepted using muse-spark-1.3-contributor after 1 attempt(s). All 25 geometry checks passed.\n\nDesign reasoning: Preserves authoritative insert dimensions, placements, and bed pose verbatim per revision instruction. Adds 4C refrigerated cold-storage bay requirement as operational target without moving components. No rescale, no rear exclusion applied, two-column layout retained. Bed drop is illustrative unverified travel only; no claim of physical operation, mounting, clearance, or collision validation.\n\nRefrigerated bay enabled. Target 4 °C; manual sample transfer. Known parts subtotal: $44.90 USD. Unpriced parts, shipping and taxes are excluded. Cooling performance is unverified."
+      "content": "Adding a 4 C refrigerated bay concept alongside your current layout, keeping arrangement and bed position. I'll regenerate to check fit — target is a setting, not validated cooling.\n\nModel layout accepted using gpt-6.1-terra after 1 attempt(s). All 25 geometry checks passed.\n\nDesign reasoning: Preserves authoritative insert dimensions, placements, and bed pose verbatim per revision instruction. Adds 4C refrigerated cold-storage bay requirement as operational target without moving components. No rescale, no rear exclusion applied, two-column layout retained. Bed drop is illustrative unverified travel only; no claim of physical operation, mounting, clearance, or collision validation.\n\nRefrigerated bay enabled. Target 4 °C; manual sample transfer. Known parts subtotal: $44.90 USD. Unpriced parts, shipping and taxes are excluded. Cooling performance is unverified."
     },
     {
       "role": "user",

@@ -1,8 +1,8 @@
 # Workspace quality review
 
-Reviewed 2026-11-02. MuseAutoLab is a platform for designing custom laboratory automation setups; liquid preparation is the implemented example used for these checks.
+Reviewed 2026-11-02. AutoLab is a platform for designing custom laboratory automation setups; liquid preparation is the implemented example used for these checks.
 
-The review used the real React interface, local API/compiler and headless Chrome with deterministic synthetic model responses. The checks below made no Meta inference, supplier refresh or purchase calls. They establish browser behavior, not usability with human participants or laboratory performance.
+The review used the real React interface, local API/compiler and headless Chrome with deterministic synthetic model responses. The checks below made no live model inference, supplier refresh or purchase calls. They establish browser behavior, not usability with human participants or laboratory performance.
 
 ## Changes and observed results
 

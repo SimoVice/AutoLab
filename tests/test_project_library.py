@@ -15,13 +15,13 @@ from app import project_library
 
 @pytest.fixture(params=["sqlite", "json"])
 def client(tmp_path, monkeypatch, request):
-    monkeypatch.delenv("MUSEAUTOLAB_DATABASE_PATH", raising=False)
-    monkeypatch.delenv("MUSEAUTOLAB_LIBRARY_DIRECTORY", raising=False)
-    monkeypatch.delenv("MUSEAUTOLAB_MODAL_VOLUME_NAME", raising=False)
+    monkeypatch.delenv("AUTOLAB_DATABASE_PATH", raising=False)
+    monkeypatch.delenv("AUTOLAB_LIBRARY_DIRECTORY", raising=False)
+    monkeypatch.delenv("AUTOLAB_MODAL_VOLUME_NAME", raising=False)
     if request.param == "sqlite":
-        monkeypatch.setenv("MUSEAUTOLAB_DATABASE_PATH", str(tmp_path / "projects.sqlite3"))
+        monkeypatch.setenv("AUTOLAB_DATABASE_PATH", str(tmp_path / "projects.sqlite3"))
     else:
-        monkeypatch.setenv("MUSEAUTOLAB_LIBRARY_DIRECTORY", str(tmp_path / "projects"))
+        monkeypatch.setenv("AUTOLAB_LIBRARY_DIRECTORY", str(tmp_path / "projects"))
     api._sessions.clear()
     with TestClient(api.app) as client:
         yield client
@@ -106,8 +106,8 @@ def test_autosave_preserves_named_entry_and_rejects_stale_disk_write(client):
 
 
 def test_local_mode_preserves_portable_download_and_disables_library(client, monkeypatch):
-    monkeypatch.delenv("MUSEAUTOLAB_DATABASE_PATH", raising=False)
-    monkeypatch.delenv("MUSEAUTOLAB_LIBRARY_DIRECTORY", raising=False)
+    monkeypatch.delenv("AUTOLAB_DATABASE_PATH", raising=False)
+    monkeypatch.delenv("AUTOLAB_LIBRARY_DIRECTORY", raising=False)
     project = client.post("/api/projects").json()["project"]
     assert client.get("/api/library").json() == {"enabled": False, "projects": []}
     assert client.post(f"/api/projects/{project['id']}/save", json={
@@ -120,9 +120,9 @@ def test_local_mode_preserves_portable_download_and_disables_library(client, mon
 
 @pytest.fixture
 def volume_storage(tmp_path, monkeypatch):
-    monkeypatch.delenv("MUSEAUTOLAB_DATABASE_PATH", raising=False)
-    monkeypatch.setenv("MUSEAUTOLAB_LIBRARY_DIRECTORY", str(tmp_path / "projects"))
-    monkeypatch.setenv("MUSEAUTOLAB_MODAL_VOLUME_NAME", "test-volume")
+    monkeypatch.delenv("AUTOLAB_DATABASE_PATH", raising=False)
+    monkeypatch.setenv("AUTOLAB_LIBRARY_DIRECTORY", str(tmp_path / "projects"))
+    monkeypatch.setenv("AUTOLAB_MODAL_VOLUME_NAME", "test-volume")
     return tmp_path / "projects"
 
 
@@ -182,12 +182,12 @@ def test_failed_replace_preserves_previous_snapshot(volume_storage, monkeypatch)
 
 
 def test_storage_configuration_rejects_ambiguous_backends(volume_storage, monkeypatch):
-    monkeypatch.setenv("MUSEAUTOLAB_DATABASE_PATH", "do-not-create.sqlite3")
+    monkeypatch.setenv("AUTOLAB_DATABASE_PATH", "do-not-create.sqlite3")
     with pytest.raises(RuntimeError, match="either SQLite"):
         project_library.configured()
-    monkeypatch.delenv("MUSEAUTOLAB_DATABASE_PATH")
-    monkeypatch.delenv("MUSEAUTOLAB_LIBRARY_DIRECTORY")
-    with pytest.raises(RuntimeError, match="requires MUSEAUTOLAB_LIBRARY_DIRECTORY"):
+    monkeypatch.delenv("AUTOLAB_DATABASE_PATH")
+    monkeypatch.delenv("AUTOLAB_LIBRARY_DIRECTORY")
+    with pytest.raises(RuntimeError, match="requires AUTOLAB_LIBRARY_DIRECTORY"):
         project_library.configured()
 
 

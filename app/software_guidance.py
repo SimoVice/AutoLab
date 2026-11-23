@@ -20,7 +20,7 @@ def _route_software(route: str) -> tuple[list[dict], list[dict]]:
                     "Jubilee build. Its Python interfaces describe the machine, tools,"
                     " decks and labware; "
                     "it provides example notebooks. First configure and commission "
-                    "the actual controller, tool and labware interfaces. MuseAutoLab "
+                    "the actual controller, tool and labware interfaces. AutoLab "
                     "has not integrated "
                     "or tested a Science Jubilee hardware-control adapter for this "
                     "design. Provisional "
@@ -54,7 +54,7 @@ def _route_software(route: str) -> tuple[list[dict], list[dict]]:
                     "documented local "
                     "simulation and App workflow, then perform instrument/labware "
                     "setup, calibration and "
-                    "position checks. MuseAutoLab's JSON template is a specification, "
+                    "position checks. AutoLab's JSON template is a specification, "
                     "not an Opentrons "
                     "protocol. opentrons_simulate protocol.py applies only to a "
                     "separately authored "
@@ -171,10 +171,10 @@ def build_software_guidance(project: dict) -> dict:
         "tool interfaces and labware arrangement are separate from the current preparation recipe."
     )
     limitations = [
-        "MuseAutoLab currently checks the arithmetic of its supported dilution plan; "
+        "AutoLab currently checks the arithmetic of its supported dilution plan; "
         "it does not execute hardware protocols.",
         "Aliquoting, transfers and serial dilutions are possible upstream programming tasks, "
-        "not automatically validated MuseAutoLab protocols or verified performance claims.",
+        "not automatically validated AutoLab protocols or verified performance claims.",
         "Recheck tool, labware, deck, reach, transfer range and materials for each new task. "
         "A compatible recipe can reuse hardware; changed interfaces need a"
         " reviewed design revision.",

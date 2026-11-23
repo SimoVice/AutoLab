@@ -72,8 +72,8 @@ export default function HostedAccess() {
   if (access && (!access.enabled || access.authenticated)) return <App key={access.account ?? 'local'} hosted={access.enabled} account={access.account ?? ''} onSignOut={logout} />;
 
   return <main className="access-page">
-    <section className="access-story" aria-label="MuseAutoLab">
-      <a className="brand" href="/"><span>Muse<span className="brand-accent">Auto</span>Lab</span></a>
+    <section className="access-story" aria-label="AutoLab">
+      <a className="brand" href="/"><span><span className="brand-accent">Auto</span>Lab</span></a>
       <div><h1>Your lab process.<br />A workspace to build it.</h1><p>Design custom laboratory automation, explore equipment and develop your next setup in one place.</p></div>
     </section>
     <section className="access-form-panel">

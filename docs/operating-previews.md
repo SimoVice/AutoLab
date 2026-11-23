@@ -9,7 +9,7 @@ plate or recipe changes the proposed operation.
 *Actual workspace capture at a planned transfer to A1. The displayed quantity is
 a transfer total, not a measurement or a validated pipetting stroke.*
 
-This is an adapter capability within MuseAutoLab's laboratory automation
+This is an adapter capability within AutoLab's laboratory automation
 platform. The initial preparation adapter covers the Jubilee setup with its
 sample rack or supported 96-well plate. An accepted inspection concept has a
 separate camera-sweep sequence. Unsupported platforms display a reason instead

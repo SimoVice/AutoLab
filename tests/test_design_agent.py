@@ -448,9 +448,9 @@ def test_failed_correction_retains_previous_usage_and_does_not_change_input(monk
     async def fake_propose(project, instruction, feedback):
         calls.append(feedback)
         if len(calls) == 1:
-            return CANDIDATE, {"model": "test-meta", "input_tokens": 12, "output_tokens": 7}
+            return CANDIDATE, {"model": "test-model", "input_tokens": 12, "output_tokens": 7}
         error = ModelClientError("OpenAI returned an incomplete design response.")
-        error.usage = {"model": "test-meta", "input_tokens": 15, "output_tokens": 9}
+        error.usage = {"model": "test-model", "input_tokens": 15, "output_tokens": 9}
         raise error
 
     monkeypatch.setattr(design_agent, "propose_layout", fake_propose)

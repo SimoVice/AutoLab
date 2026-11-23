@@ -37,9 +37,9 @@ from app.tip_racks import TipRackUpdate, is_tip_only_turn
 from app.workflows import describe_workflow
 
 ROOT = Path(__file__).resolve().parent.parent
-LOGGER = logging.getLogger("museautolab.model")
+LOGGER = logging.getLogger("autolab.model")
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
-_selected_model: ContextVar[str | None] = ContextVar("museautolab_selected_model", default=None)
+_selected_model: ContextVar[str | None] = ContextVar("autolab_selected_model", default=None)
 
 
 def configured_model() -> str:
@@ -138,7 +138,7 @@ Apply this fresh-turn rule to the tip-rack namespace before returning JSON:
   values. These nulls do not erase recorded project state.
 """
 
-SYSTEM_INSTRUCTIONS = """You are MuseAutoLab's general laboratory automation assistant.
+SYSTEM_INSTRUCTIONS = """You are AutoLab's general laboratory automation assistant.
 Act like a practical engineer interviewing the user, not a fixed machine configurator.
 Use the recorded engineering requirements and reviewed_platforms. Ask the next useful
 missing question about process/throughput, existing equipment, bench space, budget,
@@ -1237,7 +1237,7 @@ async def generate_turn(
         state["reviewed_reference_library"]["architecture"] = "Custom concept assembly"
     from app.platform_profiles import platform_profiles
 
-    if (os.getenv("MUSEAUTOLAB_LIVE_PLATFORM_PRICES") == "1" and client is None
+    if (os.getenv("AUTOLAB_LIVE_PLATFORM_PRICES") == "1" and client is None
             and not project.get("engineering_design") and not project.get("concept_design")
             and not state["bench_station"] and (
                 project.get("workflow", {}).get("kind") == "liquid_preparation"
@@ -1373,6 +1373,24 @@ async def generate_turn(
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code
+        err_type = err_code = None
+        try:
+            err = exc.response.json().get("error")
+            if isinstance(err, dict):
+                raw_type, raw_code = err.get("type"), err.get("code")
+                if isinstance(raw_type, str):
+                    err_type = raw_type[:64]
+                if isinstance(raw_code, str):
+                    err_code = raw_code[:64]
+        except (ValueError, TypeError, AttributeError):
+            pass
+        LOGGER.warning(
+            "OpenAI request failed model=%s status=%s error_type=%s error_code=%s",
+            settings.model,
+            status,
+            err_type,
+            err_code,
+        )
         raise ModelClientError(
             f"OpenAI request failed (HTTP {status}). Check model access or try again."
         ) from None

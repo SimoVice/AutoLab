@@ -239,7 +239,7 @@
       "browser-microplate.log",
       "browser-resources.log"
     ],
-    "scope": "Offline model/catalog fixtures; real local API/compiler/source meshes/browser. No Meta or supplier call and no heavy CAD job."
+    "scope": "Offline model/catalog fixtures; real local API/compiler/source meshes/browser. No model or supplier call and no heavy CAD job."
   },
   "frontend_build": {
     "command": "npm.cmd run build",
@@ -319,7 +319,7 @@
     }
   ],
   "usage": {
-    "new_meta_calls": 0,
+    "new_model_calls": 0,
     "supplier_refreshes": 0,
     "heavy_cad_exports": 0
   },

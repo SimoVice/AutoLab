@@ -894,7 +894,7 @@ print(result["status"], result["metrics"])
         "# MuJoCo simulation bundle\n\n"
         f"Project {project['id']} revision {project['revision']}, scenario "
         f"{result['scenario']}.\n\n"
-        "Use the MuseAutoLab README's locked Python .venv with mujoco==3.17.0.\n"
+        "Use the AutoLab README's locked Python .venv with mujoco==3.17.0.\n"
         "Run that interpreter against `simulation/run.py` after extracting the project ZIP.\n"
         "The runner reads project.json and writes simulation/replay-result.json.\n"
         "model.xml is the compiled scene description; result.json retains assumptions,\n"

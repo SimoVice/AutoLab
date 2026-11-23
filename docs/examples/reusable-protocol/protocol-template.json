@@ -134,8 +134,8 @@
   "execution_enabled": false,
   "kind": "declarative_pipetting_protocol",
   "limits": [
-    "MuseAutoLab currently checks the arithmetic of its supported dilution plan; it does not execute hardware protocols.",
-    "Aliquoting, transfers and serial dilutions are possible upstream programming tasks, not automatically validated MuseAutoLab protocols or verified performance claims.",
+    "AutoLab currently checks the arithmetic of its supported dilution plan; it does not execute hardware protocols.",
+    "Aliquoting, transfers and serial dilutions are possible upstream programming tasks, not automatically validated AutoLab protocols or verified performance claims.",
     "Recheck tool, labware, deck, reach, transfer range and materials for each new task. A compatible recipe can reuse hardware; changed interfaces need a reviewed design revision."
   ],
   "schema_version": 1,

@@ -25,7 +25,7 @@ from app.design_spec import apply_candidate, check_candidate, proposal_schema
 from app.model_client import ModelClientError, ModelSettings, _safe_usage
 from app.openai_models import chat_parameters
 
-LOGGER = logging.getLogger("museautolab.design")
+LOGGER = logging.getLogger("autolab.design")
 
 DESIGN_MODEL_TIMEOUT_S = 45.0
 DESIGN_MAX_COMPLETION_TOKENS = 2400

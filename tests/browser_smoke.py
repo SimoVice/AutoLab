@@ -1,6 +1,6 @@
 """Reusable local browser harness; default flow is browser_foundation.
 
-The Meta transports are offline fixtures. Backend, compiler, source meshes,
+The model transports are offline fixtures. Backend, compiler, source meshes,
 portable state and Chrome are real. No physical validation is implied.
 """
 
@@ -182,8 +182,8 @@ def main() -> int:
         log(f"Backend ready at {api_base} (AI provider stubbed).")
 
         env = dict(os.environ)
-        env["MUSEAUTOLAB_API_TARGET"] = api_base
-        log(f"Starting Vite frontend on {web_url} with MUSEAUTOLAB_API_TARGET={api_base}")
+        env["AUTOLAB_API_TARGET"] = api_base
+        log(f"Starting Vite frontend on {web_url} with AUTOLAB_API_TARGET={api_base}")
         frontend_proc = subprocess.Popen(
             [
                 node_bin,

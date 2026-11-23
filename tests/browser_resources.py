@@ -1,6 +1,6 @@
 """Pricing and instruction UX with offline catalog fixtures and real saved projects.
 
-No supplier, Meta, purchase or heavy CAD calls are made. The normal project API,
+No supplier, model, purchase or heavy CAD calls are made. The normal project API,
 canonical instruction builder, revision changes and browser rendering are real.
 """
 

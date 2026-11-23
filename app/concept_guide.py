@@ -193,7 +193,7 @@ The local controller simulates the sequence and has no configured hardware drive
 <nav aria-label="Guide sections"><a href="#parts">Parts and sources</a>
 <a href="#assembly">Assembly</a><a href="#operation">Operating sequence</a>
 <a href="#software">Software and commissioning</a></nav>
-<section><h2>Inspect the model in MuseAutoLab</h2>
+<section><h2>Inspect the model in AutoLab</h2>
 <p>Drag the model to rotate it and scroll to zoom. The arrow buttons rotate the view;
 Reset view restores the camera. Select an operation in Assembly and operation to review it.
 Play advances the illustrative sequence, Pause holds the current view, Next step selects
@@ -204,7 +204,7 @@ rotations continue from the preceding indexed pose and hold the next pose. Reset
 the first operation. Planned pauses are illustrative; timing is not a measured cycle time.
 In reduced-motion mode,
 use Next step to read the sequence without automatic movement.</p>
-<p>To reopen the design in MuseAutoLab, use Save project in the application and then Open
+<p>To reopen the design in AutoLab, use Save project in the application and then Open
 project. The package's project.json is controller data, a different file from that saved project.
 Keep this extracted folder together so the guide's model and software links work offline.</p>
 </section>

@@ -1,4 +1,4 @@
-"""Stubbed MuseAutoLab backend for the browser smoke test.
+"""Stubbed AutoLab backend for the browser smoke test.
 
 This server runs the actual product FastAPI app and domain logic from
 ``app.api`` / ``app.domain`` locally, but replaces the OpenAI model client
@@ -228,7 +228,7 @@ async def _fake_propose_layout(project, instruction, feedback, **kwargs):
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run the stubbed MuseAutoLab API for browser smoke testing."
+        description="Run the stubbed AutoLab API for browser smoke testing."
     )
     parser.add_argument(
         "--host", default="127.0.0.1", help="Loopback host to bind (default 127.0.0.1)."
@@ -249,7 +249,7 @@ def main(argv: list[str] | None = None) -> None:
     import uvicorn
 
     print(
-        f"[stub-server] Starting stubbed MuseAutoLab API on http://{args.host}:{args.port} "
+        f"[stub-server] Starting stubbed AutoLab API on http://{args.host}:{args.port} "
         "(AI provider and layout model are stubbed; no OpenAI request will be made).",
         flush=True,
     )

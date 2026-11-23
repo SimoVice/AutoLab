@@ -99,8 +99,8 @@ from app.workflows import (
     workstation_context_question,
 )
 
-app = FastAPI(title="MuseAutoLab", version="0.1.0",
-              openapi_url=None if os.getenv("MUSEAUTOLAB_HOSTED") == "1" else "/openapi.json")
+app = FastAPI(title="AutoLab", version="0.1.0",
+              openapi_url=None if os.getenv("AUTOLAB_HOSTED") == "1" else "/openapi.json")
 install_host_auth(app)
 
 
@@ -842,7 +842,7 @@ async def save_project(project_id: str, revision: int) -> Response:
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
     content = json.dumps(snapshot, ensure_ascii=False, allow_nan=False, indent=2).encode("utf-8")
-    filename = f"museautolab-{snapshot['project_id'][:8]}-r{revision}.json"
+    filename = f"autolab-{snapshot['project_id'][:8]}-r{revision}.json"
     return Response(content=content, media_type="application/json", headers={
         "Content-Disposition": f'attachment; filename="{filename}"', "Cache-Control": "no-store",
     })
@@ -906,7 +906,7 @@ async def send_message(project_id: str, request: MessageRequest) -> dict:
         try:
             turn = None
             usage = {}
-            # Ordinary natural language always goes through Muse. A provider outage
+            # Ordinary natural language goes through the configured OpenAI model; provider outage
             # permits only the narrow documented canonical offline commands.
             try:
                 report_activity("interpreting")
@@ -1761,7 +1761,7 @@ async def download_export(project_id: str, job_id: str) -> Response:
         meta = await export_status(current, job_id)
     except ExportError as exc:
         raise _export_error_response(exc) from None
-    filename = f"museautolab-{meta['project_id']}-r{meta['revision']}.zip"
+    filename = f"autolab-{meta['project_id']}-r{meta['revision']}.zip"
     return Response(
         content=payload,
         media_type="application/zip",

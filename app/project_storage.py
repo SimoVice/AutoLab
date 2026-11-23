@@ -80,7 +80,7 @@ class HistoryEntry(StrictModel):
 
 
 class Snapshot(StrictModel):
-    format: Literal["museautolab-project"]
+    format: Literal["autolab-project"]
     schema_version: Annotated[int, Field(ge=1, le=1)]
     compiler_version: Literal["1", "2", "3", "4", "5", "6", "7", "8"]
     saved_at: Annotated[str, Field(min_length=10, max_length=50)]
@@ -127,7 +127,7 @@ def decode_snapshot(raw: bytes) -> dict:
     try:
         value = json.loads(raw, object_pairs_hook=_unique_object, parse_constant=_reject_constant)
     except (UnicodeError, json.JSONDecodeError, RecursionError) as exc:
-        raise ValueError("Choose a valid MuseAutoLab JSON project file.") from exc
+        raise ValueError("Choose a valid AutoLab JSON project file.") from exc
     stack = [(value, 0)]
     while stack:
         item, depth = stack.pop()
@@ -138,14 +138,14 @@ def decode_snapshot(raw: bytes) -> dict:
         elif isinstance(item, list):
             stack.extend((v, depth + 1) for v in item)
     if not isinstance(value, dict):
-        raise ValueError("Choose a MuseAutoLab project file, not a brief or build package.")
+        raise ValueError("Choose a AutoLab project file, not a brief or build package.")
     return value
 
 
 def make_snapshot(project: dict, history: list[dict]) -> dict:
     extension = project.get("inspection_extension")
     payload = {
-        "format": "museautolab-project",
+        "format": "autolab-project",
         "schema_version": 1,
         "compiler_version": (
             "8" if project.get("design", {}).get("foundation") else
@@ -229,7 +229,7 @@ def restore_snapshot(snapshot: object) -> tuple[dict, list[dict]]:
         UUID(saved.project_id)
         datetime.fromisoformat(saved.saved_at.replace("Z", "+00:00"))
     except (ValidationError, ValueError) as exc:
-        raise ValueError("Unsupported or invalid MuseAutoLab project file.") from exc
+        raise ValueError("Unsupported or invalid AutoLab project file.") from exc
     inputs = saved.inputs
     if (saved.compiler_version not in ("5", "6", "7", "8")
             and (saved.labware_brief or saved.labware_rack)):

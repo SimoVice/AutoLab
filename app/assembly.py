@@ -670,7 +670,7 @@ def build_readme(project: dict) -> bytes:
         "- project.json preserves the confirmed input snapshot; manifest.json records its hash\n"
         "  and the SHA-256 of each other file. Use Save project in the app for a portable "
         "file accepted by Open project; this package snapshot is for inspection.\n"
-        "- To regenerate CAD, use the MuseAutoLab README's locked Python .venv\n"
+        "- To regenerate CAD, use the AutoLab README's locked Python .venv\n"
         "  (build123d==0.13.0) and run `python cad/deck-model.py`. Outputs are written "
         "beside it.\n\n"
         "## Physical motion model\n\n"

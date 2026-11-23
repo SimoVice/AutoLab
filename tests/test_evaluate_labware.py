@@ -1,4 +1,4 @@
-"""Harness safety/accounting checks; no Meta calls or frozen-case rehearsals."""
+"""Harness safety/accounting checks; no live model calls or frozen-case rehearsals."""
 
 import asyncio
 import json

@@ -395,7 +395,7 @@ async def refresh_procurement(project: dict, *, client: httpx.AsyncClient | None
             follow_redirects=False,
             limits=httpx.Limits(max_connections=MAX_PARALLEL_SUPPLIERS),
             headers={
-                "User-Agent": "MuseAutoLab/0.1 (read-only US product price check)",
+                "User-Agent": "AutoLab/0.1 (read-only US product price check)",
                 "Accept": "text/html",
             },
         ) as active_client:

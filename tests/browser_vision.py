@@ -351,7 +351,7 @@ def run_vision(web_url: str) -> None:
             else:
                 log(f"Example JPEG not found at {EXAMPLE_JPEG}; upload step skipped.")
 
-            screenshot_path = os.environ.get("MUSEAUTOLAB_VISION_SCREENSHOT", "").strip()
+            screenshot_path = os.environ.get("AUTOLAB_VISION_SCREENSHOT", "").strip()
             if screenshot_path:
                 target = Path(screenshot_path)
                 if not target.is_absolute():

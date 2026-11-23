@@ -13,8 +13,8 @@ from app.project_storage import make_snapshot, restore_snapshot
 
 
 def test_notes_follow_only_their_project_and_preserve_its_revision(tmp_path, monkeypatch):
-    monkeypatch.setenv("MUSEAUTOLAB_DATABASE_PATH", str(tmp_path / "notes.sqlite3"))
-    monkeypatch.delenv("MUSEAUTOLAB_LIBRARY_DIRECTORY", raising=False)
+    monkeypatch.setenv("AUTOLAB_DATABASE_PATH", str(tmp_path / "notes.sqlite3"))
+    monkeypatch.delenv("AUTOLAB_LIBRARY_DIRECTORY", raising=False)
     with TestClient(api.app) as client:
         project = client.post("/api/projects").json()["project"]
         key = project["id"]

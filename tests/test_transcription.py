@@ -13,7 +13,7 @@ import app.api as api
 import app.transcription as voice
 from app.model_client import ModelSettings
 
-SETTINGS = ModelSettings("synthetic-test-key", "https://api.openai.com/v1", "gpt-6.1-sol")
+SETTINGS = ModelSettings("synthetic-test-key", "https://api.openai.com/v1", "gpt-6.2-sol")
 
 
 def wav(*, rate=16000, channels=1, width=2, seconds=0.1):

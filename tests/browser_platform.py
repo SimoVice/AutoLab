@@ -1,7 +1,7 @@
 """General discovery and task-specific routing through the real app.
 
 Chat responses are deterministic fixtures; the real domain, API and frontend run.
-No Meta call, camera or arbitrary CAD generation is tested here. Geometry only
+No model call, camera or arbitrary CAD generation is tested here. Geometry only
 appears after an explicit model-backed design via the shared helper.
 """
 

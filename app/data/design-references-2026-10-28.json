@@ -38,7 +38,7 @@
         "Tool and labware calibration is still required"
       ],
       "use": "Documented reference for pipette/camera modular workflows and integration advice",
-      "limits": "No Science Jubilee control code or CAD is installed in MuseAutoLab. A reference workflow is not a compatible ready-made adapter or verified liquid-handling result."
+      "limits": "No Science Jubilee control code or CAD is installed in AutoLab. A reference workflow is not a compatible ready-made adapter or verified liquid-handling result."
     },
     {
       "id": "pololu-1209",

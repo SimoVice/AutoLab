@@ -17,7 +17,7 @@ from PIL import Image, ImageOps
 from app.model_catalog import IMAGE_MODEL
 from app.model_client import DEFAULT_BASE_URL, ModelClientError, ModelSettings
 
-LOGGER = logging.getLogger("museautolab.illustration")
+LOGGER = logging.getLogger("autolab.illustration")
 MAX_REFERENCE_BYTES = 4 * 1024 * 1024
 MAX_REFERENCE_DATA_URL = 4 * ((MAX_REFERENCE_BYTES + 2) // 3) + 64
 MAX_REQUEST_BYTES = MAX_REFERENCE_DATA_URL + 2048
@@ -33,7 +33,7 @@ SCOPE = (
     "does not establish dimensions, compatibility, manufacturing readiness or hardware performance."
 )
 ATTRIBUTION = (
-    "Generated with OpenAI GPT Image from a MuseAutoLab project view. Original design and "
+    "Generated with OpenAI GPT Image from an AutoLab project view. Original design and "
     "source credits remain in Project details and the engineering files."
 )
 PROMPT = """Create one clean presentation illustration based strictly on the supplied reference

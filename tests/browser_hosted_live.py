@@ -89,7 +89,7 @@ def run():
     port = free_port()
     origin = f"https://127.0.0.1:{port}"
     username, password, secret = (secrets.token_urlsafe(32) for _ in range(3))
-    with tempfile.TemporaryDirectory(prefix="museautolab-hosted-browser-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="autolab-hosted-browser-") as temporary:
         directory = Path(temporary)
         certificate, private_key = directory / "certificate.pem", directory / "private.pem"
         subprocess.run(
@@ -117,18 +117,18 @@ def run():
         )
         environment = dict(os.environ)
         for name in tuple(environment):
-            if name.startswith(("MUSEAUTOLAB_", "MODEL_", "META_API_")):
+            if name.startswith(("AUTOLAB_", "LEGACY_")):
                 environment.pop(name)
         environment.update(
             {
                 "PYTHONPATH": str(ROOT),
-                "MUSEAUTOLAB_HOSTED": "1",
-                "MUSEAUTOLAB_DATABASE_PATH": str(directory / "projects.sqlite3"),
-                "MUSEAUTOLAB_AUTH_SESSION_DIRECTORY": str(directory / "sessions"),
-                "MUSEAUTOLAB_AUTH_ORIGIN": origin,
-                "MUSEAUTOLAB_AUTH_USERNAME": username,
-                "MUSEAUTOLAB_AUTH_PASSWORD_HASH": hash_password(password),
-                "MUSEAUTOLAB_AUTH_SIGNING_SECRET": secret,
+                "AUTOLAB_HOSTED": "1",
+                "AUTOLAB_DATABASE_PATH": str(directory / "projects.sqlite3"),
+                "AUTOLAB_AUTH_SESSION_DIRECTORY": str(directory / "sessions"),
+                "AUTOLAB_AUTH_ORIGIN": origin,
+                "AUTOLAB_AUTH_USERNAME": username,
+                "AUTOLAB_AUTH_PASSWORD_HASH": hash_password(password),
+                "AUTOLAB_AUTH_SIGNING_SECRET": secret,
                 "OPENAI_API_KEY": secrets.token_urlsafe(32),
             }
         )
@@ -212,7 +212,7 @@ def run():
                     status = api("/api/auth/status")["data"]
                     project_id = page.evaluate(
                         "key => sessionStorage.getItem(key)",
-                        f"museautolab.hosted.{status['account']}",
+                        f"autolab.hosted.{status['account']}",
                     )
                     original = api(f"/api/projects/{project_id}")["data"]["project"]
                     page.get_by_role("button", name="Save project", exact=True).click()
