@@ -14,10 +14,17 @@ import math
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
+from typing import Any
 from uuid import uuid4
 
 import httpx
 
+from app.supplier_apis import (
+    SupplierApiError,
+    convert_currency,
+    fetch_fx_rates,
+    fetch_official_quote,
+)
 from app.supplier_catalogs import PRODUCTS, CatalogError, fetch_product
 
 CACHE_TTL_SECONDS = 900
@@ -322,6 +329,7 @@ def _apply_observation(row: dict, observation: dict, *, stale: bool, issue: str 
     unavailable = observation["availability"] in {"OutOfStock", "SoldOut", "Discontinued"}
     line_total = None if unavailable else _amount(pack_price * packs)
     row.update(
+        currency=observation.get("currency", row.get("currency", "USD")),
         product_name=observation["product_name"],
         availability=observation["availability"],
         price_source_url=observation["source_url"],
@@ -335,6 +343,9 @@ def _apply_observation(row: dict, observation: dict, *, stale: bool, issue: str 
         issue=issue,
         pack_price=_amount(pack_price),
     )
+    for opt_key in ("mpn", "stock_quantity", "lead_time_days", "datasheet_url", "adapter"):
+        if observation.get(opt_key) is not None:
+            row[opt_key] = observation[opt_key]
     if unavailable and issue is None:
         row["issue"] = "Supplier lists this item as unavailable; its listed price is excluded."
     if stale:
@@ -351,36 +362,91 @@ def _apply_observation(row: dict, observation: dict, *, stale: bool, issue: str 
         row["variant_title"] = observation["variant_title"]
 
 
-async def refresh_procurement(project: dict, *, client: httpx.AsyncClient | None = None) -> dict:
+async def refresh_procurement(
+    project: dict,
+    *,
+    client: httpx.AsyncClient | None = None,
+    currency: str = "USD",
+    fx_rates: dict[str, Any] | None = None,
+    use_official_apis: bool = False,
+) -> dict:
     """Refresh selected registered products; failed pages retain stale prior facts.
 
     The short process-local cache avoids hammering suppliers on repeated clicks.
     Cache entries record original fetch time; cache hits never pretend a new fetch.
     """
+    target_currency = str(currency or "USD").strip().upper()
+    if target_currency not in ("USD", "CHF", "EUR"):
+        raise ValueError(f"Unsupported currency {currency!r}. Choose USD, CHF, or EUR.")
+
     now = _now()
     rows = [_row(group) for group in procurement_groups(project)]
+    for row in rows:
+        row["currency"] = target_currency
+    resolved_fx = fx_rates
+    fx_error: str | None = None
+    if target_currency != "USD" and resolved_fx is None:
+        try:
+            resolved_fx = await fetch_fx_rates("USD", client=client)
+        except SupplierApiError as exc:
+            fx_error = str(exc)
+
     semaphore = asyncio.Semaphore(MAX_PARALLEL_SUPPLIERS)
 
     async def retrieve(row: dict, active_client: httpx.AsyncClient):
         if not row["catalog_supported"]:
             return
         key = row["selected_id"]
-        prior = _cache.get(key)
+        cache_key = key if target_currency == "USD" and not use_official_apis else (
+            f"{key}:{target_currency}:{'official' if use_official_apis else 'reviewed'}"
+        )
+        prior = _cache.get(cache_key)
         if prior and now < _date(prior["fetched_at"]) + timedelta(seconds=CACHE_TTL_SECONDS):
             _apply_observation(row, prior, stale=False, issue=None)
             row["cache_hit"] = True
             return
+        if target_currency != "USD" and resolved_fx is None:
+            row["status"] = "missing"
+            row["issue"] = fx_error or f"Official FX rates required for {target_currency}."
+            return
         async with semaphore:
+            product = PRODUCTS[key]
             try:
-                observation = await fetch_product(PRODUCTS[key], active_client)
-            except CatalogError as exc:
+                if use_official_apis:
+                    observation = await fetch_official_quote(
+                        {
+                            "catalog_id": key,
+                            "option_id": key,
+                            "mpn": product.mpn or product.sku,
+                            "digikey_pn": product.digikey_pn,
+                            "mouser_pn": product.mouser_pn,
+                            "sku": product.sku,
+                        },
+                        currency=target_currency,
+                        fx_rates=resolved_fx,
+                        client=active_client,
+                    )
+                else:
+                    observation = await fetch_product(product, active_client)
+                    if target_currency != "USD":
+                        for tier in observation["price_breaks"]:
+                            converted = convert_currency(
+                                Decimal(tier["pack_price"]), "USD", target_currency, resolved_fx
+                            )
+                            tier["pack_price"] = f"{converted:.2f}"
+                        observation["currency"] = target_currency
+            except (CatalogError, SupplierApiError) as exc:
                 row["status"] = "missing"
                 row["issue"] = str(exc)
                 if prior:
                     _apply_observation(row, prior, stale=True, issue=str(exc))
                 return
-            observation["fetched_at"] = _iso(_now())
-            _cache[key] = deepcopy(observation)
+            observation.setdefault("fetched_at", _iso(_now()))
+            if product.typical_lead_time_days and observation.get("lead_time_days") is None:
+                observation["lead_time_days"] = product.typical_lead_time_days
+            if product.mpn and not observation.get("mpn"):
+                observation["mpn"] = product.mpn
+            _cache[cache_key] = deepcopy(observation)
             _apply_observation(row, observation, stale=False, issue=None)
             row["cache_hit"] = False
 
@@ -395,8 +461,8 @@ async def refresh_procurement(project: dict, *, client: httpx.AsyncClient | None
             follow_redirects=False,
             limits=httpx.Limits(max_connections=MAX_PARALLEL_SUPPLIERS),
             headers={
-                "User-Agent": "AutoLab/0.1 (read-only US product price check)",
-                "Accept": "text/html",
+                "User-Agent": "AutoLab/0.1 (read-only product price check)",
+                "Accept": "text/html,application/json",
             },
         ) as active_client:
             await run(active_client)
@@ -405,13 +471,22 @@ async def refresh_procurement(project: dict, *, client: httpx.AsyncClient | None
         for row in rows
         if row["freshness"] == "fresh"
     ]
+    market_map = {"USD": "US", "CHF": "CH", "EUR": "EU"}
+    fx_val = (
+        resolved_fx["rates"].get(target_currency)
+        if resolved_fx and resolved_fx.get("rates")
+        else None
+    )
     report = {
         "schema_version": 1,
         "report_id": str(uuid4()),
         "project_id": project["id"],
         "project_revision": project["revision"],
-        "market": "US",
-        "currency": "USD",
+        "market": market_map[target_currency],
+        "currency": target_currency,
+        "fx_rate_used": fx_val,
+        "fx_source": resolved_fx.get("source") if resolved_fx else None,
+        "fx_rate_date": resolved_fx.get("rate_date") if resolved_fx else None,
         "fetched_at": _iso(now),
         "expires_at": _iso(min(fresh_expiry, default=now)),
         "is_expired": not bool(fresh_expiry),
@@ -419,7 +494,7 @@ async def refresh_procurement(project: dict, *, client: httpx.AsyncClient | None
         "scope": "Selected project procurement groups and a partial, non-overlapping set of "
         "source-linked Jubilee candidate kits. Candidate fit and remaining BOM require review.",
         "exclusions": [
-            "Shipping, sales tax, duties and delivery times are not included.",
+            "Shipping, sales tax, VAT, duties and delivery times are not included.",
             "Custom fabrication, assembly, validation, support and unspecified parts are unpriced.",
             "Dated curated fallback prices and stale observations are excluded "
             "from the fresh subtotal.",
@@ -451,6 +526,7 @@ def report_csv(report: dict) -> bytes:
         "label",
         "supplier",
         "sku",
+        "mpn",
         "quantity",
         "pack_size",
         "pack_count",
@@ -460,8 +536,11 @@ def report_csv(report: dict) -> bytes:
         "status",
         "freshness",
         "availability",
+        "stock_quantity",
+        "lead_time_days",
         "price_source_url",
         "availability_source_url",
+        "datasheet_url",
         "fetched_at",
         "last_known_price",
         "last_known_line_total",
@@ -477,6 +556,7 @@ def report_csv(report: dict) -> bytes:
         "variant_title",
         "evidence_sha256",
         "parser",
+        "adapter",
     ]
     writer = csv.DictWriter(buffer, fieldnames=columns, extrasaction="ignore")
     writer.writeheader()

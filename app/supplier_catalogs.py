@@ -32,21 +32,111 @@ class CatalogProduct:
     product_id: str | None = None
     variant_id: str | None = None
     variant_title: str | None = None
+    mpn: str | None = None
+    digikey_pn: str | None = None
+    mouser_pn: str | None = None
+    typical_lead_time_days: int | None = None
 
 
 PRODUCTS = {
     item.option_id: item
     for item in (
-        CatalogProduct("pololu-1209", "Pololu", "1209", "https://www.pololu.com/product/1209"),
-        CatalogProduct("pololu-1208", "Pololu", "1208", "https://www.pololu.com/product/1208"),
-        CatalogProduct("drv8825", "Pololu", "2133", "https://www.pololu.com/product/2133"),
-        CatalogProduct("a4988", "Pololu", "1182", "https://www.pololu.com/product/1182"),
-        CatalogProduct("pico", "Adafruit", "4864", "https://www.adafruit.com/product/4864"),
-        CatalogProduct("pico-h", "Adafruit", "5525", "https://www.adafruit.com/product/5525"),
-        CatalogProduct("diy-peltier", "Adafruit", "1335", "https://www.adafruit.com/product/1335"),
-        CatalogProduct("probe", "Adafruit", "381", "https://www.adafruit.com/product/381"),
-        CatalogProduct("bare", "Adafruit", "374", "https://www.adafruit.com/product/374"),
-        CatalogProduct("camera-module-3", "Adafruit", "5657", "https://www.adafruit.com/product/5657"),
+        CatalogProduct(
+            "pololu-1209",
+            "Pololu",
+            "1209",
+            "https://www.pololu.com/product/1209",
+            mpn="SY35ST36-1004A",
+            digikey_pn="2183-1209-ND",
+            typical_lead_time_days=5,
+        ),
+        CatalogProduct(
+            "pololu-1208",
+            "Pololu",
+            "1208",
+            "https://www.pololu.com/product/1208",
+            mpn="SY35ST28-0504A",
+            digikey_pn="2183-1208-ND",
+            typical_lead_time_days=5,
+        ),
+        CatalogProduct(
+            "drv8825",
+            "Pololu",
+            "2133",
+            "https://www.pololu.com/product/2133",
+            mpn="POLOLU-2133",
+            digikey_pn="2183-2133-ND",
+            typical_lead_time_days=5,
+        ),
+        CatalogProduct(
+            "a4988",
+            "Pololu",
+            "1182",
+            "https://www.pololu.com/product/1182",
+            mpn="POLOLU-1182",
+            digikey_pn="2183-1182-ND",
+            typical_lead_time_days=5,
+        ),
+        CatalogProduct(
+            "pico",
+            "Adafruit",
+            "4864",
+            "https://www.adafruit.com/product/4864",
+            mpn="SC0915",
+            digikey_pn="1528-4864-ND",
+            mouser_pn="485-4864",
+            typical_lead_time_days=4,
+        ),
+        CatalogProduct(
+            "pico-h",
+            "Adafruit",
+            "5525",
+            "https://www.adafruit.com/product/5525",
+            mpn="SC0917",
+            digikey_pn="1528-5525-ND",
+            mouser_pn="485-5525",
+            typical_lead_time_days=4,
+        ),
+        CatalogProduct(
+            "diy-peltier",
+            "Adafruit",
+            "1335",
+            "https://www.adafruit.com/product/1335",
+            mpn="ADA1335",
+            digikey_pn="1528-1335-ND",
+            mouser_pn="485-1335",
+            typical_lead_time_days=5,
+        ),
+        CatalogProduct(
+            "probe",
+            "Adafruit",
+            "381",
+            "https://www.adafruit.com/product/381",
+            mpn="ADA381",
+            digikey_pn="1528-1205-ND",
+            mouser_pn="485-381",
+            typical_lead_time_days=5,
+        ),
+        CatalogProduct(
+            "bare",
+            "Adafruit",
+            "374",
+            "https://www.adafruit.com/product/374",
+            mpn="DS18B20",
+            digikey_pn="1528-1204-ND",
+            mouser_pn="485-374",
+            typical_lead_time_days=5,
+        ),
+        CatalogProduct(
+            "camera-module-3",
+            "Adafruit",
+            "5657",
+            "https://www.adafruit.com/product/5657",
+            mpn="SC0872",
+            digikey_pn="1528-5657-ND",
+            mouser_pn="485-5657",
+            typical_lead_time_days=5,
+        ),
         CatalogProduct(
             "jubilee-motor-kit",
             "Filastruder",
@@ -56,6 +146,8 @@ PRODUCTS = {
             product_id="4665174130759",
             variant_id="32303923134535",
             variant_title="Full set with cables",
+            mpn="LDO-MTR-KIT-JUB",
+            typical_lead_time_days=7,
         ),
         CatalogProduct(
             "jubilee-motion-kit",
@@ -66,6 +158,8 @@ PRODUCTS = {
             product_id="4640549175367",
             variant_id="32245286371399",
             variant_title="Standard",
+            mpn="JubileeMotionSet",
+            typical_lead_time_days=7,
         ),
         CatalogProduct(
             "jubilee-hardware-kit",
@@ -76,6 +170,8 @@ PRODUCTS = {
             product_id="4925904289863",
             variant_id="32712442904647",
             variant_title="Full Set",
+            mpn="JubHWKit",
+            typical_lead_time_days=7,
         ),
         CatalogProduct(
             "jubilee-frame-kit-black",
@@ -87,6 +183,8 @@ PRODUCTS = {
             product_id="4925902782535",
             variant_id="32712440021063",
             variant_title="Black",
+            mpn="JubFrameKitBlack",
+            typical_lead_time_days=7,
         ),
         CatalogProduct(
             "jubilee-crossbar",
@@ -97,6 +195,8 @@ PRODUCTS = {
             product_id="7446311371005",
             variant_id="42044330115325",
             variant_title="Default Title",
+            mpn="JBXBAR",
+            typical_lead_time_days=10,
         ),
         CatalogProduct(
             "jubilee-xy-mount-set",
@@ -107,6 +207,8 @@ PRODUCTS = {
             product_id="7446311403773",
             variant_id="42044330148093",
             variant_title="Default Title",
+            mpn="JBSM",
+            typical_lead_time_days=10,
         ),
     )
 }
