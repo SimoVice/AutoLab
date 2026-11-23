@@ -406,7 +406,7 @@ def restore_snapshot(snapshot: object) -> tuple[dict, list[dict]]:
         from app.spatial_fit import refresh_spatial_fit
 
         if (
-            inputs.workflow_kind != "general"
+            inputs.workflow_kind not in ("general", "liquid_preparation")
             or saved.revision < 1
             or any(
                 (
@@ -426,7 +426,8 @@ def restore_snapshot(snapshot: object) -> tuple[dict, list[dict]]:
             )
         ):
             raise ValueError(
-                "An open-source hardware import must belong to its own general project."
+                "An open-source hardware import cannot coexist with another active "
+                "workstation or fixture design."
             )
         up_data = deepcopy(saved.upstream_project)
         if not isinstance(up_data, dict) or not up_data.get("provenance"):

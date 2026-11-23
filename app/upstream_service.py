@@ -28,18 +28,20 @@ from app.workflows import describe_workflow
 
 def _ensure_upstream_allowed(project: dict[str, Any]) -> dict[str, Any]:
     wf_kind = (project.get("workflow") or {}).get("kind")
+    design = project.get("design") or {}
     if (
-        wf_kind == "liquid_preparation"
-        or project.get("engineering_design")
+        project.get("engineering_design")
+        or design.get("foundation")
+        or design.get("platform")
         or project.get("concept_design")
         or project.get("standalone_fixture")
         or project.get("bench_station")
     ):
         raise ValueError(
-            "Start a new general project for an open-source hardware import to keep "
+            "Start a new project for an open-source hardware import to keep "
             "the current workstation or design intact."
         )
-    if wf_kind != "general":
+    if wf_kind not in ("general", "liquid_preparation"):
         return apply_update(project, {"workflow_kind": "general"})
     return deepcopy(project)
 

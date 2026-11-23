@@ -376,3 +376,101 @@ def test_autonomous_agent_loop_discovers_ingests_and_adapts_open_hardware(
         "check_spatial_fit",
     ]
     assert res["project"]["upstream_project"]["adaptation"]["interference"]["passed"] is True
+
+
+def test_upstream_project_allowed_in_liquid_preparation_and_persists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    import asyncio
+    from copy import deepcopy
+
+    from app.upstream_service import apply_upstream_adaptation, attach_upstream_project
+
+    clear_discovery_cache()
+    monkeypatch.setenv("AUTOLAB_UPSTREAM_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("AUTOLAB_LAB_PROFILE_PATH", str(tmp_path / "lab-profile.json"))
+    step_bytes = _step_fixture(tmp_path)
+    commit_sha = "f0e1d2c3b4a59687" * 2 + "f0e1d2c3"
+
+    liq = apply_update(
+        new_project(),
+        {
+            "workflow_kind": "liquid_preparation",
+            "workspace_width_mm": 400.0,
+            "workspace_depth_mm": 400.0,
+            "workspace_height_mm": 400.0,
+            "equipment": "Existing P200 and P1000 pipettes sharing tips",
+            "stock_concentration": "10 mg/mL",
+            "target_concentrations": "5 mg/mL, 2 mg/mL",
+            "final_volume": "1 mL",
+        },
+    )
+
+    async def _attach_and_adapt():
+        attached = await attach_upstream_project(
+            liq,
+            source_host="github",
+            repo_full_name="openlab/pipette-gantry",
+            commit_sha=commit_sha,
+            cad_file_path="cad/pump-frame.step",
+            repo_url="https://github.com/openlab/pipette-gantry",
+            spdx_hint="MIT",
+            local_bytes=step_bytes,
+            doc_texts_override={
+                "bom/parts.csv": "Part,Qty,SKU,Notes\nNEMA 17,1,17HS,Stepper\n",
+                "docs/ASSEMBLY.md": "1. Bolt stepper to frame.\n2. Mount pipette clamp.\n",
+            },
+        )
+        return await apply_upstream_adaptation(
+            attached,
+            mode="mating",
+            mating_spec={
+                "kind": "adapter_plate",
+                "placement": "below",
+                "clearance_mm": 0.4,
+            },
+        )
+
+    adp = asyncio.run(_attach_and_adapt())
+    assert adp["workflow"]["kind"] == "liquid_preparation"
+    assert adp["workflow"]["label"] == "Adapted open-source hardware"
+    assert adp["workflow"]["design_available"] is True
+    assert adp["upstream_project"]["adaptation"]["interference"]["passed"] is True
+
+    updated = apply_update(adp, {"workspace_depth_mm": 380.0})
+    assert updated["design"]["footprint"] == adp["design"]["footprint"]
+    assert updated["design"]["spatial_fit"]["subject"] == "upstream_project"
+    assert updated["design"]["spatial_fit"]["status"] == "fits"
+
+    snap = make_snapshot(updated, [{"role": "user", "content": "Automate pipetting in 400mm box"}])
+    restored, _ = restore_snapshot(snap)
+    assert restored["workflow"]["kind"] == "liquid_preparation"
+    assert restored["summary"]["stock_concentration"] == "10 mg/mL"
+    assert restored["summary"]["equipment"] == "Existing P200 and P1000 pipettes sharing tips"
+    assert restored["upstream_project"]["adaptation"]["part_id"] == "custom-adapter-plate"
+
+    with_foundation = deepcopy(liq)
+    with_foundation["design"]["foundation"] = {"id": "jubilee"}
+    with pytest.raises(ValueError, match="keep the current workstation or design intact"):
+        asyncio.run(
+            attach_upstream_project(
+                with_foundation,
+                source_host="github",
+                repo_full_name="openlab/pipette-gantry",
+                commit_sha=commit_sha,
+                cad_file_path="cad/pump-frame.step",
+                repo_url="https://github.com/openlab/pipette-gantry",
+                spdx_hint="MIT",
+                local_bytes=step_bytes,
+                doc_texts_override={},
+            )
+        )
+
+
+def test_agent_prompt_enforces_proactive_discovery_and_pros_cons():
+    from app.agent_loop import AGENT_SYSTEM_PROMPT
+
+    assert "discover_open_hardware_projects" in AGENT_SYSTEM_PROMPT
+    assert "liquid_preparation" in AGENT_SYSTEM_PROMPT
+    assert "NEVER wait for the user" in AGENT_SYSTEM_PROMPT
+    assert "Pros and Cons" in AGENT_SYSTEM_PROMPT

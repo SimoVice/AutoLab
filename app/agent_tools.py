@@ -378,8 +378,10 @@ _TOOL_SPECS: list[tuple[str, str, type[BaseModel]]] = [
     ),
     (
         "lookup_reviewed_references",
-        "Search reviewed hardware platforms, open-hardware CAD references, commercial tip-rack "
-        "profiles, and verified supplier candidate entries in AutoLab's internal library.",
+        "Search ONLY AutoLab's internal reviewed library (Jubilee, OT-2, commercial tip-rack "
+        "profiles, and verified supplier candidate entries). Pair with "
+        "discover_open_hardware_projects rather than using alone when proposing platforms or "
+        "alternatives.",
         LookupReviewedReferencesArgs,
     ),
     (
@@ -463,9 +465,12 @@ _TOOL_SPECS: list[tuple[str, str, type[BaseModel]]] = [
     ),
     (
         "discover_open_hardware_projects",
-        "Search approved open-source hardware indices (GitHub, GitLab, OpenAlex, Europe PMC, "
-        "NIH 3D) for documented lab hardware projects, CAD files (.step/.stl/.scad/.py), "
-        "SPDX licenses, and BOMs beyond Jubilee and OT-2.",
+        "Proactively search approved open-source hardware indices (GitHub, GitLab, OpenAlex, "
+        "Europe PMC, NIH 3D) for documented lab hardware projects, CAD files "
+        "(.step/.stl/.scad/.py), SPDX licenses, and BOMs beyond Jubilee and OT-2. Call by default "
+        "in BOTH liquid_preparation and general workflows whenever scoping, proposing, or "
+        "comparing platforms/mechanisms, using concise 2-4 word English technical queries (retry "
+        "once broader or with require_cad=False if 0 candidates match).",
         DiscoverOpenHardwareProjectsArgs,
     ),
     (

@@ -89,6 +89,22 @@ def describe_workflow(project: dict) -> dict:
         "design_available": design_available,
         "parameters_started": parameters_started,
     }
+    _upstream_meta = {
+        "label": "Adapted open-source hardware",
+        "status": "supported_concept",
+        "capabilities": [
+            "open-source cad discovery",
+            "spdx license & sha256 pin",
+            "sandboxed cad normalization",
+            "mating / parametric adaptation",
+            "attributed bom & build package",
+        ],
+        "scope": (
+            "Commit-pinned open-source hardware import with custom adaptation and modeled "
+            "interference checks. Assembly, BOM compatibility, and firmware safety "
+            "remain unverified."
+        ),
+    }
     if kind == "general":
         station = project.get("bench_station")
         if project.get("concept_design"):
@@ -113,22 +129,7 @@ def describe_workflow(project: dict) -> dict:
                 ),
             )
         elif project.get("upstream_project"):
-            result.update(
-                label="Adapted open-source hardware",
-                status="supported_concept",
-                capabilities=[
-                    "open-source cad discovery",
-                    "spdx license & sha256 pin",
-                    "sandboxed cad normalization",
-                    "mating / parametric adaptation",
-                    "attributed bom & build package",
-                ],
-                scope=(
-                    "Commit-pinned open-source hardware import with custom adaptation and modeled "
-                    "interference checks. Assembly, BOM compatibility, and firmware safety "
-                    "remain unverified."
-                ),
-            )
+            result.update(**_upstream_meta)
         elif station:
             result.update(
                 label="Human-operated bench station",
@@ -145,6 +146,8 @@ def describe_workflow(project: dict) -> dict:
                 scope="Develop proposed operations and acceptance checks, or design custom "
                       "equipment with downloadable models, parts and assembly guidance.",
             )
+    elif kind == "liquid_preparation" and project.get("upstream_project"):
+        result.update(**_upstream_meta)
     return result
 
 

@@ -613,6 +613,23 @@ def _apply_update(project: dict, patch: dict) -> dict:
             return refresh_spatial_fit(reapply_labware(result, require_accepted=False))
         return refresh_spatial_fit(add_geometry(result))
 
+    if result.get("upstream_project"):
+        from app.spatial_fit import refresh_spatial_fit
+
+        up_data = result["upstream_project"]
+        adapt_comb = (up_data.get("adaptation") or {}).get("combined_geometry")
+        comb = adapt_comb or up_data.get("geometry") or {}
+        app_size = comb.get("app_size_mm") or [0.0, 0.0, 0.0]
+        result["design"]["footprint"] = {
+            "width_mm": round(float(app_size[0]), 2),
+            "depth_mm": round(float(app_size[2]), 2),
+            "height_mm": round(float(app_size[1]), 2),
+        }
+        result["revision"] += 1
+        result["status"] = "draft"
+        result["workflow"] = describe_workflow(result)
+        return refresh_spatial_fit(result)
+
     from app.spatial_fit import evaluate_spatial_fit
 
     candidate_design, _, _ = _finish_design(
