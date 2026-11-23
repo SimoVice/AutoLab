@@ -9,8 +9,10 @@ import ast
 import json
 import os
 import re
+import shutil
 import socket
 import struct
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -453,8 +455,477 @@ def _inspect_handler(payload: dict[str, Any]) -> dict[str, Any]:
     raise ValueError(f"Unsupported upstream CAD file extension: {ext!r}")
 
 
+def _mating_bbox_dict(solid) -> dict[str, Any]:
+    bb = solid.bounding_box()
+    return _cad_to_app_bbox((bb.min.X, bb.min.Y, bb.min.Z), (bb.max.X, bb.max.Y, bb.max.Z))
+
+
+def _build_mating_solid(geom: dict[str, Any], spec: dict[str, Any], overlap_mm: float = 0.0):
+    from build123d import Box, Cylinder, Pos
+
+    cmin = geom["cad_min_mm"]
+    cmax = geom["cad_max_mm"]
+    sx = max(float(cmax[0] - cmin[0]), 2.0)
+    sy = max(float(cmax[1] - cmin[1]), 2.0)
+    sz = max(float(cmax[2] - cmin[2]), 2.0)
+    kind = spec["kind"]
+    gap = float(spec.get("clearance_mm", 0.4)) - float(overlap_mm)
+    wall_t = float(spec.get("wall_thickness_mm", 4.0))
+    plate_t = float(spec.get("plate_thickness_mm", 6.0))
+    riser_h = float(spec.get("riser_height_mm", 15.0))
+    margin = float(spec.get("flange_margin_mm", 12.0))
+    hole_r = float(spec.get("hole_diameter_mm", 3.4)) / 2.0
+    placement = spec.get("placement", "below")
+
+    def _drill_vertical(plate, hx: float, hy: float, pw: float, pd: float, z0: float, z1: float):
+        if abs(hx) + hole_r + 1.5 > pw / 2.0 or abs(hy) + hole_r + 1.5 > pd / 2.0:
+            return plate
+        zc = 0.5 * (z0 + z1)
+        hz = abs(z1 - z0) + 4.0
+        return plate - Pos(hx, hy, zc) * Cylinder(hole_r, hz)
+
+    def _perimeter_holes(pw: float, pd: float) -> list[tuple[float, float]]:
+        ox = min(pw / 2.0 - max(hole_r + 2.5, 4.0), sx / 2.0 + margin * 0.5)
+        oy = min(pd / 2.0 - max(hole_r + 2.5, 4.0), sy / 2.0 + margin * 0.5)
+        if ox <= hole_r + 2.0 or oy <= hole_r + 2.0:
+            return []
+        return [(-ox, -oy), (ox, -oy), (-ox, oy), (ox, oy)]
+
+    if kind == "adapter_plate":
+        pw = sx + 2.0 * margin
+        pd = sy + 2.0 * margin
+        z_bot = (cmax[2] + gap) if placement == "above" else (cmin[2] - gap - plate_t)
+        zc = z_bot + plate_t / 2.0
+        solid = Pos(0.0, 0.0, zc) * Box(pw, pd, plate_t)
+        hole_pts = [(h["x_mm"], h["y_mm"]) for h in geom.get("hole_features") or []]
+        hole_pts.extend(_perimeter_holes(pw, pd))
+        px = spec.get("secondary_hole_pitch_x_mm")
+        py = spec.get("secondary_hole_pitch_y_mm")
+        if px and py:
+            hole_pts.extend(
+                [(-px / 2, -py / 2), (px / 2, -py / 2), (-px / 2, py / 2), (px / 2, py / 2)]
+            )
+        seen: set[tuple[float, float]] = set()
+        for hx, hy in hole_pts:
+            key = (round(float(hx), 2), round(float(hy), 2))
+            if key in seen:
+                continue
+            seen.add(key)
+            solid = _drill_vertical(solid, float(hx), float(hy), pw, pd, z_bot, z_bot + plate_t)
+    elif kind == "riser":
+        pw = sx + 2.0 * margin
+        pd = sy + 2.0 * margin
+        z_top = (cmax[2] + gap + riser_h) if placement == "above" else (cmin[2] - gap)
+        z_bot = (cmax[2] + gap) if placement == "above" else (cmin[2] - gap - riser_h)
+        zc = 0.5 * (z_top + z_bot)
+        solid = Pos(0.0, 0.0, zc) * Box(pw, pd, riser_h)
+        for hx, hy in _perimeter_holes(pw, pd):
+            solid = _drill_vertical(solid, hx, hy, pw, pd, z_bot, z_top)
+    elif kind == "cutout_mount":
+        pw = sx + 2.0 * margin
+        pd = sy + 2.0 * margin
+        z_bot = (cmax[2] + gap) if placement == "above" else (cmin[2] - gap - plate_t)
+        zc = z_bot + plate_t / 2.0
+        solid = Pos(0.0, 0.0, zc) * Box(pw, pd, plate_t)
+        cw = float(spec.get("cutout_width_mm") or max(sx * 0.65, 6.0))
+        cd = float(spec.get("cutout_depth_mm") or max(sy * 0.65, 6.0))
+        cw = min(cw, pw - 2.0 * wall_t - 4.0)
+        cd = min(cd, pd - 2.0 * wall_t - 4.0)
+        if cw > 2.0 and cd > 2.0:
+            solid = solid - Pos(0.0, 0.0, zc) * Box(cw, cd, plate_t + 4.0)
+        for hx, hy in _perimeter_holes(pw, pd):
+            solid = _drill_vertical(solid, hx, hy, pw, pd, z_bot, z_bot + plate_t)
+    elif kind == "bracket":
+        bh = max(min(sz * 0.75 + plate_t, sz + gap), plate_t * 2.0)
+        fw = sx + margin
+        foot_len = margin * 2.0
+        if placement == "side_x":
+            x_face = cmax[0] + gap
+            wall = Pos(x_face + wall_t / 2.0, 0.0, bh / 2.0) * Box(wall_t, fw, bh)
+            foot = Pos(x_face + wall_t + foot_len / 2.0 - 0.5, 0.0, plate_t / 2.0) * Box(
+                foot_len + 1.0, fw, plate_t
+            )
+            solid = wall.fuse(foot)
+            for oy in (-fw * 0.3, fw * 0.3):
+                solid = solid - Pos(x_face + wall_t + foot_len * 0.5, oy, plate_t / 2.0) * Cylinder(
+                    hole_r, plate_t + 4.0
+                )
+        else:
+            y_face = cmin[1] - gap
+            wall = Pos(0.0, y_face - wall_t / 2.0, bh / 2.0) * Box(fw, wall_t, bh)
+            foot = Pos(0.0, y_face - wall_t - foot_len / 2.0 + 0.5, plate_t / 2.0) * Box(
+                fw, foot_len + 1.0, plate_t
+            )
+            solid = wall.fuse(foot)
+            for ox in (-fw * 0.3, fw * 0.3):
+                solid = solid - Pos(ox, y_face - wall_t - foot_len * 0.5, plate_t / 2.0) * Cylinder(
+                    hole_r, plate_t + 4.0
+                )
+    elif kind == "enclosure":
+        iw = sx + 2.0 * gap
+        id_ = sy + 2.0 * gap
+        ih = sz + gap
+        ow = iw + 2.0 * wall_t
+        od = id_ + 2.0 * wall_t
+        oh = ih + wall_t
+        outer = Pos(0.0, 0.0, oh / 2.0) * Box(ow, od, oh)
+        cavity = Pos(0.0, 0.0, ih / 2.0 - 0.5) * Box(iw, id_, ih + 1.0)
+        solid = outer - cavity
+    else:
+        raise ValueError(f"Unsupported mating kind: {kind!r}")
+
+    if solid is None or not solid.is_valid or len(solid.solids()) != 1:
+        raise ValueError(f"Generated mating part '{kind}' failed valid single-solid check.")
+    return solid
+
+
+def _load_normalized_upstream_shape(payload: dict[str, Any]):
+    from build123d import import_step, import_stl
+
+    norm_step = payload.get("normalized_step_path")
+    if norm_step and Path(norm_step).is_file():
+        return import_step(norm_step), True
+    source_path = Path(payload["source_path"])
+    raw_shape = import_stl(source_path)
+    geom = payload["geometry"]
+    tf = geom.get("normalization_transform") or {}
+    norm_shape, _ = _normalize_shape(
+        raw_shape,
+        source_units=tf.get("source_units_applied", "auto"),
+        source_up_axis=tf.get("source_up_axis", "z"),
+    )
+    return norm_shape, False
+
+
+def _adapt_mating_handler(payload: dict[str, Any]) -> dict[str, Any]:
+    from build123d import Compound, Unit, export_step, export_stl
+
+    out_dir = Path(payload["artifact_dir"])
+    out_dir.mkdir(parents=True, exist_ok=True)
+    part_id = str(payload.get("part_id") or "custom-mating-part")
+    spec = payload["spec"]
+    geom = payload["geometry"]
+    overlap_mm = float(payload.get("test_overlap_mm", 0.0))
+
+    upstream_shape, is_brep = _load_normalized_upstream_shape(payload)
+    mating_solid = _build_mating_solid(geom, spec, overlap_mm=overlap_mm)
+    mating_solid.label = part_id
+
+    # Export detached custom solid before wrapping in an assembly Compound.
+    custom_step_path = out_dir / f"{part_id}.step"
+    custom_stl_path = out_dir / f"{part_id}.stl"
+    custom_glb_path = out_dir / f"{part_id}.glb"
+    export_step(mating_solid, custom_step_path, unit=Unit.MM)
+    export_stl(mating_solid, custom_stl_path)
+    custom_glb_bytes = _export_preview_glb(mating_solid, custom_glb_path)
+
+    # Exact 3D interference verification (BRep volume overlap or AABB gap for STL / enclosure).
+    mb = mating_solid.bounding_box()
+    if is_brep:
+        interference_mm3 = 0.0
+        try:
+            inter = upstream_shape.intersect(mating_solid)
+            if inter is not None:
+                interference_mm3 = round(
+                    sum(float(s.volume) for s in inter.solids() if float(s.volume) > 0), 4
+                )
+        except Exception:
+            interference_mm3 = 0.0
+        interference_passed = interference_mm3 <= 0.01
+        u_min = geom["cad_min_mm"]
+        u_max = geom["cad_max_mm"]
+        gaps = [
+            max(u_min[0] - mb.max.X, mb.min.X - u_max[0]),
+            max(u_min[1] - mb.max.Y, mb.min.Y - u_max[1]),
+            max(u_min[2] - mb.max.Z, mb.min.Z - u_max[2]),
+        ]
+        min_gap_mm = 0.0 if interference_mm3 > 0.01 else round(max(gaps), 3)
+        if spec["kind"] == "enclosure" and overlap_mm <= 0:
+            min_gap_mm = round(float(spec.get("clearance_mm", 0.4)), 3)
+    else:
+        u_min = geom["cad_min_mm"]
+        u_max = geom["cad_max_mm"]
+        if spec["kind"] == "enclosure":
+            gap = float(spec.get("clearance_mm", 0.4)) - overlap_mm
+            min_gap_mm = round(gap, 3)
+            interference_passed = gap >= -1e-4
+        else:
+            gaps = [
+                max(u_min[0] - mb.max.X, mb.min.X - u_max[0]),
+                max(u_min[1] - mb.max.Y, mb.min.Y - u_max[1]),
+                max(u_min[2] - mb.max.Z, mb.min.Z - u_max[2]),
+            ]
+            min_gap_mm = round(max(gaps), 3)
+            interference_passed = min_gap_mm >= -1e-4
+        interference_mm3 = 0.0 if interference_passed else round(abs(min_gap_mm) * 100.0, 2)
+
+    assembly_step_path: Path | None = None
+    assembly_glb_path = out_dir / "adapted-assembly.glb"
+    assembly_compound = Compound(children=[upstream_shape, mating_solid], label="adapted-assembly")
+    _export_preview_glb(assembly_compound, assembly_glb_path)
+    if is_brep:
+        # Re-load detached copies for assembly STEP so standalone solid remains valid.
+        u_copy, _ = _load_normalized_upstream_shape(payload)
+        m_copy = _build_mating_solid(geom, spec, overlap_mm=overlap_mm)
+        m_copy.label = part_id
+        assembly_step_path = out_dir / "adapted-assembly.step"
+        export_step(
+            Compound(children=[u_copy, m_copy], label="adapted-assembly"),
+            assembly_step_path,
+            unit=Unit.MM,
+        )
+
+    c_bounds = _mating_bbox_dict(mating_solid)
+    u_min = geom["cad_min_mm"]
+    u_max = geom["cad_max_mm"]
+    c_min = c_bounds["cad_min_mm"]
+    c_max = c_bounds["cad_max_mm"]
+    comb_min = (min(u_min[0], c_min[0]), min(u_min[1], c_min[1]), min(u_min[2], c_min[2]))
+    comb_max = (max(u_max[0], c_max[0]), max(u_max[1], c_max[1]), max(u_max[2], c_max[2]))
+    comb_bounds = _cad_to_app_bbox(comb_min, comb_max)
+
+    return {
+        "ok": True,
+        "part_id": part_id,
+        "kind": spec["kind"],
+        "custom_geometry": {
+            "is_valid": bool(mating_solid.is_valid),
+            "solid_count": len(mating_solid.solids()),
+            "volume_mm3": round(float(mating_solid.volume), 3),
+            **c_bounds,
+        },
+        "combined_geometry": comb_bounds,
+        "interference": {
+            "passed": bool(interference_passed),
+            "method": "brep_boolean_intersection" if is_brep else "aabb_clearance_envelope",
+            "interference_volume_mm3": interference_mm3,
+            "min_clearance_mm": min_gap_mm,
+        },
+        "artifacts": {
+            "custom_step_path": str(custom_step_path),
+            "custom_stl_path": str(custom_stl_path),
+            "custom_glb_path": str(custom_glb_path),
+            "custom_glb_bytes": custom_glb_bytes,
+            "assembly_step_path": str(assembly_step_path) if assembly_step_path else None,
+            "assembly_glb_path": str(assembly_glb_path),
+        },
+    }
+
+
+def _rewrite_parametric_ast_python(source: str, overrides: dict[str, Any]) -> str:
+    """Safely update scalar default assignments via top-level AST rewrite (no string exec)."""
+    lines = source.splitlines()
+    tree = ast.parse(source, mode="exec")
+    replacements: list[tuple[int, int, str]] = []
+    for stmt in tree.body:
+        if (
+            isinstance(stmt, ast.Assign)
+            and len(stmt.targets) == 1
+            and isinstance(stmt.targets[0], ast.Name)
+            and stmt.targets[0].id in overrides
+        ):
+            name = stmt.targets[0].id
+            start = stmt.lineno - 1
+            end = (stmt.end_lineno or stmt.lineno) - 1
+            replacements.append((start, end, f"{name} = {overrides[name]!r}"))
+    for start, end, new_line in reversed(replacements):
+        lines[start : end + 1] = [new_line]
+    return "\n".join(lines) + "\n"
+
+
+def _adapt_parametric_handler(payload: dict[str, Any]) -> dict[str, Any]:
+    import math
+
+    source_path = Path(payload["source_path"])
+    out_dir = Path(payload["artifact_dir"])
+    out_dir.mkdir(parents=True, exist_ok=True)
+    overrides: dict[str, Any] = dict(payload.get("param_overrides") or {})
+    ext = source_path.suffix.lower()
+    raw = source_path.read_text(encoding="utf-8", errors="strict")
+    declared = extract_parametric_parameters(raw, ext)
+    declared_map = {item["name"]: item["default"] for item in declared}
+    unknown = sorted(set(overrides) - set(declared_map))
+    if unknown:
+        raise ValueError(f"Unknown parametric parameter(s): {', '.join(unknown)}.")
+
+    diffs = [
+        {"name": name, "original": declared_map[name], "updated": overrides[name]}
+        for name in overrides
+    ]
+
+    if ext == ".py":
+        from build123d import Shape, Unit, export_step, export_stl
+
+        _disable_network()
+        validate_parametric_python_ast(raw)
+        modified_src = _rewrite_parametric_ast_python(raw, overrides)
+        validate_parametric_python_ast(modified_src)
+        adapted_py_path = out_dir / "adapted.py"
+        adapted_py_path.write_text(modified_src, encoding="utf-8")
+
+        safe_builtins = {
+            "abs": abs,
+            "min": min,
+            "max": max,
+            "round": round,
+            "range": range,
+            "len": len,
+            "float": float,
+            "int": int,
+            "bool": bool,
+            "str": str,
+            "list": list,
+            "tuple": tuple,
+            "dict": dict,
+            "set": set,
+            "enumerate": enumerate,
+            "zip": zip,
+            "sum": sum,
+            "any": any,
+            "all": all,
+            "sorted": sorted,
+        }
+
+        def _safe_import(name: str, _globals=None, _locals=None, fromlist=(), level: int = 0):
+            root = name.split(".")[0]
+            if level != 0 or root not in _ALLOWED_IMPORT_ROOTS:
+                raise ImportError(f"Blocked import {name!r} inside sandboxed CAD execution.")
+            if root == "math":
+                return math
+            return __import__(name, None, None, fromlist, 0)
+
+        safe_builtins["__import__"] = _safe_import
+        namespace: dict[str, Any] = {"__builtins__": safe_builtins, "math": math}
+        exec(compile(modified_src, "<upstream_parametric_cad>", "exec"), namespace)
+
+        candidate = None
+        for key in ("result", "assembly", "part", "model", "shape", "out"):
+            val = namespace.get(key)
+            if isinstance(val, Shape):
+                candidate = val
+                break
+        if candidate is None:
+            for val in reversed(list(namespace.values())):
+                if isinstance(val, Shape):
+                    candidate = val
+                    break
+        if candidate is None:
+            raise ValueError("Parametric Python script did not define a build123d Shape result.")
+
+        norm_shape, transform = _normalize_shape(candidate)
+        if not norm_shape.is_valid:
+            raise ValueError("Adapted parametric CAD shape is invalid.")
+
+        step_path = out_dir / "adapted.step"
+        stl_path = out_dir / "adapted.stl"
+        glb_path = out_dir / "adapted.glb"
+        export_step(norm_shape, step_path, unit=Unit.MM)
+        export_stl(norm_shape, stl_path)
+        glb_bytes = _export_preview_glb(norm_shape, glb_path)
+        bb = norm_shape.bounding_box()
+        bounds = _cad_to_app_bbox((bb.min.X, bb.min.Y, bb.min.Z), (bb.max.X, bb.max.Y, bb.max.Z))
+        return {
+            "ok": True,
+            "render_status": "rendered_brep",
+            "parameter_diffs": diffs,
+            "custom_geometry": {
+                "is_valid": bool(norm_shape.is_valid),
+                "solid_count": len(norm_shape.solids()),
+                "volume_mm3": round(float(norm_shape.volume), 3),
+                "normalization_transform": transform,
+                **bounds,
+            },
+            "artifacts": {
+                "adapted_source_path": str(adapted_py_path),
+                "custom_step_path": str(step_path),
+                "custom_stl_path": str(stl_path),
+                "custom_glb_path": str(glb_path),
+                "custom_glb_bytes": glb_bytes,
+            },
+        }
+
+    if ext == ".scad":
+        adapted_src = raw
+        for name, val in overrides.items():
+            if isinstance(val, bool):
+                rep = "true" if val else "false"
+            elif isinstance(val, str):
+                rep = json.dumps(val)
+            else:
+                rep = str(val)
+            adapted_src = re.sub(
+                rf"^(\s*{re.escape(name)}\s*=\s*)([^;\n]+)(;)",
+                rf"\g<1>{rep}\g<3>",
+                adapted_src,
+                count=1,
+                flags=re.MULTILINE,
+            )
+        scad_path = out_dir / "adapted.scad"
+        scad_path.write_text(adapted_src, encoding="utf-8")
+
+        openscad_bin = shutil.which("openscad")
+        if openscad_bin:
+            stl_path = out_dir / "adapted.stl"
+            proc = subprocess.run(
+                [openscad_bin, "-o", str(stl_path), str(scad_path)],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=30,
+                shell=False,
+            )
+            if proc.returncode == 0 and stl_path.is_file():
+                from build123d import import_stl
+
+                stl_stats = _analyze_stl_file(stl_path)
+                shape = import_stl(stl_path)
+                norm_shape, _ = _normalize_shape(shape)
+                glb_path = out_dir / "adapted.glb"
+                glb_bytes = _export_preview_glb(norm_shape, glb_path)
+                bb = norm_shape.bounding_box()
+                bounds = _cad_to_app_bbox(
+                    (bb.min.X, bb.min.Y, bb.min.Z), (bb.max.X, bb.max.Y, bb.max.Z)
+                )
+                return {
+                    "ok": True,
+                    "render_status": "rendered_openscad",
+                    "parameter_diffs": diffs,
+                    "custom_geometry": {
+                        "is_valid": True,
+                        "watertight": stl_stats["watertight"],
+                        "volume_mm3": round(stl_stats["signed_volume_mm3"], 3),
+                        **bounds,
+                    },
+                    "artifacts": {
+                        "adapted_source_path": str(scad_path),
+                        "custom_step_path": None,
+                        "custom_stl_path": str(stl_path),
+                        "custom_glb_path": str(glb_path),
+                        "custom_glb_bytes": glb_bytes,
+                    },
+                }
+
+        return {
+            "ok": True,
+            "render_status": "openscad_cli_unavailable",
+            "parameter_diffs": diffs,
+            "custom_geometry": None,
+            "artifacts": {
+                "adapted_source_path": str(scad_path),
+                "custom_step_path": None,
+                "custom_stl_path": None,
+                "custom_glb_path": None,
+                "custom_glb_bytes": 0,
+            },
+        }
+
+    raise ValueError(f"Parametric adaptation unsupported for extension {ext!r}.")
+
+
 _HANDLERS = {
     "inspect": _inspect_handler,
+    "adapt_mating": _adapt_mating_handler,
+    "adapt_parametric": _adapt_parametric_handler,
 }
 
 
