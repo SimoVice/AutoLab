@@ -809,22 +809,18 @@ def build_cad_files(project: dict) -> dict[str, bytes]:
             (c for c in components if c.get("fabrication_shape") == "microplate_holder"), None
         )
         if plate_comp:
-            plate_children = getattr(built_solids[plate_comp["id"]], "children", None) or []
-            holder_ref = (
-                plate_children[0]
-                if len(plate_children) >= 1
-                else _build_plate_part(plate_comp, "holder-")
-            )
-            plate_ref = (
-                plate_children[1]
-                if len(plate_children) >= 2
-                else _build_plate_part(plate_comp, "reference-")
-            )
+            plate_cache: dict[str, object] = {}
+
+            def _get_plate_part(prefix: str):
+                if prefix not in plate_cache:
+                    plate_cache[prefix] = _build_plate_part(plate_comp, prefix)
+                return plate_cache[prefix]
+
             for filename, subkey, factory, exporter in (
-                ("plate-holder.step", "holder_step", lambda: holder_ref,
+                ("plate-holder.step", "holder_step", lambda: _get_plate_part("holder-"),
                  lambda s, p: export_step(s, p, unit=Unit.MM)),
-                ("plate-holder.stl", "holder_stl", lambda: holder_ref, export_stl),
-                ("plate-reference.step", "ref_step", lambda: plate_ref,
+                ("plate-holder.stl", "holder_stl", lambda: _get_plate_part("holder-"), export_stl),
+                ("plate-reference.step", "ref_step", lambda: _get_plate_part("reference-"),
                  lambda s, p: export_step(s, p, unit=Unit.MM)),
             ):
                 rack_files["cad/" + filename] = _cached_export(
