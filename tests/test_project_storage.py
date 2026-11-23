@@ -138,3 +138,22 @@ def test_snapshot_api_survives_session_loss_without_reusing_old_jobs(monkeypatch
             == 413
         )
     api._sessions.clear()
+
+
+def test_general_equipment_patch_roundtrips_through_snapshot():
+    project = apply_update(
+        new_project(),
+        {
+            "workflow_kind": "general",
+            "equipment": "fixed camera",
+            "brief_equipment": "fixed camera",
+            "workspace_width_mm": 360.0,
+        },
+    )
+    assert project["summary"]["equipment"] is None
+    assert project["brief"]["equipment"] == "fixed camera"
+    snapshot = make_snapshot(project, [{"role": "user", "content": "Tray 128 x 86 x 18.5 mm."}])
+    restored, _ = restore_snapshot(decode_snapshot(json.dumps(snapshot).encode()))
+    assert restored["summary"]["equipment"] is None
+    assert restored["brief"]["equipment"] == "fixed camera"
+    assert restored["summary"]["workspace_width_mm"] == 360.0

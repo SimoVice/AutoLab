@@ -417,6 +417,10 @@ def _apply_update(project: dict, patch: dict) -> dict:
         if equipment_touched:
             brief_patch["equipment"] = liquid_equipment
             summary_updates["equipment"] = liquid_equipment
+    elif "equipment" in summary_updates:
+        general_equipment = summary_updates.pop("equipment")
+        if general_equipment is not None and "equipment" not in brief_patch:
+            brief_patch["equipment"] = general_equipment
 
     # Fast no-op check including selections, brief and workflow kind.
     summary_noop = all(

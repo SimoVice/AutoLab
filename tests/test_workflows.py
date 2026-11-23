@@ -234,3 +234,23 @@ def test_grounded_width_is_kept_in_generic_brief_without_machine():
     revised = apply_update(project, {"workspace_width_mm": 400})
     assert revised["brief"]["constraints"] == "Available width: 400 mm"
     assert revised["revision"] == project["revision"] + 1
+
+
+def test_general_equipment_stays_out_of_liquid_summary():
+    both = apply_update(
+        new_project(),
+        {
+            "workflow_kind": "general",
+            "equipment": "fixed camera",
+            "brief_equipment": "fixed camera",
+        },
+    )
+    assert both["summary"]["equipment"] is None
+    assert both["brief"]["equipment"] == "fixed camera"
+
+    summary_only = apply_update(
+        new_project(),
+        {"workflow_kind": "general", "equipment": "fixed camera"},
+    )
+    assert summary_only["summary"]["equipment"] is None
+    assert summary_only["brief"]["equipment"] == "fixed camera"
