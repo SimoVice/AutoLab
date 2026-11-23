@@ -41,6 +41,13 @@ def main():
             )
     if args.mode in ("gil", "hang"):
         hold_gil(1.25 if args.mode == "gil" else 30)
+    if args.mode == "memory-hog":
+        # Allocate and fault in ~96 MB of writable pages so OS RSS rises deterministically.
+        hog = bytearray(96 * 1024 * 1024)
+        for offset in range(0, len(hog), 4096):
+            hog[offset] = 1
+        time.sleep(15)
+        return 0
     if args.mode == "error":
         diagnostic.write_text(
             json.dumps({"error_type": "SyntheticWorkerFailure"}), encoding="utf-8"

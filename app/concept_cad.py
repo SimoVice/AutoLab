@@ -6,25 +6,39 @@ represents proposed primitive solids; it is not a toleranced fabrication drawing
 from __future__ import annotations
 
 import json
+import time
 from functools import lru_cache
+from importlib import metadata
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Lock
 
+from app.cad_cache import cache_key, clear_cache, get_cached_bytes, put_cached_bytes
 from app.concept_design import compile_concept
 
 # Boolean operations grow rapidly with solid count. Bound a single request and
 # never start an unbounded BRep generation as part of the standard ZIP export.
 MAX_STEP_PRIMITIVES = 200
 _CAD_LOCK = Lock()
+_CACHE_NAMESPACE = "concept_step"
 
 
 class ConceptCADUnavailable(RuntimeError):
     """The optional CAD dependency is not installed."""
 
 
-def concept_step(design: dict, component_key: str | None = None) -> bytes:
-    """Export a named assembly in world coordinates, or one part in local coordinates."""
+def _build123d_version() -> str:
+    try:
+        return metadata.version("build123d")
+    except Exception:
+        return "unknown"
+
+
+def concept_step_with_metrics(
+    design: dict, component_key: str | None = None
+) -> tuple[bytes, dict]:
+    """Export an editable STEP model and return elapsed/cache performance telemetry."""
+    started = time.perf_counter()
     canonical = compile_concept(design['proposal'], design.get('workspace_width_mm'))
     components = canonical['components']
     if component_key is not None:
@@ -38,15 +52,50 @@ def concept_step(design: dict, component_key: str | None = None) -> bytes:
     data = [{'key': c['key'], 'name': c['name'], 'position_mm': c['position_mm'],
              'primitives': c['primitives']} for c in components]
     encoded = json.dumps(data, sort_keys=True, separators=(',', ':'))
-    return _render_step(encoded, component_key is None)
+    ck = cache_key(
+        _CACHE_NAMESPACE,
+        {'world': component_key is None, 'components': data},
+        version=_build123d_version(),
+    )
+    cached = get_cached_bytes(ck)
+    cache_hit = cached is not None
+    payload = cached if cached is not None else _render_step(encoded, component_key is None)
+    if not cache_hit:
+        put_cached_bytes(ck, payload)
+    elapsed_ms = round((time.perf_counter() - started) * 1000.0, 2)
+    return payload, {
+        'component_key': component_key,
+        'component_count': len(components),
+        'primitive_count': count,
+        'cache_hit': cache_hit,
+        'elapsed_ms': elapsed_ms,
+    }
+
+
+def concept_step(design: dict, component_key: str | None = None) -> bytes:
+    """Export a named assembly in world coordinates, or one part in local coordinates."""
+    payload, _ = concept_step_with_metrics(design, component_key)
+    return payload
 
 
 @lru_cache(maxsize=4)
-def _render_step(encoded: str, world_coordinates: bool) -> bytes:
+def _render_step_lru(encoded: str, world_coordinates: bool) -> bytes:
     # Serialize native CAD operations so concurrent downloads cannot multiply
     # their memory cost or contend in the underlying STEP writer.
     with _CAD_LOCK:
         return _write_step(encoded, world_coordinates)
+
+
+def _render_step(encoded: str, world_coordinates: bool) -> bytes:
+    return _render_step_lru(encoded, world_coordinates)
+
+
+def _clear_concept_cache() -> None:
+    _render_step_lru.cache_clear()
+    clear_cache(_CACHE_NAMESPACE)
+
+
+_render_step.cache_clear = _clear_concept_cache  # type: ignore[attr-defined]
 
 
 def _extrusion_solid(profile: str, size_mm: list[float], axis: str):

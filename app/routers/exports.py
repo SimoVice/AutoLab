@@ -159,3 +159,36 @@ async def download_export_file(project_id: str, job_id: str, name: str) -> Respo
         media_type=media_type_for(name),
         headers={"Content-Disposition": f'attachment; filename="{safe}"'},
     )
+
+
+@router.get("/api/projects/{project_id}/parts/{component_id}/cad")
+async def download_single_part_cad(
+    project_id: str,
+    component_id: str,
+    format: str = "step",
+) -> Response:
+    """Export one component CAD artifact incrementally inside the bounded CAD worker."""
+    from app.cad_worker import CadWorkerError, execute_cad_part
+
+    if format not in ("step", "stl"):
+        raise HTTPException(status_code=422, detail="Choose 'step' or 'stl' CAD format.")
+    session = api_hook("session_for", session_for)(project_id)
+    async with session.model_lock():
+        current = project_with_report(
+            session.project, session.procurement_report, session.cost_estimate
+        )
+    try:
+        payload, meta = await execute_cad_part(current, component_id, fmt=format)
+    except CadWorkerError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
+    filename = f"{component_id}.{format}"
+    return Response(
+        content=payload,
+        media_type=media_type_for(filename),
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-AutoLab-CAD-Cache": "hit" if meta.get("cache_hit") else "miss",
+        },
+    )

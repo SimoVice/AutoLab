@@ -523,19 +523,136 @@ def _workstation_svg(components: list[dict], project_id, revision) -> bytes:
     return "\n".join(parts).encode("utf-8")
 
 
+def _rss_mb() -> float | None:
+    try:
+        import os
+
+        from app.cad_worker import _process_rss_bytes
+
+        rss = _process_rss_bytes(os.getpid())
+        return round(rss / (1024 * 1024), 2) if rss is not None else None
+    except Exception:
+        return None
+
+
+def _cached_export(
+    namespace: str,
+    cache_payload: object,
+    tmp_path: str,
+    solid_factory,
+    exporter,
+    cad_version: str,
+    stats: dict,
+    metric_key: str,
+) -> bytes:
+    import time
+
+    from app.cad_cache import cache_key, get_cached_bytes, put_cached_bytes
+
+    t0 = time.perf_counter()
+    ck = cache_key(namespace, cache_payload, version=f"{_SOURCE_SHA256[:12]}:{cad_version}")
+    cached = get_cached_bytes(ck)
+    if cached is not None:
+        stats["cache_hits"] += 1
+        stats["per_part_ms"][metric_key] = round((time.perf_counter() - t0) * 1000.0, 2)
+        return cached
+    solid = solid_factory()
+    exporter(solid, tmp_path)
+    with open(tmp_path, "rb") as fh:
+        raw = fh.read()
+    put_cached_bytes(ck, raw)
+    stats["cache_misses"] += 1
+    stats["per_part_ms"][metric_key] = round((time.perf_counter() - t0) * 1000.0, 2)
+    return raw
+
+
+def export_single_part(
+    project: dict, component_id: str, *, fmt: str = "step"
+) -> tuple[bytes, dict]:
+    """Incrementally export and cache one named component as STEP or STL."""
+    import gc
+    import os
+    import time
+
+    from build123d import Unit, export_step, export_stl
+
+    if fmt not in ("step", "stl"):
+        raise ValueError("CAD part format must be 'step' or 'stl'.")
+    if not isinstance(project, dict) or "design" not in project:
+        raise ValueError("project.design is missing.")
+    started = time.perf_counter()
+    components = _components(project)
+    comp = next((c for c in components if c["id"] == component_id), None)
+    if comp is None:
+        raise ValueError(f"Unknown CAD component '{component_id}'.")
+
+    from app.cad_cache import cache_key, get_cached_bytes, put_cached_bytes
+
+    cad_ver = _build123d_version()
+    payload = {
+        "comp": comp,
+        "geometry_sha": GEOMETRY_SOURCE_SHA256,
+        "format": fmt,
+    }
+    ck = cache_key("single_part", payload, version=f"{_SOURCE_SHA256[:12]}:{cad_ver}")
+    cached = get_cached_bytes(ck)
+    if cached is not None:
+        return cached, {
+            "component_id": component_id,
+            "format": fmt,
+            "cache_hit": True,
+            "elapsed_ms": round((time.perf_counter() - started) * 1000.0, 2),
+            "peak_rss_mb": _rss_mb(),
+        }
+
+    imported = comp["kind"] == "upstream-cad"
+    solid = load_foundation_cad(comp["bed_drop_mm"]) if imported else _build_solid(comp)
+    solid.label = comp["id"]
+    if imported:
+        solid.children[1].label = "build_plate_assembly"
+    if solid is None or not solid.is_valid:
+        raise ValueError(f"CAD solid for '{comp['id']}' is invalid.")
+    with TemporaryDirectory() as tmp:
+        out_path = os.path.join(tmp, f"part.{fmt}")
+        if fmt == "step":
+            export_step(solid, out_path, unit=Unit.MM)
+        else:
+            export_stl(solid, out_path)
+        with open(out_path, "rb") as fh:
+            data = fh.read()
+    put_cached_bytes(ck, data)
+    gc.collect()
+    return data, {
+        "component_id": component_id,
+        "format": fmt,
+        "cache_hit": False,
+        "elapsed_ms": round((time.perf_counter() - started) * 1000.0, 2),
+        "peak_rss_mb": _rss_mb(),
+    }
+
+
 def build_cad_files(project: dict) -> dict[str, bytes]:
-    """Build concept CAD files from the live project snapshot."""
+    """Build concept CAD files from the live project snapshot with incremental per-part cache."""
+    import gc
+    import os
+    import time
+
     from build123d import Compound, Unit, export_step, export_stl
 
+    started = time.perf_counter()
     if not isinstance(project, dict) or "design" not in project:
         raise ValueError("project.design is missing.")
     project_id = project.get("id")
     revision = project.get("revision")
     components = _components(project)
+    cad_ver = _build123d_version()
+    perf: dict = {"cache_hits": 0, "cache_misses": 0, "per_part_ms": {}}
 
     solids: list = []
+    built_solids: dict[str, object] = {}
     entries: list[dict] = []
     for comp in components:
+        part_t0 = time.perf_counter()
         imported = comp["kind"] == "upstream-cad"
         solid = load_foundation_cad(comp["bed_drop_mm"]) if imported else _build_solid(comp)
         solid.label = comp["id"]
@@ -550,7 +667,11 @@ def build_cad_files(project: dict) -> dict[str, bytes]:
         if not volume > 0:
             raise ValueError(f"CAD solid for '{comp['id']}' has no volume.")
         bbox = _bbox_of(solid)
+        perf["per_part_ms"][f"build:{comp['id']}"] = round(
+            (time.perf_counter() - part_t0) * 1000.0, 2
+        )
         solids.append(solid)
+        built_solids[comp["id"]] = solid
         entries.append(
             {
                 "id": comp["id"],
@@ -606,86 +727,139 @@ def build_cad_files(project: dict) -> dict[str, bytes]:
     deck = next((c for c in components if c["id"] == DECK_ID), None)
     if deck is None:
         raise ValueError("Deck component 'base' is missing.")
-    # Export a separate root shape: a child attached to an assembly cannot be
-    # exported alone by build123d's XDE writer without its parent hierarchy.
-    deck_solid = _build_solid(deck)
-    workstation = Compound(children=solids, label="AutoLab concept")
-    if project["design"].get("foundation") is None and not workstation.is_valid:
-        raise ValueError("Workstation compound is invalid.")
 
     with TemporaryDirectory() as tmp:
-        import os
-
-        ws_path = os.path.join(tmp, "workstation.step")
-        deck_step_path = os.path.join(tmp, "deck.step")
-        deck_stl_path = os.path.join(tmp, "deck.stl")
-        export_step(workstation, ws_path, unit=Unit.MM)
-        export_step(deck_solid, deck_step_path, unit=Unit.MM)
-        export_stl(deck_solid, deck_stl_path)
+        # Export standalone part STEP/STL files BEFORE assembling Compound(children=solids),
+        # keeping deck/racks as clean root shapes and hitting the incremental cache by content.
+        deck_solid = built_solids[DECK_ID]
+        deck_step = _cached_export(
+            "part_step",
+            {"part": "deck", "comp": deck},
+            os.path.join(tmp, "deck.step"),
+            lambda: deck_solid,
+            lambda s, p: export_step(s, p, unit=Unit.MM),
+            cad_ver,
+            perf,
+            "export:deck.step",
+        )
+        deck_stl = _cached_export(
+            "part_stl",
+            {"part": "deck", "comp": deck},
+            os.path.join(tmp, "deck.stl"),
+            lambda: deck_solid,
+            export_stl,
+            cad_ver,
+            perf,
+            "export:deck.stl",
+        )
+        rack_files: dict[str, bytes] = {}
         rack_comp = next(
             (c for c in components if c.get("fabrication_shape") == "rim_supported_tube_rack"),
             None,
         )
-        rack_files = {}
         if rack_comp:
-            rack_solid = _build_solid(rack_comp)
-            rack_step_path = os.path.join(tmp, "tube-rack.step")
-            rack_stl_path = os.path.join(tmp, "tube-rack.stl")
-            export_step(rack_solid, rack_step_path, unit=Unit.MM)
-            export_stl(rack_solid, rack_stl_path)
-            coupon = _build_rack_fit_coupon(rack_comp)
-            coupon_step_path = os.path.join(tmp, "tube-rack-fit-coupon.step")
-            coupon_stl_path = os.path.join(tmp, "tube-rack-fit-coupon.stl")
-            export_step(coupon, coupon_step_path, unit=Unit.MM)
-            export_stl(coupon, coupon_stl_path)
-            with open(coupon_step_path, "rb") as fh:
-                rack_files["cad/tube-rack-fit-coupon.step"] = fh.read()
-            with open(coupon_stl_path, "rb") as fh:
-                rack_files["cad/tube-rack-fit-coupon.stl"] = fh.read()
-            with open(rack_step_path, "rb") as fh:
-                rack_files["cad/tube-rack.step"] = fh.read()
-            with open(rack_stl_path, "rb") as fh:
-                rack_files["cad/tube-rack.stl"] = fh.read()
+            rack_solid = built_solids[rack_comp["id"]]
+            for filename, subkey, factory, exporter in (
+                ("tube-rack.step", "body_step", lambda: rack_solid,
+                 lambda s, p: export_step(s, p, unit=Unit.MM)),
+                ("tube-rack.stl", "body_stl", lambda: rack_solid, export_stl),
+                ("tube-rack-fit-coupon.step", "coupon_step",
+                 lambda: _build_rack_fit_coupon(rack_comp),
+                 lambda s, p: export_step(s, p, unit=Unit.MM)),
+                ("tube-rack-fit-coupon.stl", "coupon_stl",
+                 lambda: _build_rack_fit_coupon(rack_comp), export_stl),
+            ):
+                rack_files["cad/" + filename] = _cached_export(
+                    "rack_part",
+                    {"kind": "tube", "sub": subkey, "comp": rack_comp},
+                    os.path.join(tmp, filename),
+                    factory,
+                    exporter,
+                    cad_ver,
+                    perf,
+                    f"export:{filename}",
+                )
         tip_comp = next(
             (c for c in components if c.get("fabrication_shape") == "rim_supported_tip_rack"),
             None,
         )
         if tip_comp:
-            for filename, solid, exporter in (
-                ("tip-rack.step", _build_solid(tip_comp),
+            tip_solid = built_solids[tip_comp["id"]]
+            for filename, subkey, factory, exporter in (
+                ("tip-rack.step", "body_step", lambda: tip_solid,
                  lambda s, p: export_step(s, p, unit=Unit.MM)),
-                ("tip-rack.stl", _build_solid(tip_comp), export_stl),
-                ("tip-rack-fit-coupon.step", _build_rack_fit_coupon(tip_comp),
+                ("tip-rack.stl", "body_stl", lambda: tip_solid, export_stl),
+                ("tip-rack-fit-coupon.step", "coupon_step",
+                 lambda: _build_rack_fit_coupon(tip_comp),
                  lambda s, p: export_step(s, p, unit=Unit.MM)),
-                ("tip-rack-fit-coupon.stl", _build_rack_fit_coupon(tip_comp), export_stl),
+                ("tip-rack-fit-coupon.stl", "coupon_stl",
+                 lambda: _build_rack_fit_coupon(tip_comp), export_stl),
             ):
-                path = os.path.join(tmp, filename)
-                exporter(solid, path)
-                with open(path, "rb") as fh:
-                    rack_files["cad/" + filename] = fh.read()
+                rack_files["cad/" + filename] = _cached_export(
+                    "rack_part",
+                    {"kind": "tip", "sub": subkey, "comp": tip_comp},
+                    os.path.join(tmp, filename),
+                    factory,
+                    exporter,
+                    cad_ver,
+                    perf,
+                    f"export:{filename}",
+                )
         plate_comp = next(
             (c for c in components if c.get("fabrication_shape") == "microplate_holder"), None
         )
         if plate_comp:
-            holder = _build_plate_part(plate_comp, "holder-")
-            reference = _build_plate_part(plate_comp, "reference-")
-            for filename, solid, exporter in (
-                ("plate-holder.step", holder, lambda s, p: export_step(s, p, unit=Unit.MM)),
-                ("plate-holder.stl", holder, export_stl),
-                ("plate-reference.step", reference, lambda s, p: export_step(s, p, unit=Unit.MM)),
+            plate_children = getattr(built_solids[plate_comp["id"]], "children", None) or []
+            holder_ref = (
+                plate_children[0]
+                if len(plate_children) >= 1
+                else _build_plate_part(plate_comp, "holder-")
+            )
+            plate_ref = (
+                plate_children[1]
+                if len(plate_children) >= 2
+                else _build_plate_part(plate_comp, "reference-")
+            )
+            for filename, subkey, factory, exporter in (
+                ("plate-holder.step", "holder_step", lambda: holder_ref,
+                 lambda s, p: export_step(s, p, unit=Unit.MM)),
+                ("plate-holder.stl", "holder_stl", lambda: holder_ref, export_stl),
+                ("plate-reference.step", "ref_step", lambda: plate_ref,
+                 lambda s, p: export_step(s, p, unit=Unit.MM)),
             ):
-                path = os.path.join(tmp, filename)
-                exporter(solid, path)
-                with open(path, "rb") as fh:
-                    rack_files["cad/" + filename] = fh.read()
-        with open(ws_path, "rb") as fh:
-            workstation_step = fh.read()
-        with open(deck_step_path, "rb") as fh:
-            deck_step = fh.read()
-        with open(deck_stl_path, "rb") as fh:
-            deck_stl = fh.read()
+                rack_files["cad/" + filename] = _cached_export(
+                    "plate_part",
+                    {"sub": subkey, "comp": plate_comp},
+                    os.path.join(tmp, filename),
+                    factory,
+                    exporter,
+                    cad_ver,
+                    perf,
+                    f"export:{filename}",
+                )
+
+        def _build_ws_compound():
+            workstation = Compound(children=solids, label="AutoLab concept")
+            if project["design"].get("foundation") is None and not workstation.is_valid:
+                raise ValueError("Workstation compound is invalid.")
+            return workstation
+
+        workstation_step = _cached_export(
+            "workstation_step",
+            {"components": components},
+            os.path.join(tmp, "workstation.step"),
+            _build_ws_compound,
+            lambda s, p: export_step(s, p, unit=Unit.MM),
+            cad_ver,
+            perf,
+            "export:workstation.step",
+        )
+    gc.collect()
     if not workstation_step or not deck_step or not deck_stl:
         raise ValueError("CAD export produced empty geometry.")
+
+    perf["total_ms"] = round((time.perf_counter() - started) * 1000.0, 2)
+    perf["peak_rss_mb"] = _rss_mb()
 
     labware_source = None
     if project.get("labware_rack"):
@@ -765,6 +939,7 @@ def build_cad_files(project: dict) -> dict[str, bytes]:
         "deck_component_id": DECK_ID,
         "component_count": len(solids),
         "solid_count": sum(len(s.solids()) for s in solids),
+        "performance": perf,
         "source": {
             "generator": "app.cad_exports.build_cad_files",
             "source_sha256": _SOURCE_SHA256,
@@ -801,8 +976,23 @@ def build_cad_files(project: dict) -> dict[str, bytes]:
     if microplate_source:
         from app.microplate_geometry import DATA_DIR, PROFILE_ID
 
-        for name in (PROFILE_ID + ".json", "provenance.json", "LICENSE.txt"):
-            files["cad/source/microplate-" + name] = (DATA_DIR / name).read_bytes()
+        plate_cfg = project["labware_plate"]
+        pid = plate_cfg.get("profile_id", PROFILE_ID)
+        if pid == PROFILE_ID and not plate_cfg.get("labware_definition"):
+            for name in (PROFILE_ID + ".json", "provenance.json", "LICENSE.txt"):
+                files["cad/source/microplate-" + name] = (DATA_DIR / name).read_bytes()
+        elif plate_cfg.get("labware_definition"):
+            files[f"cad/source/microplate-{pid}.json"] = json.dumps(
+                plate_cfg["labware_definition"], indent=2
+            ).encode("utf-8")
+        else:
+            candidate_json = DATA_DIR / f"{pid}.json"
+            if candidate_json.is_file():
+                files[f"cad/source/microplate-{pid}.json"] = candidate_json.read_bytes()
+            files["cad/source/microplate-provenance.json"] = (
+                DATA_DIR / "provenance.json"
+            ).read_bytes()
+            files["cad/source/microplate-LICENSE.txt"] = (DATA_DIR / "LICENSE.txt").read_bytes()
     if tip_source and project["tip_rack"].get("kind") == "commercial_reference":
         tip_data_dir = Path(__file__).parent / "data" / "tipracks"
         profile_id = project["tip_rack"]["profile_id"]
