@@ -32,6 +32,7 @@ from app.routers import (
     media,
     procurement,
     projects,
+    upstream,
 )
 from app.routers.chat import send_message
 from app.routers.exports import download_instructions, get_instructions
@@ -58,7 +59,17 @@ app = FastAPI(
 )
 auth.install_auth_routes(app)
 
-for router_module in (projects, library, chat, procurement, exports, fixtures, labware, media):
+for router_module in (
+    projects,
+    library,
+    chat,
+    procurement,
+    exports,
+    fixtures,
+    labware,
+    media,
+    upstream,
+):
     app.include_router(router_module.router)
 
 install_activity(app)

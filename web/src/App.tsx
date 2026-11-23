@@ -5,6 +5,7 @@ import type { LibraryOpen, SavedEntry } from './ProjectLibrary';
 import BenchStationPanel from './BenchStationPanel';
 import ConceptWorkspace from './ConceptWorkspace';
 import FixturePanel from './FixturePanel';
+import UpstreamProjectPanel from './UpstreamProjectPanel';
 import FunctionalPlan from './FunctionalPlan';
 import { modelComponents } from './modelComponents';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -371,7 +372,10 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
   const hasBrief = recordedBrief.length > 0;
   const hasSelectedFoundation = !hasEngineeringDesign && project?.engineering?.selected_platform_id === 'jubilee';
   const hasFixtureDesign = Boolean(project?.standalone_fixture);
-  const hasGeneralDesign = Boolean(project?.bench_station || project?.concept_design || hasFixtureDesign);
+  const hasUpstreamDesign = Boolean(project?.upstream_project);
+  const hasGeneralDesign = Boolean(
+    project?.bench_station || project?.concept_design || hasFixtureDesign || hasUpstreamDesign,
+  );
   const hasWorkspaceContent = hasBrief || hasEngineeringDesign || hasSelectedFoundation || hasGeneralDesign;
   const showLiquidParams = supportedLiquid && (Boolean(workflow?.parameters_started) || project?.plan?.status === 'ready');
   const briefHref = project ? `/api/projects/${encodeURIComponent(project.id)}/brief?revision=${encodeURIComponent(String(project.revision))}` : '#';
@@ -830,7 +834,7 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
               </details>
   );
 
-  const resources = project && hardwareDestination !== 'design' && (hasEngineeringDesign || (hasGeneralDesign && !hasFixtureDesign)) && (
+  const resources = project && hardwareDestination !== 'design' && (hasEngineeringDesign || (hasGeneralDesign && !hasFixtureDesign && !hasUpstreamDesign)) && (
     <ProjectResources imageCapability={imageCapability} key={`resources:${project.id}:${project.revision}`}
       project={project} activePanel={hardwareDestination}
       costVersion={costVersion} costLoading={costState.loading} costIssue={costState.issue}
@@ -870,7 +874,7 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
       </header>
       {(project?.engineering_design || project?.concept_design || project?.bench_station) && !project?.design_workflow?.machine_approved && <div className="machine-approval-bar"><div><strong>Ready to program this workstation?</strong><span>Approve the equipment layout, then create its operating recipe.</span></div><button className="confirm-button" type="button" disabled={uiBusy} onClick={() => void confirm()}>{uiBusy ? 'Approving…' : 'Approve design & open software'}</button></div>}
       {(hasEngineeringDesign || hasGeneralDesign) && <nav className="software-route-nav" aria-label="Project workspace"><button type="button" aria-current={!softwareOpen && hardwareDestination === 'design' ? 'page' : undefined} onClick={() => openHardware()}>3D design</button><button type="button" aria-current={!softwareOpen && hardwareDestination === 'parts' ? 'page' : undefined} onClick={() => openHardware('parts')}>Parts &amp; prices</button><button type="button" aria-current={!softwareOpen && hardwareDestination === 'instructions' ? 'page' : undefined} onClick={() => openHardware('instructions')}>Assembly</button><button type="button" aria-current={project?.design_workflow?.machine_approved && softwareOpen ? 'page' : undefined} disabled={!project?.design_workflow?.machine_approved} title={!project?.design_workflow?.machine_approved ? 'Approve the design to open software' : undefined} onClick={() => { setSoftwareOpen(true); setPlaying(false); }}>Software &amp; protocols</button></nav>}
-      {project && (hasEngineeringDesign || (hasGeneralDesign && !hasFixtureDesign)) && <CostSummary project={project} report={currentProcurement} headless refreshToken={costRefreshToken} onState={handleCostState} />}
+      {project && (hasEngineeringDesign || (hasGeneralDesign && !hasFixtureDesign && !hasUpstreamDesign)) && <CostSummary project={project} report={currentProcurement} headless refreshToken={costRefreshToken} onState={handleCostState} />}
       {project?.design_workflow?.machine_approved && softwareOpen ? <SoftwareWorkspace project={project} onProject={setProject} onConversation={(message, reply) => setMessages(current => [...current, { id: Date.now(), role: 'user', text: message }, { id: Date.now() + 1, role: 'assistant', text: reply }])} /> : <>
       <nav className="workspace-switch" aria-label="Workspace view">
         <button type="button" aria-pressed={mobileView === 'design' && hasWorkspaceContent} aria-controls="design-workspace" disabled={!hasWorkspaceContent} onClick={() => setMobileView('design')}>Design</button>
@@ -890,7 +894,7 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
           <div className={`design-content${hasEngineeringDesign ? ' design-content-engineering' : ''}${hasGeneralDesign && hardwareDestination === 'design' ? ' design-content-model' : ''}`}
             hidden={!hasGeneralDesign && hardwareDestination !== 'design'} tabIndex={0}
             ref={hasGeneralDesign ? resourceAnchor : undefined} aria-label="Design and project details">
-          {hasGeneralDesign && !hasFixtureDesign && resources}
+          {hasGeneralDesign && !hasFixtureDesign && !hasUpstreamDesign && resources}
           {!hasGeneralDesign && hasSelectedFoundation && <SelectedPlatformPreview />}
           {project?.concept_design ? (
             <ConceptWorkspace imageCapability={imageCapability} key={`${project.id}:${project.revision}`} projectId={project.id}
@@ -905,6 +909,23 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
               busy={uiBusy}
               selectedId={selectedId}
               onSelect={setSelectedId}
+              onProject={(next, assistantMessage) => {
+                setProject(next);
+                if (assistantMessage) {
+                  setMessages((current) => [
+                    ...current,
+                    { id: Date.now() + 1, role: 'assistant', text: assistantMessage },
+                  ]);
+                }
+              }}
+            />
+          ) : project?.upstream_project ? (
+            <UpstreamProjectPanel
+              key={`${project.id}:${project.revision}`}
+              project={project}
+              upstream={project.upstream_project}
+              panel={hardwareDestination}
+              busy={uiBusy}
               onProject={(next, assistantMessage) => {
                 setProject(next);
                 if (assistantMessage) {

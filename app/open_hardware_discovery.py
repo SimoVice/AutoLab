@@ -28,6 +28,16 @@ CACHE_TTL_SECONDS = 600.0
 DEFAULT_SOURCES = ("github", "gitlab", "openalex", "europepmc", "nih3d")
 
 _discovery_cache: dict[tuple[Any, ...], tuple[float, dict[str, Any]]] = {}
+_candidate_cache: dict[tuple[str, str, str], dict[str, Any]] = {}
+
+
+def lookup_discovered_candidate(
+    source_host: str, repo_full_name: str, commit_sha: str
+) -> dict[str, Any] | None:
+    """Return cached tree/license metadata for a previously discovered commit-pinned repo."""
+    return _candidate_cache.get(
+        (source_host.lower().strip(), repo_full_name.lower().strip(), commit_sha.strip())
+    )
 _REPO_URL_RE = re.compile(
     r"https://(?:github\.com|gitlab\.com)/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)",
     re.IGNORECASE,
@@ -49,8 +59,9 @@ _SOFTWARE_DIRS = (
 
 
 def clear_discovery_cache() -> None:
-    """Clear the bounded discovery cache."""
+    """Clear the bounded discovery caches."""
     _discovery_cache.clear()
+    _candidate_cache.clear()
 
 
 def _headers(accept: str = "application/json", *, is_github: bool = False) -> dict[str, str]:
@@ -751,6 +762,12 @@ async def discover_open_hardware(
             filtered.append(cand)
 
         ranked = rank_discovery_candidates(cleaned_query, filtered)[:limit]
+        for cand in ranked:
+            sha = str(cand.get("commit_sha") or "").strip()
+            rname = str(cand.get("repo_full_name") or "").lower().strip()
+            shost = str(cand.get("source_host") or "").lower().strip()
+            if sha and rname and shost:
+                _candidate_cache[(shost, rname, sha)] = cand
         return {
             "query": cleaned_query,
             "sources_queried": list(selected),

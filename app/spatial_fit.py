@@ -107,6 +107,21 @@ STANDALONE_FIXTURE_CLEARANCE_SPECS = (
     ),
 )
 
+UPSTREAM_PROJECT_CLEARANCE_SPECS = (
+    (
+        "depth_mm",
+        "front_access_mm",
+        100.0,
+        "Allow 100 mm front operator clearance for loading and servicing upstream hardware.",
+    ),
+    (
+        "height_mm",
+        "top_service_mm",
+        50.0,
+        "Allow 50 mm overhead clearance above the adapted assembly for cables and motion.",
+    ),
+)
+
 GENERIC_WORKSTATION_CLEARANCE_SPECS = (
     (
         "depth_mm",
@@ -212,6 +227,28 @@ def _resolve_subject_and_body(
         if candidate_footprint and "height_mm" in candidate_footprint:
             height = float(candidate_footprint["height_mm"])
         return "standalone_fixture", (width, depth, height), STANDALONE_FIXTURE_CLEARANCE_SPECS
+
+    if project.get("upstream_project") and platform_id is None:
+        up = project["upstream_project"]
+        adapt = up.get("adaptation") or {}
+        comb = adapt.get("combined_geometry") or up.get("geometry") or {}
+        app_size = comb.get("app_size_mm") or [0.0, 0.0, 0.0]
+        width = (
+            float(candidate_footprint.get("width_mm", app_size[0]))
+            if candidate_footprint
+            else float(app_size[0])
+        )
+        height = (
+            float(candidate_footprint.get("height_mm", app_size[1]))
+            if candidate_footprint
+            else float(app_size[1])
+        )
+        depth = (
+            float(candidate_footprint.get("depth_mm", app_size[2]))
+            if candidate_footprint
+            else float(app_size[2])
+        )
+        return "upstream_project", (width, depth, height), UPSTREAM_PROJECT_CLEARANCE_SPECS
 
     if project.get("bench_station") and platform_id is None:
         station = project["bench_station"]
@@ -341,6 +378,19 @@ def evaluate_printable_fit(project: dict, lab_profile: dict | None) -> list[dict
                         prov,
                     )
                 )
+    if up := project.get("upstream_project"):
+        adapt = up.get("adaptation") or {}
+        cgeom = adapt.get("custom_geometry") or {}
+        app_size = cgeom.get("app_size_mm")
+        if isinstance(app_size, (list, tuple)) and len(app_size) == 3:
+            candidates.append(
+                (
+                    adapt.get("part_id") or "custom-upstream-part",
+                    f"Adapted open-hardware part ({adapt.get('mode', 'mating')})",
+                    [float(v) for v in app_size],
+                    "upstream_cad_adaptation",
+                )
+            )
 
     checks = []
     printer_label = printer.get("name") or "Configured printer"

@@ -243,6 +243,7 @@ export type Project = {
   revision: number;
   bench_station?: BenchStation | null;
   standalone_fixture?: StandaloneFixture | null;
+  upstream_project?: UpstreamProjectState | null;
   build_logs?: BuildLogEntry[];
   build_feedback?: BuildFeedbackSummary | null;
   labware_brief?: LabwareBrief | null;
@@ -659,4 +660,108 @@ export type BuildFeedbackSummary = {
   parts_to_reprint: BuildFeedbackPartDiff[];
   parts_unchanged: BuildFeedbackPartDiff[];
   has_untested_changes: boolean;
+};
+
+export type UpstreamBomItem = {
+  id: string;
+  name: string;
+  quantity: number | string;
+  sku?: string | null;
+  supplier?: string | null;
+  source_url?: string | null;
+  notes?: string | null;
+  source: 'upstream_repo' | 'autolab_custom_adaptation';
+  source_file: string;
+  compatibility_status: string;
+};
+
+export type UpstreamAssemblyStep = {
+  order: number;
+  text: string;
+  source: 'upstream_repo' | 'autolab_custom_adaptation';
+  source_file: string;
+};
+
+export type UpstreamProjectState = {
+  schema_version: '1';
+  title: string;
+  description?: string;
+  publication_references?: { title: string; doi?: string | null; url?: string | null }[];
+  provenance: {
+    source_host: string;
+    repo_full_name: string;
+    repo_url: string;
+    commit_sha: string;
+    file_path: string;
+    raw_url: string;
+    file_sha256: string;
+    file_bytes: number;
+    retrieved_at: string;
+    spdx_id: string;
+    license_category: string;
+    license_url?: string | null;
+    license_flags?: string[];
+    commercial_ok?: boolean;
+    copyleft?: boolean;
+    authors?: string;
+  };
+  license_gate: {
+    spdx_id: string;
+    category: string;
+    allowed: boolean;
+    flags?: string[];
+    blocking_reasons?: string[];
+    summary: string;
+  };
+  geometry: {
+    cad_kind: string;
+    is_valid: boolean;
+    watertight?: boolean | null;
+    solid_count?: number;
+    volume_mm3?: number | null;
+    cad_size_mm: [number, number, number];
+    app_size_mm: [number, number, number];
+    hole_features?: { x_mm: number; y_mm: number; diameter_mm: number }[];
+    parametric_parameters?: { name: string; default: unknown; type: string }[];
+  };
+  bom: UpstreamBomItem[];
+  assembly: {
+    upstream_repo?: string | null;
+    commit_sha?: string | null;
+    upstream_steps: UpstreamAssemblyStep[];
+    custom_steps: UpstreamAssemblyStep[];
+  };
+  software: {
+    detected_stacks: string[];
+    entrypoints: { path: string; url: string }[];
+    execution_status: string;
+    disclaimer: string;
+  };
+  adaptation?: {
+    mode: 'mating' | 'parametric';
+    part_id: string;
+    spec: Record<string, unknown>;
+    custom_geometry?: {
+      app_size_mm: [number, number, number];
+      cad_size_mm: [number, number, number];
+      volume_mm3?: number | null;
+    } | null;
+    combined_geometry?: {
+      app_size_mm: [number, number, number];
+      cad_size_mm: [number, number, number];
+    } | null;
+    interference: {
+      passed: boolean;
+      method: string;
+      interference_volume_mm3: number;
+      min_clearance_mm?: number | null;
+    };
+    printer_fit?: {
+      fits: boolean;
+      orientation: string;
+      detail: string;
+    } | null;
+    parameter_diffs?: { name: string; original: unknown; updated: unknown }[];
+    render_status?: string;
+  } | null;
 };

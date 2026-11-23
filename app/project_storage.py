@@ -98,6 +98,7 @@ class Snapshot(StrictModel):
     bench_station: dict[str, JsonValue] | None = None
     custom_assembly_v1: dict[str, JsonValue] | None = None
     standalone_fixture: dict[str, JsonValue] | None = None
+    upstream_project: dict[str, JsonValue] | None = None
     build_logs: list[dict[str, JsonValue]] | None = None
     inspection_extension: dict[str, JsonValue] | None = None
     generic_sample_capacity: Annotated[int, Field(ge=1, le=6)] | None = None
@@ -184,6 +185,8 @@ def make_snapshot(project: dict, history: list[dict]) -> dict:
            if project.get("concept_design") else {}),
         **({"standalone_fixture": deepcopy(project["standalone_fixture"]["spec"])}
            if project.get("standalone_fixture") else {}),
+        **({"upstream_project": deepcopy(project["upstream_project"])}
+           if project.get("upstream_project") else {}),
         **({"build_logs": deepcopy(project["build_logs"])}
            if project.get("build_logs") else {}),
         "platform_id": project.get("design", {}).get("platform", {}).get("id"),
@@ -399,6 +402,46 @@ def restore_snapshot(snapshot: object) -> tuple[dict, list[dict]]:
             "height_mm": compiled_fixture["height_mm"],
         }
         project["workflow"] = describe_workflow(project)
+    if saved.upstream_project is not None:
+        from app.spatial_fit import refresh_spatial_fit
+
+        if (
+            inputs.workflow_kind != "general"
+            or saved.revision < 1
+            or any(
+                (
+                    saved.standalone_fixture,
+                    saved.custom_assembly_v1,
+                    saved.bench_station,
+                    saved.engineering_design,
+                    saved.foundation_id,
+                    saved.platform_id,
+                    saved.labware_brief,
+                    saved.labware_rack,
+                    saved.labware_plate,
+                    saved.tip_rack,
+                    saved.inspection_extension,
+                    saved.cold_transfer_extension,
+                )
+            )
+        ):
+            raise ValueError(
+                "An open-source hardware import must belong to its own general project."
+            )
+        up_data = deepcopy(saved.upstream_project)
+        if not isinstance(up_data, dict) or not up_data.get("provenance"):
+            raise ValueError("Saved upstream project data is missing provenance.")
+        project["upstream_project"] = up_data
+        adapt_comb = (up_data.get("adaptation") or {}).get("combined_geometry")
+        comb = adapt_comb or up_data.get("geometry") or {}
+        app_size = comb.get("app_size_mm") or [0.0, 0.0, 0.0]
+        project["design"]["footprint"] = {
+            "width_mm": round(float(app_size[0]), 2),
+            "depth_mm": round(float(app_size[2]), 2),
+            "height_mm": round(float(app_size[1]), 2),
+        }
+        project["workflow"] = describe_workflow(project)
+        refresh_spatial_fit(project)
     if saved.inspection_extension is not None and not upgraded:
         from app.inspection import restore_extension
 

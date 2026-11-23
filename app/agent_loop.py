@@ -38,6 +38,10 @@ _TOOL_STAGES = {
     "apply_build_feedback": "repairing",
     "approve_machine": "verifying",
     "update_lab_profile": "designing",
+    "discover_open_hardware_projects": "researching",
+    "ingest_open_hardware_project": "researching",
+    "adapt_open_hardware_project": "assembling",
+    "inspect_upstream_project": "inspecting",
 }
 
 AGENT_SYSTEM_PROMPT = """You are AutoLab's autonomous laboratory engineering assistant.
@@ -67,6 +71,12 @@ CORE PRINCIPLES
 - Never force or adopt an infeasible platform. If select_platform or a layout check returns a
   recoverable 3D violation, explain the exact required mm, limit mm, and overflow mm cleanly, or
   compare viable alternatives via lookup_reviewed_references.
+- Open-source hardware discovery & adaptation: when the user asks to find, compare, import, or
+  adapt existing open-source laboratory platforms/instruments/pumps/stages/fixtures beyond Jubilee
+  and OT-2, call discover_open_hardware_projects first instead of guessing URLs or proposing only
+  Jubilee/OT-2. Cite exact SPDX license, pinned commit SHA, and file SHA-256 on ingested projects;
+  ask the user explicitly before overriding Non-Commercial or Unknown licenses; then run
+  adapt_open_hardware_project and check_spatial_fit to verify zero modeled interference and fit.
 - Lab profile & provenance: respect configured lab_profile (3D printer build volume, bench size,
   tools) when present; keep user_measured vs reference dimensions distinct; never fabricate CAD
   dimensions, vendor prices, stock, URLs, live web searches, or unverified physical/thermal claims.

@@ -314,6 +314,55 @@ class ApplyBuildFeedbackArgs(_StrictArgs):
     fdm_undersize_delta_mm: float | None = Field(default=None, ge=-1.0, le=1.0)
 
 
+class ParamOverrideArg(_StrictArgs):
+    name: Annotated[str, Field(min_length=1, max_length=80)]
+    value: float | bool | str
+
+
+class DiscoverOpenHardwareProjectsArgs(_StrictArgs):
+    query: Annotated[str, Field(min_length=2, max_length=200)]
+    sources: list[Literal["github", "gitlab", "openalex", "europepmc", "nih3d"]] | None = None
+    max_results: int | None = Field(default=None, ge=1, le=12)
+    require_cad: bool = True
+    commercial_use_ok: bool = False
+
+
+class IngestOpenHardwareProjectArgs(_StrictArgs):
+    source_host: Literal["github", "gitlab", "nih3d"]
+    repo_full_name: Annotated[str, Field(min_length=3, max_length=200)]
+    commit_sha: Annotated[str, Field(min_length=2, max_length=64)]
+    cad_file_path: Annotated[str, Field(min_length=3, max_length=400)]
+    allow_non_commercial: bool = False
+    allow_unknown_license: bool = False
+    source_units: Literal["auto", "mm", "in"] = "auto"
+    source_up_axis: Literal["z", "y"] = "z"
+
+
+class AdaptOpenHardwareProjectArgs(_StrictArgs):
+    mode: Literal["mating", "parametric"]
+    mating_kind: Literal[
+        "adapter_plate", "bracket", "riser", "enclosure", "cutout_mount"
+    ] | None = None
+    placement: Literal["below", "above", "rear", "side_x", "surround"] | None = None
+    clearance_mm: float | None = Field(default=None, ge=0.0, le=5.0)
+    plate_thickness_mm: float | None = Field(default=None, ge=2.0, le=30.0)
+    riser_height_mm: float | None = Field(default=None, ge=2.0, le=150.0)
+    wall_thickness_mm: float | None = Field(default=None, ge=1.5, le=25.0)
+    flange_margin_mm: float | None = Field(default=None, ge=4.0, le=60.0)
+    hole_diameter_mm: float | None = Field(default=None, ge=2.0, le=12.0)
+    secondary_hole_pitch_x_mm: float | None = Field(default=None, ge=10.0, le=300.0)
+    secondary_hole_pitch_y_mm: float | None = Field(default=None, ge=10.0, le=300.0)
+    cutout_width_mm: float | None = Field(default=None, ge=4.0, le=400.0)
+    cutout_depth_mm: float | None = Field(default=None, ge=4.0, le=400.0)
+    param_overrides: list[ParamOverrideArg] | None = Field(default=None, max_length=24)
+
+
+class InspectUpstreamProjectArgs(_StrictArgs):
+    section: Literal[
+        "all", "geometry", "license", "bom", "assembly", "software", "adaptation"
+    ] = "all"
+
+
 _TOOL_SPECS: list[tuple[str, str, type[BaseModel]]] = [
     (
         "inspect_project_state",
@@ -412,6 +461,33 @@ _TOOL_SPECS: list[tuple[str, str, type[BaseModel]]] = [
         "equipment, and optionally apply them to the active project.",
         UpdateLabProfileArgs,
     ),
+    (
+        "discover_open_hardware_projects",
+        "Search approved open-source hardware indices (GitHub, GitLab, OpenAlex, Europe PMC, "
+        "NIH 3D) for documented lab hardware projects, CAD files (.step/.stl/.scad/.py), "
+        "SPDX licenses, and BOMs beyond Jubilee and OT-2.",
+        DiscoverOpenHardwareProjectsArgs,
+    ),
+    (
+        "ingest_open_hardware_project",
+        "Verify license and commit/SHA-256 provenance, download a discovered open-source CAD "
+        "file, normalize its units/axes in a sandboxed worker, and extract mounting features, "
+        "BOM, assembly steps, and software references into the project.",
+        IngestOpenHardwareProjectArgs,
+    ),
+    (
+        "adapt_open_hardware_project",
+        "Adapt an ingested open-source hardware project via either non-destructive mating CAD "
+        "(adapter_plate, bracket, riser, enclosure, cutout_mount with 3D interference checks) "
+        "or sandboxed parametric source regeneration (.py/.scad with explicit parameter diffs).",
+        AdaptOpenHardwareProjectArgs,
+    ),
+    (
+        "inspect_upstream_project",
+        "Inspect parsed sections (geometry, license, bom, assembly, software, adaptation) of "
+        "the currently ingested open-source hardware project.",
+        InspectUpstreamProjectArgs,
+    ),
 ]
 
 
@@ -471,6 +547,7 @@ def _compact_project_state(project: dict, lab_profile: dict | None) -> dict[str,
         for name in (
             "engineering_design",
             "standalone_fixture",
+            "upstream_project",
             "bench_station",
             "concept_design",
             "labware_rack",
@@ -550,6 +627,27 @@ def _compact_project_state(project: dict, lab_profile: dict | None) -> dict[str,
         ]
     if project.get("build_feedback"):
         compact["build_feedback"] = project["build_feedback"]
+    if up := project.get("upstream_project"):
+        prov = up.get("provenance") or {}
+        geom = up.get("geometry") or {}
+        adapt = up.get("adaptation") or {}
+        compact["upstream_project"] = {
+            "repo_full_name": prov.get("repo_full_name"),
+            "commit_sha": prov.get("commit_sha"),
+            "spdx_id": prov.get("spdx_id"),
+            "cad_kind": geom.get("cad_kind"),
+            "app_size_mm": geom.get("app_size_mm"),
+            "parametric_parameters": geom.get("parametric_parameters", [])[:20],
+            "bom_count": len(up.get("bom") or []),
+            "adaptation": {
+                "mode": adapt.get("mode"),
+                "part_id": adapt.get("part_id"),
+                "interference_passed": (adapt.get("interference") or {}).get("passed"),
+                "printer_fit_ok": (adapt.get("printer_fit") or {}).get("fits"),
+            }
+            if adapt
+            else None,
+        }
     profile_ctx = lab_profile_prompt_context(lab_profile)
     if profile_ctx:
         compact["lab_profile"] = profile_ctx
@@ -1925,6 +2023,240 @@ def _tool_apply_build_feedback(args: ApplyBuildFeedbackArgs, ctx: ToolContext) -
     )
 
 
+async def _tool_discover_open_hardware_projects(
+    args: DiscoverOpenHardwareProjectsArgs, ctx: ToolContext
+) -> ToolResult:
+    from app.open_hardware_discovery import discover_open_hardware
+
+    res = await discover_open_hardware(
+        args.query,
+        sources=list(args.sources) if args.sources else None,
+        max_results=args.max_results or 6,
+        require_cad=args.require_cad,
+        commercial_use_ok=args.commercial_use_ok,
+    )
+    compact_candidates = [
+        {
+            "source_host": c["source_host"],
+            "repo_full_name": c["repo_full_name"],
+            "repo_url": c["repo_url"],
+            "commit_sha": c["commit_sha"],
+            "spdx_id": c["spdx_id"],
+            "license_allowed": (c.get("license_gate") or {}).get("allowed"),
+            "cad_files": (c.get("cad_files") or [])[:8],
+            "bom_files": (c.get("bom_files") or [])[:4],
+            "assembly_files": (c.get("assembly_files") or [])[:4],
+            "score": c.get("score"),
+            "description": c.get("description", "")[:180],
+        }
+        for c in res.get("candidates") or []
+    ]
+    summary = (
+        f"Discovered {len(compact_candidates)} open-source hardware candidate(s) for "
+        f"'{args.query}'."
+    )
+    return ToolResult(
+        tool="discover_open_hardware_projects",
+        ok=True,
+        stage="researching",
+        mutated=False,
+        summary=summary,
+        data={
+            "query": args.query,
+            "candidate_count": len(compact_candidates),
+            "candidates": compact_candidates,
+            "literature_references": (res.get("literature_references") or [])[:4],
+            "source_warnings": res.get("source_warnings") or [],
+        },
+    )
+
+
+async def _tool_ingest_open_hardware_project(
+    args: IngestOpenHardwareProjectArgs, ctx: ToolContext
+) -> ToolResult:
+    from app.upstream_service import attach_upstream_project
+
+    try:
+        updated = await attach_upstream_project(
+            ctx.project,
+            source_host=args.source_host,
+            repo_full_name=args.repo_full_name,
+            commit_sha=args.commit_sha,
+            cad_file_path=args.cad_file_path,
+            allow_non_commercial=args.allow_non_commercial,
+            allow_unknown_license=args.allow_unknown_license,
+            source_units=args.source_units,
+            source_up_axis=args.source_up_axis,
+            lab_profile=ctx.lab_profile,
+        )
+    except PermissionError as exc:
+        return ToolResult(
+            tool="ingest_open_hardware_project",
+            ok=False,
+            recoverable=True,
+            requires_human_input=True,
+            stage="researching",
+            summary=str(exc),
+            diagnostics=[str(exc)],
+        )
+    except Exception as exc:
+        return _fail("ingest_open_hardware_project", "researching", str(exc))
+
+    up = updated["upstream_project"]
+    prov = up["provenance"]
+    geom = up["geometry"]
+    ctx.project = updated
+    ctx.mutated = True
+    msg = (
+        f"Ingested {prov['repo_full_name']} ({prov['file_path']}, {prov['spdx_id']}, "
+        f"size {geom['app_size_mm']} mm) at revision {updated['revision']}."
+    )
+    run = {"kind": "ingest_open_hardware_project", "status": "accepted", "message": msg}
+    ctx.action_runs.append(run)
+    return ToolResult(
+        tool="ingest_open_hardware_project",
+        ok=True,
+        stage="researching",
+        mutated=True,
+        summary=msg,
+        data={
+            "provenance": prov,
+            "license_gate": up["license_gate"],
+            "geometry": {
+                "cad_kind": geom.get("cad_kind"),
+                "is_valid": geom.get("is_valid"),
+                "app_size_mm": geom.get("app_size_mm"),
+                "hole_count": len(geom.get("hole_features") or []),
+                "parametric_parameters": geom.get("parametric_parameters", [])[:20],
+            },
+            "bom_count": len(up.get("bom") or []),
+            "software_stacks": (up.get("software") or {}).get("detected_stacks") or [],
+        },
+        action_run=run,
+    )
+
+
+async def _tool_adapt_open_hardware_project(
+    args: AdaptOpenHardwareProjectArgs, ctx: ToolContext
+) -> ToolResult:
+    from app.upstream_service import apply_upstream_adaptation
+
+    if not ctx.project.get("upstream_project"):
+        return _fail(
+            "adapt_open_hardware_project",
+            "assembling",
+            "Ingest an open-source hardware project before adapting it.",
+        )
+
+    mating_spec = None
+    overrides = None
+    if args.mode == "mating":
+        if not args.mating_kind:
+            return _fail(
+                "adapt_open_hardware_project",
+                "assembling",
+                "mating_kind is required when mode='mating'.",
+            )
+        spec_fields = {
+            "kind": args.mating_kind,
+            "placement": args.placement or "below",
+            "clearance_mm": args.clearance_mm,
+            "plate_thickness_mm": args.plate_thickness_mm,
+            "riser_height_mm": args.riser_height_mm,
+            "wall_thickness_mm": args.wall_thickness_mm,
+            "flange_margin_mm": args.flange_margin_mm,
+            "hole_diameter_mm": args.hole_diameter_mm,
+            "secondary_hole_pitch_x_mm": args.secondary_hole_pitch_x_mm,
+            "secondary_hole_pitch_y_mm": args.secondary_hole_pitch_y_mm,
+            "cutout_width_mm": args.cutout_width_mm,
+            "cutout_depth_mm": args.cutout_depth_mm,
+        }
+        mating_spec = {k: v for k, v in spec_fields.items() if v is not None}
+    else:
+        if not args.param_overrides:
+            return _fail(
+                "adapt_open_hardware_project",
+                "assembling",
+                "param_overrides is required when mode='parametric'.",
+            )
+        overrides = [item.model_dump() for item in args.param_overrides]
+
+    try:
+        updated = await apply_upstream_adaptation(
+            ctx.project,
+            mode=args.mode,
+            mating_spec=mating_spec,
+            param_overrides=overrides,
+            lab_profile=ctx.lab_profile,
+        )
+    except Exception as exc:
+        return _fail("adapt_open_hardware_project", "assembling", str(exc))
+
+    adapt = updated["upstream_project"]["adaptation"]
+    ctx.project = updated
+    ctx.mutated = True
+    inter = adapt["interference"]
+    pfit = adapt.get("printer_fit")
+    msg = (
+        f"Generated {adapt['mode']} adaptation '{adapt['part_id']}' "
+        f"(interference_passed={inter['passed']}, "
+        f"min_clearance={inter.get('min_clearance_mm')} mm) "
+        f"at revision {updated['revision']}."
+    )
+    run = {"kind": "adapt_open_hardware_project", "status": "accepted", "message": msg}
+    ctx.action_runs.append(run)
+    return ToolResult(
+        tool="adapt_open_hardware_project",
+        ok=True,
+        stage="assembling",
+        mutated=True,
+        summary=msg,
+        data={
+            "mode": adapt["mode"],
+            "part_id": adapt["part_id"],
+            "interference": inter,
+            "printer_fit": pfit,
+            "parameter_diffs": adapt.get("parameter_diffs") or [],
+            "custom_geometry": adapt.get("custom_geometry"),
+        },
+        action_run=run,
+    )
+
+
+def _tool_inspect_upstream_project(
+    args: InspectUpstreamProjectArgs, ctx: ToolContext
+) -> ToolResult:
+    up = ctx.project.get("upstream_project")
+    if not isinstance(up, dict):
+        return _fail(
+            "inspect_upstream_project",
+            "inspecting",
+            "No upstream open-source project is currently loaded.",
+        )
+    if args.section == "all":
+        data = {
+            "provenance": up.get("provenance"),
+            "license_gate": up.get("license_gate"),
+            "geometry": up.get("geometry"),
+            "bom_count": len(up.get("bom") or []),
+            "assembly": up.get("assembly"),
+            "software": up.get("software"),
+            "adaptation": up.get("adaptation"),
+        }
+    elif args.section == "license":
+        data = {"provenance": up.get("provenance"), "license_gate": up.get("license_gate")}
+    else:
+        data = {args.section: up.get(args.section)}
+    return ToolResult(
+        tool="inspect_upstream_project",
+        ok=True,
+        stage="inspecting",
+        mutated=False,
+        summary=f"Inspected upstream section '{args.section}'.",
+        data=data,
+    )
+
+
 _DISPATCH: dict[str, tuple[type[BaseModel], Any, bool]] = {
     "inspect_project_state": (InspectProjectStateArgs, _tool_inspect_project_state, False),
     "check_spatial_fit": (CheckSpatialFitArgs, _tool_check_spatial_fit, False),
@@ -1950,6 +2282,26 @@ _DISPATCH: dict[str, tuple[type[BaseModel], Any, bool]] = {
     "apply_build_feedback": (ApplyBuildFeedbackArgs, _tool_apply_build_feedback, False),
     "approve_machine": (ApproveMachineArgs, _tool_approve_machine, False),
     "update_lab_profile": (UpdateLabProfileArgs, _tool_update_lab_profile, False),
+    "discover_open_hardware_projects": (
+        DiscoverOpenHardwareProjectsArgs,
+        _tool_discover_open_hardware_projects,
+        True,
+    ),
+    "ingest_open_hardware_project": (
+        IngestOpenHardwareProjectArgs,
+        _tool_ingest_open_hardware_project,
+        True,
+    ),
+    "adapt_open_hardware_project": (
+        AdaptOpenHardwareProjectArgs,
+        _tool_adapt_open_hardware_project,
+        True,
+    ),
+    "inspect_upstream_project": (
+        InspectUpstreamProjectArgs,
+        _tool_inspect_upstream_project,
+        False,
+    ),
 }
 
 

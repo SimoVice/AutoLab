@@ -112,6 +112,23 @@ def describe_workflow(project: dict) -> dict:
                     "repeatability (E13), and thermal/chemical compatibility require verification."
                 ),
             )
+        elif project.get("upstream_project"):
+            result.update(
+                label="Adapted open-source hardware",
+                status="supported_concept",
+                capabilities=[
+                    "open-source cad discovery",
+                    "spdx license & sha256 pin",
+                    "sandboxed cad normalization",
+                    "mating / parametric adaptation",
+                    "attributed bom & build package",
+                ],
+                scope=(
+                    "Commit-pinned open-source hardware import with custom adaptation and modeled "
+                    "interference checks. Assembly, BOM compatibility, and firmware safety "
+                    "remain unverified."
+                ),
+            )
         elif station:
             result.update(
                 label="Human-operated bench station",

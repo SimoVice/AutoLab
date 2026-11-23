@@ -52,6 +52,48 @@ def camera_geometry_spec() -> dict:
 
 
 def project_source_basis(project: dict) -> dict:
+    if up := project.get("upstream_project"):
+        prov = up.get("provenance") or {}
+        adapt = up.get("adaptation")
+        bindings = [
+            {
+                "component_id": "upstream-source",
+                "basis": "imported_open_hardware_cad",
+                "reference_id": prov.get("repo_full_name"),
+                "detail": (
+                    f"Commit {str(prov.get('commit_sha', ''))[:12]} · "
+                    f"{prov.get('file_path', 'CAD')} · {prov.get('spdx_id', 'UNKNOWN')} "
+                    f"(SHA-256 {str(prov.get('file_sha256', ''))[:12]}). Physical fit unverified."
+                ),
+            }
+        ]
+        if adapt:
+            bindings.append(
+                {
+                    "component_id": adapt.get("part_id", "custom-part"),
+                    "basis": "custom_adaptation",
+                    "reference_id": None,
+                    "detail": (
+                        f"AutoLab {adapt.get('mode', 'mating')} adaptation; modeled "
+                        f"interference_passed={(adapt.get('interference') or {}).get('passed')}."
+                    ),
+                }
+            )
+        return {
+            "schema_version": "1",
+            "checked_on": prov.get("retrieved_at") or _DATA["checked_on"],
+            "library_sha256": _DATA["sha256"],
+            "architecture": (
+                f"Adapted open-source hardware project ({prov.get('repo_full_name', 'upstream')})"
+            ),
+            "bindings": bindings,
+            "references": reference_library()["references"],
+            "open_hardware_status": (
+                f"Imported upstream CAD ({prov.get('spdx_id', 'UNKNOWN')}, commit "
+                f"{str(prov.get('commit_sha', ''))[:10]}); separate from custom adaptation."
+            ),
+        }
+
     supported = project.get("workflow", {}).get("kind") == "liquid_preparation"
     parts = project.get("design", {}).get("components", []) if supported else []
     specs = component_geometry_specs(project)
