@@ -1157,4 +1157,8 @@ def attach_standalone_fixture(
     updated["workflow"] = describe_workflow(updated)
     refresh_workflow(updated)
     refresh_spatial_fit(updated, lab_profile=profile)
+    if updated.get("build_logs"):
+        from app.build_feedback import compute_reprint_diff
+
+        updated["build_feedback"] = compute_reprint_diff(updated)
     return updated

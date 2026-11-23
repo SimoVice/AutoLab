@@ -488,7 +488,17 @@ def restore_snapshot(snapshot: object) -> tuple[dict, list[dict]]:
             restored_prov[key] = validated.model_dump(mode="json", exclude_none=True)
         project["dimension_provenance"] = restored_prov
     if saved.build_logs is not None:
-        project["build_logs"] = deepcopy(saved.build_logs)
+        from app.build_feedback import BuildLogEntry, compute_reprint_diff
+
+        restored_logs = []
+        for item in saved.build_logs:
+            try:
+                validated = BuildLogEntry.model_validate(item)
+            except ValidationError as exc:
+                raise ValueError("Invalid saved build log entry.") from exc
+            restored_logs.append(validated.model_dump(mode="json", exclude_none=True))
+        project["build_logs"] = restored_logs
+        project["build_feedback"] = compute_reprint_diff(project)
     refresh_workflow(project)
     from app.spatial_fit import refresh_spatial_fit
 
