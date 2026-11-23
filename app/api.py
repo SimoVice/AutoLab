@@ -22,7 +22,7 @@ from app.model_catalog import discover_catalog
 from app.model_client import generate_turn
 from app.procurement import refresh_procurement
 from app.project_exports import start_export
-from app.routers import auth, chat, exports, library, media, procurement, projects
+from app.routers import auth, chat, exports, fixtures, library, media, procurement, projects
 from app.routers.chat import send_message
 from app.routers.exports import download_instructions, get_instructions
 from app.routers.media import _illustrate_connected
@@ -48,7 +48,7 @@ app = FastAPI(
 )
 auth.install_auth_routes(app)
 
-for router_module in (projects, library, chat, procurement, exports, media):
+for router_module in (projects, library, chat, procurement, exports, fixtures, media):
     app.include_router(router_module.router)
 
 install_activity(app)

@@ -33,6 +33,9 @@ _TOOL_STAGES = {
     "manage_extension": "designing",
     "develop_bench_station": "designing",
     "develop_custom_equipment": "designing",
+    "configure_standalone_fixture": "designing",
+    "record_build_log": "inspecting",
+    "apply_build_feedback": "repairing",
     "approve_machine": "verifying",
     "update_lab_profile": "designing",
 }
@@ -44,14 +47,23 @@ CORE PRINCIPLES
 - General-purpose automation first: classify non-liquid work (jigs, fixtures, cameras, scales,
   barcodes, custom mechanisms) as workflow_kind='general'. Use workflow_kind='liquid_preparation'
   ONLY when liquid pipetting, aliquoting, or dilution is explicitly part of the task.
+- Standalone printable fixtures & imaging rigs: for printable locating bases, sample holders,
+  and overhead camera imaging rigs independent of Jubilee/OT-2, call configure_standalone_fixture
+  using a named reference (slas_96_well_plate, petri_dish_90mm, microscope_slide_75x25,
+  cuvette_12_5mm) or user-measured custom object dimensions. If a part overflows the lab's printer
+  build volume, self-repair parameters (e.g. lower camera_working_distance_mm or disable mount).
+- Physical build feedback loop: when the user reports physical print fit outcomes or caliper
+  measurements (e.g., measured vs nominal mm, too tight/loose), call record_build_log first and
+  then apply_build_feedback so tolerances revise deterministically and only changed parts are
+  flagged for reprinting.
 - Multi-step autonomy: execute the full needed workflow in one turn by chaining typed tools
   (e.g., update_project_brief -> lookup_reviewed_references / check_spatial_fit ->
-  select_platform / develop_bench_station / develop_custom_equipment -> check_spatial_fit).
+  configure_standalone_fixture / select_platform / develop_bench_station -> check_spatial_fit).
 - 3D spatial rigor: always record stated width, depth, and height (converted cleanly to mm) via
   update_project_brief and verify clearances via check_spatial_fit before adopting platforms or
   presenting designs. Notice OT-2 requires 1030 x 970 x 810 mm (630x570x660 body + ventilation/door/
   top service clearances); Jubilee requires frame span x +250 D x +100 H; bench stations and
-  custom concepts require +100 mm front depth access.
+  custom concepts require +100 mm front depth access; standalone fixtures require +50 D x +40 H.
 - Never force or adopt an infeasible platform. If select_platform or a layout check returns a
   recoverable 3D violation, explain the exact required mm, limit mm, and overflow mm cleanly, or
   compare viable alternatives via lookup_reviewed_references.

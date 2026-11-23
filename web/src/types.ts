@@ -242,6 +242,9 @@ export type Project = {
   restored_from?: { project_id: string; revision: number; saved_at: string };
   revision: number;
   bench_station?: BenchStation | null;
+  standalone_fixture?: StandaloneFixture | null;
+  build_logs?: BuildLogEntry[];
+  build_feedback?: BuildFeedbackSummary | null;
   labware_brief?: LabwareBrief | null;
   labware_rack?: LabwareRack | null;
   labware_plate?: LabwarePlate | null;
@@ -516,4 +519,144 @@ export type DimensionMeasurement = {
   source?: string;
   measured_with?: string;
   recorded_at?: string;
+};
+
+export type FixturePrinterFit = {
+  checked: boolean;
+  fits: boolean | null;
+  orientation: string;
+  build_volume_mm?: number[] | null;
+  printer_name?: string | null;
+  detail: string;
+};
+
+export type FixturePart = {
+  id: string;
+  label: string;
+  role: string;
+  printable: boolean;
+  size_mm: [number, number, number];
+  position_mm: [number, number, number];
+  print_orientation: string;
+  supports_required: boolean;
+  material: string;
+  nozzle_mm: number;
+  layer_height_mm: number;
+  infill_pct: number;
+  perimeters: number;
+  estimated_filament_g: number;
+  estimated_print_minutes: number;
+  part_signature: string;
+  printer_fit: FixturePrinterFit;
+};
+
+export type StandaloneFixture = {
+  schema_version: '1';
+  kind: 'standalone_fixture_v1';
+  spec: {
+    schema_version: '1';
+    title: string;
+    fixture_kind: 'locating_base' | 'sample_holder' | 'imaging_rig';
+    object_reference_id: string;
+    object_label: string;
+    object_shape: 'rectangular' | 'circular';
+    object_length_mm?: number | null;
+    object_width_mm?: number | null;
+    object_diameter_mm?: number | null;
+    object_height_mm: number;
+    dimension_provenance: 'reference' | 'user_measured';
+    clearance_per_side_mm: number;
+    fdm_undersize_mm: number;
+    wall_thickness_mm: number;
+    floor_thickness_mm: number;
+    lip_height_mm: number;
+    chamfer_mm: number;
+    fillet_mm: number;
+    fastener_spec: string;
+    include_alignment_stops: boolean;
+    include_finger_cutouts: boolean;
+    include_scale_reference: boolean;
+    include_camera_mount: boolean;
+    camera_mount_type: string;
+    camera_working_distance_mm: number;
+    material: string;
+    nozzle_mm: number;
+    layer_height_mm: number;
+  };
+  derived: {
+    pocket_length_mm: number;
+    pocket_width_mm: number;
+    pocket_diameter_mm?: number | null;
+    total_allowance_mm: number;
+    base_outer_width_mm: number;
+    base_outer_depth_mm: number;
+    base_height_mm: number;
+    scale_reference_length_mm: number;
+    tolerance_coupon: {
+      span_mm: number;
+      nominal_opening_mm: number;
+      step_openings_mm: number[];
+      offsets_per_side_mm: number[];
+      scaled_to_fit_coupon: boolean;
+      height_mm: number;
+    };
+  };
+  parts: FixturePart[];
+  part_signatures: Record<string, string>;
+  components: Component[];
+  footprint_mm: [number, number];
+  height_mm: number;
+  fasteners_bom: { item: string; quantity: number; purpose: string }[];
+  printer_fit_ok: boolean;
+  checks: DesignCheck[];
+  limitations: string[];
+};
+
+export type BuildMeasuredFeature = {
+  feature: string;
+  axis: 'length' | 'width' | 'diameter' | 'height' | 'bore' | 'other';
+  nominal_mm: number;
+  measured_mm: number;
+  error_mm?: number;
+};
+
+export type BuildLogEntry = {
+  id: string;
+  revision: number;
+  recorded_at?: string;
+  parts_printed: string[];
+  printer_name: string;
+  material: string;
+  nozzle_mm: number;
+  layer_height_mm: number;
+  fit_result: 'pass' | 'too_tight' | 'too_loose' | 'warped' | 'failed_print';
+  measured_features: BuildMeasuredFeature[];
+  notes: string;
+  part_signatures: Record<string, string>;
+  e13_summary?: {
+    trial_count: number;
+    seated_pass_count: number;
+    all_orientations_correct: boolean;
+    max_displacement_mm: number | null;
+    target_threshold_mm: number;
+    passes_1mm_target: boolean;
+  } | null;
+  applied_revision?: number | null;
+};
+
+export type BuildFeedbackPartDiff = {
+  id: string;
+  label: string;
+  previously_printed: boolean;
+  reason: string;
+};
+
+export type BuildFeedbackSummary = {
+  tested_revision: number | null;
+  current_revision: number;
+  latest_log_id: string | null;
+  latest_fit_result: string | null;
+  parts_to_reprint: BuildFeedbackPartDiff[];
+  parts_unchanged: BuildFeedbackPartDiff[];
+  has_untested_changes: boolean;
 };

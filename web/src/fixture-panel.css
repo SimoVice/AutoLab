@@ -1,0 +1,33 @@
+.fixture-panel { color: #244446; display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+.fixture-stage { display: flex; flex-direction: column; gap: 10px; }
+.fixture-stage[hidden] { display: none; }
+.fixture-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.fixture-heading h2 { margin: 0; font-size: 17px; }
+.fixture-heading p { margin: 3px 0 0; font-size: 12px; color: #66817e; }
+.provenance-badge { border-radius: 999px; padding: 4px 10px; font-size: 11px; font-weight: 600; }
+.provenance-badge.reference { background: #e4f1ed; color: #36736d; }
+.provenance-badge.measured { background: #dcfce7; color: #166534; }
+.fixture-view { height: clamp(270px, 42vh, 440px); position: relative; overflow: hidden; border: 1px solid #d7e5e1; border-radius: 12px; background: #edf3f1; }
+.fixture-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 8px 2px; border-bottom: 1px solid #dbe7e3; font-size: 12px; color: #68827e; }
+.fixture-meta strong { display: block; color: #254b49; font-size: 14px; margin-top: 2px; }
+.fixture-downloads-card, .fixture-feedback-card { border: 1px solid #d7e5e1; border-radius: 10px; padding: 12px 14px; background: #fafcfb; }
+.fixture-downloads-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.fixture-downloads-header h3, .fixture-feedback-card h3 { margin: 0 0 8px; font-size: 14px; }
+.fixture-select-actions { display: flex; gap: 8px; }
+.fixture-select-actions button, .build-log-form button, .build-logs-list button { border: 1px solid #aac9c0; border-radius: 6px; background: #ffffff; color: #176b67; padding: 5px 10px; font-size: 12px; cursor: pointer; }
+.fixture-parts-list { list-style: none; padding: 0; margin: 0; }
+.fixture-parts-list li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 6px; border-bottom: 1px solid #e4eeeb; font-size: 12px; }
+.fixture-parts-list li.reprint-required { background: #fff7ed; }
+.fixture-parts-list li.reprint-reuse { background: #f0fdf4; }
+.fixture-part-check { display: flex; align-items: flex-start; gap: 8px; flex: 1; }
+.fixture-part-check small { display: block; color: #607975; font-size: 11px; margin-top: 2px; }
+.diff-tag { display: inline-block; margin-top: 4px; border-radius: 4px; padding: 2px 6px; font-size: 10px; font-weight: 700; }
+.diff-reprint { background: #ffedd5; color: #9a3412; }
+.diff-reuse { background: #dcfce7; color: #166534; }
+.fixture-part-links { display: flex; gap: 8px; font-size: 12px; font-weight: 600; }
+.fixture-part-links a { color: #176b67; text-decoration: underline; }
+.build-log-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; align-items: end; margin-bottom: 10px; }
+.build-log-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #3d5d5a; }
+.build-log-form input, .build-log-form select { padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 12px; }
+.build-logs-list { list-style: none; padding: 0; margin: 8px 0 0; }
+.build-logs-list li { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid #e4eeeb; font-size: 12px; }

@@ -374,3 +374,130 @@ def test_live_activity_endpoint_streams_autonomous_steps_and_trace(monkeypatch):
             assert done.status_code == 200
 
     asyncio.run(journey())
+
+
+def test_agent_loop_standalone_fixture_bed_repair_and_build_feedback(monkeypatch, tmp_path):
+    monkeypatch.setenv("AUTOLAB_LAB_PROFILE_PATH", str(tmp_path / "profile.json"))
+    monkeypatch.delenv("AUTOLAB_DATABASE_PATH", raising=False)
+    monkeypatch.delenv("AUTOLAB_LIBRARY_DIRECTORY", raising=False)
+
+    from app.lab_profile import save_lab_profile
+
+    save_lab_profile(
+        {
+            "printer": {
+                "name": "Bambu Lab A1 mini",
+                "build_volume_mm": [180.0, 180.0, 180.0],
+                "nozzle_mm": 0.4,
+                "materials": ["PLA", "PETG"],
+            }
+        }
+    )
+
+    project = apply_update(new_project(), {"workflow_kind": "general"})
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            # First attempt sets 220 mm camera distance -> overflows 180 mm mast bed length.
+            return httpx.Response(
+                200,
+                json=_tool_reply(
+                    [
+                        _tc(
+                            "c1",
+                            "configure_standalone_fixture",
+                            {
+                                "fixture_kind": "imaging_rig",
+                                "object_reference_id": "slas_96_well_plate",
+                                "camera_working_distance_mm": 220.0,
+                            },
+                        )
+                    ]
+                ),
+            )
+        if calls == 2:
+            # Self-repair lowers working distance so camera-mast fits cleanly on 180 mm bed.
+            return httpx.Response(
+                200,
+                json=_tool_reply(
+                    [
+                        _tc(
+                            "c2",
+                            "configure_standalone_fixture",
+                            {
+                                "fixture_kind": "imaging_rig",
+                                "object_reference_id": "slas_96_well_plate",
+                                "camera_working_distance_mm": 135.0,
+                            },
+                        )
+                    ]
+                ),
+            )
+        if calls == 3:
+            return httpx.Response(
+                200,
+                json=_tool_reply(
+                    [
+                        _tc(
+                            "c3",
+                            "record_build_log",
+                            {
+                                "parts_printed": [
+                                    "locating-base",
+                                    "camera-mast",
+                                    "camera-arm",
+                                    "tolerance-coupon",
+                                ],
+                                "fit_result": "too_tight",
+                                "measured_features": [
+                                    {
+                                        "feature": "pocket_length",
+                                        "axis": "length",
+                                        "nominal_mm": 128.66,
+                                        "measured_mm": 128.35,
+                                    }
+                                ],
+                            },
+                        )
+                    ]
+                ),
+            )
+        if calls == 4:
+            return httpx.Response(
+                200,
+                json=_tool_reply([_tc("c4", "apply_build_feedback", {})]),
+            )
+        if calls == 5:
+            return httpx.Response(
+                200,
+                json=_tool_reply([_tc("c5", "check_spatial_fit", {})]),
+            )
+        return httpx.Response(
+            200,
+            json=_text_reply(
+                "Repaired camera working distance to 135 mm to fit A1 mini, logged the "
+                "128.35 mm caliper measurement, and revised tolerances for locating-base."
+            ),
+        )
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await run_agent_turn(
+                project,
+                "Design a 96-well imaging rig and adjust after my 128.35 mm print.",
+                [],
+                client=client,
+                settings=TEST_SETTINGS,
+            )
+
+    result = asyncio.run(run())
+    assert calls == 6
+    assert result["repairs_used"] == 1
+    assert result["project"]["standalone_fixture"]["derived"]["pocket_length_mm"] == 128.97
+    diff = result["project"]["build_feedback"]
+    assert {p["id"] for p in diff["parts_to_reprint"]} == {"locating-base", "tolerance-coupon"}
+    assert {p["id"] for p in diff["parts_unchanged"]} == {"camera-mast", "camera-arm"}
+

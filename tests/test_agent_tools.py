@@ -26,7 +26,7 @@ def _walk_schemas(node):
             yield from _walk_schemas(item)
 
 
-def test_all_13_openai_tool_schemas_are_strict_and_complete():
+def test_all_16_openai_tool_schemas_are_strict_and_complete():
     from app.agent_tools import openai_tool_schemas
 
     schemas = openai_tool_schemas(new_project())
@@ -43,6 +43,9 @@ def test_all_13_openai_tool_schemas_are_strict_and_complete():
         "manage_extension",
         "develop_bench_station",
         "develop_custom_equipment",
+        "configure_standalone_fixture",
+        "record_build_log",
+        "apply_build_feedback",
         "approve_machine",
         "update_lab_profile",
     ]
@@ -330,3 +333,70 @@ def test_bench_station_custom_equipment_and_lab_profile(monkeypatch, tmp_path):
     )
     assert concept_res.ok is True and concept_ctx.project.get("concept_design")
     assert source_project()["revision"] >= 1
+
+
+def test_standalone_fixture_tools_bed_overflow_and_build_feedback():
+    from app.agent_tools import ToolContext, execute_tool
+
+    ctx = ToolContext(
+        project=new_project(),
+        user_message="Build a 96-well plate imaging rig for A1 mini.",
+        lab_profile={"printer": {"name": "A1 mini", "build_volume_mm": [180.0, 180.0, 180.0]}},
+    )
+    overflow = asyncio.run(
+        execute_tool(
+            "configure_standalone_fixture",
+            {
+                "fixture_kind": "imaging_rig",
+                "object_reference_id": "slas_96_well_plate",
+                "camera_working_distance_mm": 220.0,
+            },
+            ctx,
+        )
+    )
+    assert overflow.ok is False and overflow.recoverable is True
+    assert "camera-mast" in overflow.summary
+
+    ok = asyncio.run(
+        execute_tool(
+            "configure_standalone_fixture",
+            {
+                "fixture_kind": "imaging_rig",
+                "object_reference_id": "slas_96_well_plate",
+                "camera_working_distance_mm": 140.0,
+            },
+            ctx,
+        )
+    )
+    assert ok.ok is True and ctx.project["standalone_fixture"]["printer_fit_ok"] is True
+
+    logged = asyncio.run(
+        execute_tool(
+            "record_build_log",
+            {
+                "parts_printed": [
+                    "locating-base",
+                    "camera-mast",
+                    "camera-arm",
+                    "tolerance-coupon",
+                ],
+                "fit_result": "too_tight",
+                "measured_features": [
+                    {
+                        "feature": "pocket_length",
+                        "axis": "length",
+                        "nominal_mm": 128.66,
+                        "measured_mm": 128.35,
+                    }
+                ],
+            },
+            ctx,
+        )
+    )
+    assert logged.ok is True
+
+    revised = asyncio.run(execute_tool("apply_build_feedback", {}, ctx))
+    assert revised.ok is True
+    assert set(revised.data["parts_to_reprint"]) == {"locating-base", "tolerance-coupon"}
+    assert set(revised.data["parts_unchanged"]) == {"camera-mast", "camera-arm"}
+

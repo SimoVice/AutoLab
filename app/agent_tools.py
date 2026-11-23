@@ -250,6 +250,69 @@ class UpdateLabProfileArgs(_StrictArgs):
     apply_to_current_project: bool = True
 
 
+class ConfigureStandaloneFixtureArgs(_StrictArgs):
+    title: Annotated[str | None, Field(max_length=140)] = None
+    fixture_kind: Literal["locating_base", "sample_holder", "imaging_rig"] | None = None
+    object_reference_id: Literal[
+        "slas_96_well_plate",
+        "petri_dish_90mm",
+        "microscope_slide_75x25",
+        "cuvette_12_5mm",
+        "custom",
+    ] = "custom"
+    object_label: Annotated[str | None, Field(max_length=120)] = None
+    object_shape: Literal["rectangular", "circular"] | None = None
+    object_length_mm: float | None = Field(default=None, ge=5.0, le=400.0)
+    object_width_mm: float | None = Field(default=None, ge=5.0, le=400.0)
+    object_diameter_mm: float | None = Field(default=None, ge=5.0, le=300.0)
+    object_height_mm: float | None = Field(default=None, ge=0.5, le=250.0)
+    clearance_per_side_mm: float | None = Field(default=None, ge=0.05, le=3.0)
+    fdm_undersize_mm: float | None = Field(default=None, ge=0.0, le=1.5)
+    wall_thickness_mm: float | None = Field(default=None, ge=2.0, le=20.0)
+    floor_thickness_mm: float | None = Field(default=None, ge=2.0, le=20.0)
+    lip_height_mm: float | None = Field(default=None, ge=1.5, le=40.0)
+    fastener_spec: Literal[
+        "none", "m3_clearance", "m3_heatset_insert", "m4_clearance"
+    ] | None = None
+    include_scale_reference: bool | None = None
+    include_camera_mount: bool | None = None
+    camera_mount_type: Literal[
+        "pi_camera_v2_v3", "usb_webcam_quarter20", "custom_m3"
+    ] | None = None
+    camera_working_distance_mm: float | None = Field(default=None, ge=40.0, le=400.0)
+    material: Literal["PLA", "PETG", "ABS", "ASA"] | None = None
+    export_parts: list[Annotated[str, Field(max_length=40)]] | None = Field(
+        default=None, max_length=8
+    )
+
+
+class ToolMeasuredFeatureArg(_StrictArgs):
+    feature: Annotated[str, Field(min_length=1, max_length=80)]
+    axis: Literal["length", "width", "diameter", "height", "bore", "other"] = "length"
+    nominal_mm: float = Field(gt=0.0, le=1000.0)
+    measured_mm: float = Field(gt=0.0, le=1000.0)
+
+
+class RecordBuildLogArgs(_StrictArgs):
+    parts_printed: list[Annotated[str, Field(max_length=40)]] = Field(
+        min_length=1, max_length=12
+    )
+    fit_result: Literal["pass", "too_tight", "too_loose", "warped", "failed_print"]
+    printer_name: Annotated[str | None, Field(max_length=100)] = None
+    material: Annotated[str | None, Field(max_length=40)] = None
+    layer_height_mm: float | None = Field(default=None, ge=0.05, le=1.0)
+    measured_features: list[ToolMeasuredFeatureArg] = Field(
+        default_factory=list, max_length=20
+    )
+    notes: Annotated[str | None, Field(max_length=1000)] = None
+
+
+class ApplyBuildFeedbackArgs(_StrictArgs):
+    log_id: Annotated[str | None, Field(max_length=40)] = None
+    clearance_delta_mm: float | None = Field(default=None, ge=-1.5, le=1.5)
+    fdm_undersize_delta_mm: float | None = Field(default=None, ge=-1.0, le=1.0)
+
+
 _TOOL_SPECS: list[tuple[str, str, type[BaseModel]]] = [
     (
         "inspect_project_state",
@@ -316,6 +379,25 @@ _TOOL_SPECS: list[tuple[str, str, type[BaseModel]]] = [
         "Author or revise an original general-purpose 3D custom benchtop assembly from the "
         "project brief and user request (jigs, imaging fixtures, custom mechanisms).",
         DevelopCustomEquipmentArgs,
+    ),
+    (
+        "configure_standalone_fixture",
+        "Create or revise a standalone printable locating base, sample holder, or overhead "
+        "camera imaging rig independent of Jubilee/OT-2, with print-ready tolerances and "
+        "3D printer bed-volume checks.",
+        ConfigureStandaloneFixtureArgs,
+    ),
+    (
+        "record_build_log",
+        "Record physical 3D-print and caliper/repeatability measurements against the active "
+        "fixture or labware revision.",
+        RecordBuildLogArgs,
+    ),
+    (
+        "apply_build_feedback",
+        "Apply recorded caliper or fit feedback from a build log to revise FDM pocket "
+        "clearances and report only which parts require reprinting.",
+        ApplyBuildFeedbackArgs,
     ),
     (
         "approve_machine",
@@ -387,6 +469,7 @@ def _compact_project_state(project: dict, lab_profile: dict | None) -> dict[str,
         name
         for name in (
             "engineering_design",
+            "standalone_fixture",
             "bench_station",
             "concept_design",
             "labware_rack",
@@ -430,6 +513,42 @@ def _compact_project_state(project: dict, lab_profile: dict | None) -> dict[str,
             "bounds_mm": concept.get("bounds_mm"),
             "components": [c.get("key") for c in concept.get("components", [])],
         }
+    if sf := project.get("standalone_fixture"):
+        compact["standalone_fixture"] = {
+            "spec": sf["spec"],
+            "derived": {
+                "pocket_length_mm": sf["derived"]["pocket_length_mm"],
+                "pocket_width_mm": sf["derived"]["pocket_width_mm"],
+                "pocket_diameter_mm": sf["derived"].get("pocket_diameter_mm"),
+                "scale_reference_length_mm": sf["derived"]["scale_reference_length_mm"],
+                "tolerance_coupon": sf["derived"]["tolerance_coupon"],
+            },
+            "footprint_mm": sf["footprint_mm"],
+            "height_mm": sf["height_mm"],
+            "printer_fit_ok": sf["printer_fit_ok"],
+            "parts": [
+                {
+                    "id": p["id"],
+                    "size_mm": p["size_mm"],
+                    "printer_fit": p["printer_fit"],
+                }
+                for p in sf["parts"]
+            ],
+        }
+    if project.get("build_logs"):
+        compact["build_logs"] = [
+            {
+                "id": item["id"],
+                "revision": item["revision"],
+                "fit_result": item["fit_result"],
+                "parts_printed": item["parts_printed"],
+                "measured_features": item.get("measured_features", []),
+                "applied_revision": item.get("applied_revision"),
+            }
+            for item in project["build_logs"][-5:]
+        ]
+    if project.get("build_feedback"):
+        compact["build_feedback"] = project["build_feedback"]
     profile_ctx = lab_profile_prompt_context(lab_profile)
     if profile_ctx:
         compact["lab_profile"] = profile_ctx
@@ -1565,6 +1684,208 @@ def _tool_update_lab_profile(args: UpdateLabProfileArgs, ctx: ToolContext) -> To
     )
 
 
+def _tool_configure_standalone_fixture(
+    args: ConfigureStandaloneFixtureArgs, ctx: ToolContext
+) -> ToolResult:
+    from app.fixture_adapter import attach_standalone_fixture
+
+    previous = ctx.project
+    existing = previous.get("standalone_fixture")
+    provided = args.model_dump(exclude_none=True)
+
+    if existing:
+        raw_spec = deepcopy(existing["spec"])
+        if args.object_reference_id != raw_spec.get("object_reference_id"):
+            for key in (
+                "object_label",
+                "object_shape",
+                "object_length_mm",
+                "object_width_mm",
+                "object_diameter_mm",
+                "object_height_mm",
+                "dimension_provenance",
+            ):
+                raw_spec.pop(key, None)
+        raw_spec.update(provided)
+        if args.object_reference_id == "custom" and any(
+            k in provided
+            for k in (
+                "object_length_mm",
+                "object_width_mm",
+                "object_diameter_mm",
+                "object_height_mm",
+            )
+        ):
+            raw_spec["dimension_provenance"] = "user_measured"
+        if raw_spec.get("object_shape") == "rectangular":
+            raw_spec["object_diameter_mm"] = None
+        elif raw_spec.get("object_shape") == "circular":
+            raw_spec["object_length_mm"] = None
+            raw_spec["object_width_mm"] = None
+    else:
+        raw_spec = dict(provided)
+        if "title" not in raw_spec:
+            ref_title = provided.get("object_reference_id", "Custom").replace("_", " ").title()
+            raw_spec["title"] = provided.get("object_label") or f"{ref_title} fixture"
+        if (
+            args.object_reference_id == "custom"
+            and args.object_length_mm is None
+            and args.object_diameter_mm is None
+        ):
+            return ToolResult(
+                tool="configure_standalone_fixture",
+                ok=True,
+                stage="inspecting",
+                mutated=False,
+                requires_human_input=True,
+                question=(
+                    "Please provide the object label and its measured dimensions in mm "
+                    "(length x width x height, or diameter x height), or pick a reference "
+                    "(96-well plate, 90 mm Petri dish, 75x25 slide, or cuvette)."
+                ),
+                summary="Missing custom object dimensions for standalone fixture.",
+            )
+
+    try:
+        updated = attach_standalone_fixture(previous, raw_spec, lab_profile=ctx.lab_profile)
+    except ValueError as exc:
+        return _fail(
+            "configure_standalone_fixture",
+            "repairing",
+            str(exc),
+            diagnostics=[str(exc)],
+            recoverable="new general project" not in str(exc),
+        )
+
+    fixture = updated["standalone_fixture"]
+    if not fixture["printer_fit_ok"]:
+        failing = [
+            f"{p['id']}: {p['printer_fit']['detail']}"
+            for p in fixture["parts"]
+            if p["printer_fit"].get("fits") is False
+        ]
+        return _fail(
+            "configure_standalone_fixture",
+            "repairing",
+            "Printable part exceeds the configured printer build volume: " + "; ".join(failing),
+            diagnostics=failing,
+            recoverable=True,
+        )
+
+    run = {
+        "kind": "configure_standalone_fixture",
+        "status": "accepted",
+        "message": (
+            f"Configured {fixture['spec']['title']} "
+            f"(pocket {fixture['derived']['pocket_length_mm']:g} x "
+            f"{fixture['derived']['pocket_width_mm']:g} mm)."
+        ),
+    }
+    ctx.project = updated
+    ctx.mutated = True
+    ctx.action_runs.append(run)
+    return ToolResult(
+        tool="configure_standalone_fixture",
+        ok=True,
+        stage="designing",
+        mutated=True,
+        summary=run["message"],
+        data={
+            "spec": fixture["spec"],
+            "derived": {
+                "pocket_length_mm": fixture["derived"]["pocket_length_mm"],
+                "pocket_width_mm": fixture["derived"]["pocket_width_mm"],
+                "pocket_diameter_mm": fixture["derived"].get("pocket_diameter_mm"),
+                "scale_reference_length_mm": fixture["derived"]["scale_reference_length_mm"],
+                "tolerance_coupon": fixture["derived"]["tolerance_coupon"],
+            },
+            "parts": [
+                {
+                    "id": p["id"],
+                    "size_mm": p["size_mm"],
+                    "printer_fit": p["printer_fit"],
+                }
+                for p in fixture["parts"]
+            ],
+            "spatial_fit": updated["design"].get("spatial_fit"),
+        },
+        action_run=run,
+    )
+
+
+def _tool_record_build_log(args: RecordBuildLogArgs, ctx: ToolContext) -> ToolResult:
+    from app.build_feedback import append_build_log
+
+    payload = args.model_dump(exclude_none=True)
+    try:
+        updated, entry = append_build_log(ctx.project, payload)
+    except ValueError as exc:
+        return _fail("record_build_log", "verifying", str(exc), recoverable=False)
+
+    run = {
+        "kind": "record_build_log",
+        "status": "accepted",
+        "message": f"Recorded physical build log {entry['id']} ({entry['fit_result']}).",
+    }
+    ctx.project = updated
+    ctx.mutated = True
+    ctx.action_runs.append(run)
+    return ToolResult(
+        tool="record_build_log",
+        ok=True,
+        stage="inspecting",
+        mutated=True,
+        summary=run["message"],
+        data={"log": entry, "build_feedback": updated.get("build_feedback")},
+        action_run=run,
+    )
+
+
+def _tool_apply_build_feedback(args: ApplyBuildFeedbackArgs, ctx: ToolContext) -> ToolResult:
+    from app.build_feedback import apply_build_log_revision
+
+    logs = ctx.project.get("build_logs") or []
+    log_id = args.log_id or (logs[-1]["id"] if logs else None)
+    if not log_id:
+        return _fail(
+            "apply_build_feedback",
+            "verifying",
+            "No physical build log exists yet; call record_build_log first.",
+        )
+
+    try:
+        updated, summary = apply_build_log_revision(
+            ctx.project,
+            log_id,
+            clearance_delta_mm=args.clearance_delta_mm,
+            fdm_undersize_delta_mm=args.fdm_undersize_delta_mm,
+            lab_profile=ctx.lab_profile,
+        )
+    except ValueError as exc:
+        return _fail("apply_build_feedback", "repairing", str(exc))
+
+    run = {
+        "kind": "apply_build_feedback",
+        "status": "accepted",
+        "message": (
+            f"Revised fixture from {log_id} -> revision {summary['new_revision']}. "
+            f"Reprint: {summary['parts_to_reprint']}; unchanged: {summary['parts_unchanged']}."
+        ),
+    }
+    ctx.project = updated
+    ctx.mutated = True
+    ctx.action_runs.append(run)
+    return ToolResult(
+        tool="apply_build_feedback",
+        ok=True,
+        stage="repairing",
+        mutated=True,
+        summary=run["message"],
+        data=summary,
+        action_run=run,
+    )
+
+
 _DISPATCH: dict[str, tuple[type[BaseModel], Any, bool]] = {
     "inspect_project_state": (InspectProjectStateArgs, _tool_inspect_project_state, False),
     "check_spatial_fit": (CheckSpatialFitArgs, _tool_check_spatial_fit, False),
@@ -1581,6 +1902,13 @@ _DISPATCH: dict[str, tuple[type[BaseModel], Any, bool]] = {
     "manage_extension": (ManageExtensionArgs, _tool_manage_extension, True),
     "develop_bench_station": (DevelopBenchStationArgs, _tool_develop_bench_station, False),
     "develop_custom_equipment": (DevelopCustomEquipmentArgs, _tool_develop_custom_equipment, True),
+    "configure_standalone_fixture": (
+        ConfigureStandaloneFixtureArgs,
+        _tool_configure_standalone_fixture,
+        False,
+    ),
+    "record_build_log": (RecordBuildLogArgs, _tool_record_build_log, False),
+    "apply_build_feedback": (ApplyBuildFeedbackArgs, _tool_apply_build_feedback, False),
     "approve_machine": (ApproveMachineArgs, _tool_approve_machine, False),
     "update_lab_profile": (UpdateLabProfileArgs, _tool_update_lab_profile, False),
 }
