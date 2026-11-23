@@ -205,6 +205,8 @@ REQUIREMENT_KEYS = (
     "final_volume",
     "equipment",
     "workspace_width_mm",
+    "workspace_depth_mm",
+    "workspace_height_mm",
     "cooling_enabled",
     "cooling_target_c",
 )
@@ -227,6 +229,7 @@ WIDTH_PATTERN = re.compile(
     r"centimetr(?:o|i)|cm|meters?|metres?|metr(?:o|i)|m)\b",
     re.IGNORECASE,
 )
+LENGTH_PATTERN = WIDTH_PATTERN
 
 COOLING_TERM_PATTERN = re.compile(
     r"cold[\s-]?storage|refrigerat\w*|fridge|frigorifer\w*|frigo\b|raffredd\w*|freezer|cooling|cold[\s-]?bay",
@@ -402,6 +405,8 @@ class ExtractedTurn(BaseModel):
     final_volume: Annotated[str | None, Field(max_length=500)] = None
     equipment: Annotated[str | None, Field(max_length=500)] = None
     workspace_width_mm: Annotated[float | None, Field(strict=True, gt=0, le=5000)] = None
+    workspace_depth_mm: Annotated[float | None, Field(strict=True, gt=0, le=5000)] = None
+    workspace_height_mm: Annotated[float | None, Field(strict=True, gt=0, le=5000)] = None
     cooling_enabled: Annotated[bool | None, Field(strict=True)] = None
     cooling_target_c: Annotated[float | None, Field(strict=True, ge=2, le=20)] = None
     workflow_kind: Literal["general", "liquid_preparation"] | None = None
@@ -415,6 +420,8 @@ class ExtractedTurn(BaseModel):
     source_final_volume: Annotated[str | None, Field(max_length=500)] = None
     source_equipment: Annotated[str | None, Field(max_length=500)] = None
     source_workspace_width_mm: Annotated[str | None, Field(max_length=500)] = None
+    source_workspace_depth_mm: Annotated[str | None, Field(max_length=500)] = None
+    source_workspace_height_mm: Annotated[str | None, Field(max_length=500)] = None
     source_cooling_enabled: Annotated[str | None, Field(max_length=500)] = None
     source_cooling_target_c: Annotated[str | None, Field(max_length=500)] = None
     source_workflow_kind: Annotated[str | None, Field(max_length=1000)] = None
@@ -519,9 +526,9 @@ class ExtractedTurn(BaseModel):
                 continue
             if not source or source not in user_message:
                 raise ValueError(f"{key}: Update source must be a literal span from this message")
-            if key == "workspace_width_mm":
+            if key in ("workspace_width_mm", "workspace_depth_mm", "workspace_height_mm"):
                 found_values = []
-                for match in WIDTH_PATTERN.finditer(source):
+                for match in LENGTH_PATTERN.finditer(source):
                     number = float(match.group(1).replace(",", "."))
                     unit = match.group(2).lower()
                     factor = 1 if unit.startswith(("mm", "milli")) else 10
@@ -530,7 +537,7 @@ class ExtractedTurn(BaseModel):
                     found_values.append(number * factor)
                 if not any(abs(candidate - value) < 1e-6 for candidate in found_values):
                     raise ValueError(
-                        f"{key}: Workspace width must match a source measurement and unit"
+                        f"{key}: Workspace dimension must match a source measurement and unit"
                     )
             elif key == "equipment":
                 if value.casefold() not in source.casefold():
@@ -1015,6 +1022,7 @@ async def generate_turn(
                 "summary": project.get("summary"),
                 "current_footprint_mm": design.get("footprint") if accepted_layout else None,
                 "constraint_status": design.get("constraint_status"),
+                "spatial_fit": design.get("spatial_fit"),
                 "current_plan": project.get("plan"),
                 "cooling": design.get("cooling"),
                 "catalogue": _catalogue_facts(project) if accepted_layout else None,

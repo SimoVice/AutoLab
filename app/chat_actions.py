@@ -11,7 +11,6 @@ from app.labware import develop_labware, reapply_labware, remove_labware
 from app.microplates import LabwareSelection, reapply_plate, select_plate
 from app.model_client import ModelClientError
 from app.tip_racks import TipRackUpdate, reapply_tip_rack, select_tip_rack, show_tip_options
-from app.upstream_cad import foundation_metadata
 from app.workflows import has_workstation_design_context, workstation_context_question
 
 
@@ -81,17 +80,18 @@ async def execute_chat_actions(
                     runs.append({"kind": kind, "status": "ready", "needs_context": True,
                                  "message": workstation_context_question(result)})
                     continue
-                width = result["summary"].get("workspace_width_mm")
-                commercial = selected == "opentrons-ot2"
-                required = 1030 if commercial else foundation_metadata()["bbox_mm"][0]
-                if width is not None and width < required:
+                from app.spatial_fit import evaluate_spatial_fit, format_spatial_violations
+
+                fit = evaluate_spatial_fit(result, platform_id=selected)
+                if fit["status"] == "infeasible":
+                    detail = format_spatial_violations(fit)
                     raise ValueError(
-                        f"The selected platform requires about {required:.1f} mm of width "
-                        "including its known operating clearances. "
-                        f"It cannot fit a {width:g} mm width without redesigning the frame. "
-                        "The accepted machine is preserved; allow more space "
-                        "or choose another base."
+                        "The selected platform does not fit the recorded workspace constraints. "
+                        f"{detail} "
+                        "The accepted machine is preserved; allow more space or "
+                        "choose another base."
                     )
+                commercial = selected == "opentrons-ot2"
                 if commercial:
                     from app.commercial_design import adopt_commercial
                     from app.platform_profiles import commercial_sourcing

@@ -83,6 +83,8 @@ def check_candidate(project: dict, raw: object) -> list[dict]:
                          "Liquid preparation with design enabled is required."))
     summary = project.get("summary") or {}
     width_limit = summary.get("workspace_width_mm")
+    depth_limit = summary.get("workspace_depth_mm")
+    height_limit = summary.get("workspace_height_mm")
     design = project.get("design") or {}
     foundation = design.get("foundation")
     minimum_width = foundation["bbox_mm"][0] if foundation else 400
@@ -92,7 +94,7 @@ def check_candidate(project: dict, raw: object) -> list[dict]:
                                 and width_limit >= minimum_width)
     )
     checks.append(_check("feasible_width", "Feasible workspace", feasible,
-                         "Resolve the infeasible workspace width before developing a layout."))
+                         "Resolve the infeasible workspace before developing a layout."))
     try:
         proposal = (FoundationLayoutProposal if foundation else LayoutProposal).model_validate(raw)
     except ValidationError as exc:
@@ -114,6 +116,34 @@ def check_candidate(project: dict, raw: object) -> list[dict]:
                           if foundation else f"Proposed width {proposal.deck_width_mm:g} mm; ")
                          + ("no width limit specified." if width_limit is None
                             else f"workspace limit {width_limit} mm.")))
+    if foundation:
+        req_depth = foundation["bbox_mm"][2] + 250.0
+        req_height = foundation["bbox_mm"][1] + 100.0
+    else:
+        cooling_added = 0.0
+        if (design.get("cooling") or {}).get("enabled"):
+            from app.catalog import cooling_envelope
+
+            c_size = cooling_envelope((design.get("cooling") or {}).get("variant_id", ""))
+            cooling_added = max(200.0, float(c_size[2]) + 60.0)
+        req_depth = proposal.deck_depth_mm + cooling_added + 100.0
+        req_height = 400.0 + 100.0
+    within_depth = depth_limit is None or (
+        isinstance(depth_limit, (int, float)) and not isinstance(depth_limit, bool)
+        and req_depth <= depth_limit + 1e-6
+    )
+    checks.append(_check("workspace_depth", "Workspace depth", within_depth,
+                         f"Required depth {req_depth:.1f} mm (including access clearance); "
+                         + ("no depth limit specified." if depth_limit is None
+                            else f"workspace limit {depth_limit:g} mm.")))
+    within_height = height_limit is None or (
+        isinstance(height_limit, (int, float)) and not isinstance(height_limit, bool)
+        and req_height <= height_limit + 1e-6
+    )
+    checks.append(_check("workspace_height", "Workspace height", within_height,
+                         f"Required height {req_height:.1f} mm (including overhead clearance); "
+                         + ("no height limit specified." if height_limit is None
+                            else f"workspace limit {height_limit:g} mm.")))
     components = {part.get("id"): part for part in design.get("components", [])
                   if isinstance(part, dict)}
     boxes = {}
@@ -234,4 +264,6 @@ def apply_candidate(project: dict, raw: object, provenance: dict) -> dict:
     result["engineering_design"] = {
         "schema_version": "1", "proposal": proposal.model_dump(), "provenance": deepcopy(provenance)
     }
-    return add_geometry(result)
+    from app.spatial_fit import refresh_spatial_fit
+
+    return refresh_spatial_fit(add_geometry(result))

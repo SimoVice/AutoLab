@@ -215,7 +215,9 @@ def clear_cold_transfer(project: dict) -> dict:
             next(o for o in g["options"] if o["id"] == g["selected_id"])["unit_price"] is None
             for g in result["sourcing"]["groups"]
         )
-    return result
+    from app.spatial_fit import refresh_spatial_fit
+
+    return refresh_spatial_fit(result)
 
 
 def compile_cold_transfer(project: dict) -> dict:
@@ -376,6 +378,20 @@ def compile_cold_transfer(project: dict) -> dict:
             "The dedicated refrigerator and transfer gantry exceed the "
             "recorded workspace width. Increase the allowed width before adding this concept."
         )
+    depth = project["summary"].get("workspace_depth_mm")
+    req_depth = (bounds["max_mm"][2] - bounds["min_mm"][2]) + 250.0
+    if depth is not None and req_depth > depth + 1e-6:
+        raise ValueError(
+            f"The dedicated refrigerator and transfer gantry require {req_depth:g} mm depth "
+            f"(including rear cable and front access clearance), exceeding the {depth:g} mm limit."
+        )
+    height_limit = project["summary"].get("workspace_height_mm")
+    req_height = (bounds["max_mm"][1] - bounds["min_mm"][1]) + 100.0
+    if height_limit is not None and req_height > height_limit + 1e-6:
+        raise ValueError(
+            f"The dedicated refrigerator and transfer gantry require {req_height:g} mm height "
+            f"(including 100 mm overhead clearance), exceeding the {height_limit:g} mm limit."
+        )
     return {
         "schema_version": "1",
         "kind": "prepared_plate_cold_transfer",
@@ -449,4 +465,6 @@ def apply_cold_transfer(project: dict, *, bump: bool = True) -> dict:
     if bump:
         result["revision"] += 1
         result["status"] = "draft"
-    return result
+    from app.spatial_fit import refresh_spatial_fit
+
+    return refresh_spatial_fit(result)

@@ -43,7 +43,9 @@ def ensure_park_clearance(project: dict) -> dict:
                 parts[cid]["position"][1] -= delta
         project["engineering_design"]["proposal"]["bed_drop_mm"] = new_drop
     design["assembly_bounds"] = assembly_bounds(project)
-    return project
+    from app.spatial_fit import refresh_spatial_fit
+
+    return refresh_spatial_fit(project)
 
 
 def is_source_based(project: dict) -> bool:
@@ -165,6 +167,9 @@ def adopt_foundation(project: dict, *, bed_drop_mm: float = 100) -> dict:
     design["footprint"] = {"width_mm": sx, "height_mm": sy, "depth_mm": sz}
     design.pop("assembly_bounds", None)
     design["assembly_bounds"] = assembly_bounds(result)
+    from app.spatial_fit import refresh_spatial_fit
+
+    refresh_spatial_fit(result)
     result["sourcing"] = foundation_sourcing(result)
     design["estimated_cost"] = {"amount": result["sourcing"]["subtotal"], "currency": "USD"}
     return result

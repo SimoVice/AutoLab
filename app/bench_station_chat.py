@@ -79,7 +79,12 @@ def update_station(current, updated, actions, message, workflow_kind=None):
         proposal = StationProposal.model_validate(current["bench_station"]["proposal"])
     else:
         return updated, None
-    station = compile_station(proposal, workspace_width_mm=updated["summary"]["workspace_width_mm"])
+    station = compile_station(
+        proposal,
+        workspace_width_mm=updated["summary"]["workspace_width_mm"],
+        workspace_depth_mm=updated["summary"].get("workspace_depth_mm"),
+        workspace_height_mm=updated["summary"].get("workspace_height_mm"),
+    )
     previous = current.get("bench_station")
     if (previous and previous["proposal"]["operations"] != station["proposal"]["operations"]
             and updated["brief"]["process"] == current["brief"]["process"]):

@@ -63,7 +63,9 @@ def clear_extension(project: dict) -> dict:
     else:
         result["design"].pop("assembly_bounds", None)
     result["design_basis"] = project_source_basis(result)
-    return result
+    from app.spatial_fit import refresh_spatial_fit
+
+    return refresh_spatial_fit(result)
 
 
 def check_extension(project: dict, raw: object) -> dict:
@@ -80,20 +82,59 @@ def check_extension(project: dict, raw: object) -> dict:
         max(module["bounds"]["max_mm"][i], max(p["position"][i] + p["size"][i] / 2 for p in parts))
         for i in range(3)
     ]
-    limit = project["summary"].get("workspace_width_mm")
-    if limit is not None and upper[0] - lower[0] > limit + 1e-6:
+    limit_w = project["summary"].get("workspace_width_mm")
+    limit_d = project["summary"].get("workspace_depth_mm")
+    limit_h = project["summary"].get("workspace_height_mm")
+    if limit_w is not None and upper[0] - lower[0] > limit_w + 1e-6:
         raise ValueError(
             "The inspection poses exceed the workspace width. Propose shorter links "
             "or increase the available width."
         )
+    depth_clearance = 250.0 if project.get("design", {}).get("foundation") else 100.0
+    required_depth = (upper[2] - lower[2]) + depth_clearance
+    if limit_d is not None and required_depth > limit_d + 1e-6:
+        raise ValueError(
+            f"With the inspection module, required depth is {required_depth:g} mm "
+            f"(including {depth_clearance:g} mm access clearance), "
+            f"exceeding the {limit_d:g} mm limit."
+        )
+    required_height = (upper[1] - lower[1]) + 100.0
+    if limit_h is not None and required_height > limit_h + 1e-6:
+        raise ValueError(
+            f"With the inspection module, required height is {required_height:g} mm "
+            f"(including 100 mm overhead clearance), exceeding the {limit_h:g} mm limit."
+        )
     module["assembly_bounds"] = {"min_mm": lower, "max_mm": upper}
-    module["checks"].append(
-        {
-            "id": "workspace_width",
-            "passed": True,
-            "detail": ("Recorded pose envelopes respect the available width." if limit is not None
-                       else "No workspace width limit was specified; pose bounds are recorded."),
-        }
+    module["checks"].extend(
+        [
+            {
+                "id": "workspace_width",
+                "passed": True,
+                "detail": (
+                    "Recorded pose envelopes respect the available width."
+                    if limit_w is not None
+                    else "No workspace width limit was specified; pose bounds are recorded."
+                ),
+            },
+            {
+                "id": "workspace_depth",
+                "passed": True,
+                "detail": (
+                    "Recorded pose envelopes and clearances respect the available depth."
+                    if limit_d is not None
+                    else "No workspace depth limit was specified; pose bounds are recorded."
+                ),
+            },
+            {
+                "id": "workspace_height",
+                "passed": True,
+                "detail": (
+                    "Recorded pose envelopes and overhead clearance respect the available height."
+                    if limit_h is not None
+                    else "No workspace height limit was specified; pose bounds are recorded."
+                ),
+            },
+        ]
     )
     return module
 
@@ -170,7 +211,9 @@ def apply_extension(project: dict, raw: object, provenance: dict, *, bump: bool 
     if bump:
         result["revision"] += 1
         result["status"] = "draft"
-    return result
+    from app.spatial_fit import refresh_spatial_fit
+
+    return refresh_spatial_fit(result)
 
 
 def footprint_notice(project: dict) -> str:

@@ -202,6 +202,37 @@ export type BenchStation = {
   parts: { operation: BenchStationOperation; label: string; source_title: string | null; source_url: string | null; price_usd: number | null }[];
 };
 
+export type SpatialFitAxis = {
+  body_mm: number;
+  clearance_mm: number;
+  required_mm: number;
+  limit_mm: number | null;
+  margin_mm: number | null;
+  fits: boolean | null;
+};
+
+export type SpatialFitViolation = {
+  axis: string;
+  code: string;
+  message: string;
+  required_mm: number;
+  limit_mm: number;
+  overflow_mm: number;
+};
+
+export type SpatialFit = {
+  status: 'unconstrained' | 'fits' | 'infeasible';
+  subject: string;
+  axes: {
+    width_mm: SpatialFitAxis;
+    depth_mm: SpatialFitAxis;
+    height_mm: SpatialFitAxis;
+  };
+  clearances: { axis: string; kind: string; mm: number; note: string }[];
+  printable_checks: Record<string, unknown>[];
+  violations: SpatialFitViolation[];
+};
+
 export type Project = {
   project_notes?: string;
   design_workflow?: { phase: 'hardware_design' | 'software'; machine_approved: boolean; approval: { machine_signature: string; revision: number } | null; recipe_started: boolean };
@@ -226,6 +257,8 @@ export type Project = {
     final_volume: string | null;
     equipment: string | null;
     workspace_width_mm: number | null;
+    workspace_depth_mm: number | null;
+    workspace_height_mm: number | null;
     cooling_enabled: boolean;
     cooling_target_c: number | null;
   };
@@ -235,6 +268,7 @@ export type Project = {
     footprint: { width_mm: number; depth_mm: number; height_mm: number };
     components: Component[];
     constraint_status: 'unconstrained' | 'fits' | 'infeasible';
+    spatial_fit?: SpatialFit;
     estimated_cost: { amount: number | null; currency: string };
     cooling: DesignCooling;
     foundation?: { id: string; source_sha256?: string; bed_drop_mm: number; bbox_mm: [number, number, number] };

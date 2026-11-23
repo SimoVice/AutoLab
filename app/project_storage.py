@@ -48,6 +48,8 @@ class Summary(StrictModel):
     final_volume: Text | None
     equipment: Text | None
     workspace_width_mm: Annotated[Number, Field(gt=0, le=5000)] | None
+    workspace_depth_mm: Annotated[Number, Field(gt=0, le=5000)] | None = None
+    workspace_height_mm: Annotated[Number, Field(gt=0, le=5000)] | None = None
     cooling_enabled: bool
     cooling_target_c: Annotated[Number, Field(ge=2, le=20)] | None
 
@@ -278,9 +280,13 @@ def restore_snapshot(snapshot: object) -> tuple[dict, list[dict]]:
     if inputs.workflow_kind == "liquid_preparation" and summary["equipment"] != brief["equipment"]:
         raise ValueError("The saved equipment fields do not match.")
     width = summary["workspace_width_mm"]
+    depth = summary.get("workspace_depth_mm")
+    height = summary.get("workspace_height_mm")
     patch = {
         **summary,
         "workspace_width_mm": None,
+        "workspace_depth_mm": None,
+        "workspace_height_mm": None,
         "selections": inputs.selections,
         "workflow_kind": inputs.workflow_kind,
         **{f"brief_{key}": value for key, value in brief.items()},
@@ -295,9 +301,11 @@ def restore_snapshot(snapshot: object) -> tuple[dict, list[dict]]:
         state.update(selected_platform_id="jubilee",
                      selection_source="Restored existing Jubilee design")
         project["engineering"] = state
-    if width is not None:
+    if any(value is not None for value in (width, depth, height)):
         project = apply_update(project, {
             "workspace_width_mm": width,
+            "workspace_depth_mm": depth,
+            "workspace_height_mm": height,
             "brief_constraints": brief["constraints"],
         })
     upgraded = saved.compiler_version in ("1", "2")
@@ -310,14 +318,14 @@ def restore_snapshot(snapshot: object) -> tuple[dict, list[dict]]:
         project["sourcing"] = commercial_sourcing()
     if not upgraded and saved.foundation_id:
         from app.foundation_design import adopt_foundation
+        from app.spatial_fit import refresh_spatial_fit
 
         project = adopt_foundation(project, bed_drop_mm=saved.foundation_bed_drop_mm)
-        if width is not None and width < project["design"]["foundation"]["bbox_mm"][0]:
-            project["design"]["constraint_status"] = "infeasible"
+        refresh_spatial_fit(project)
         if proposal is None:
             from app.geometry import add_geometry
 
-            project = add_geometry(project)
+            project = refresh_spatial_fit(add_geometry(project))
     if saved.engineering_design and not upgraded:
         source_layout = isinstance(proposal, (FoundationLayoutProposal, CommercialProposal))
         context_available = (has_workstation_design_context(project) if source_layout
@@ -341,7 +349,11 @@ def restore_snapshot(snapshot: object) -> tuple[dict, list[dict]]:
                 saved.tip_rack)):
             raise ValueError("A bench station cannot contain liquid-workflow artifacts.")
         project["bench_station"] = compile_station(
-            StationProposal.model_validate(saved.bench_station), workspace_width_mm=width)
+            StationProposal.model_validate(saved.bench_station),
+            workspace_width_mm=width,
+            workspace_depth_mm=depth,
+            workspace_height_mm=height,
+        )
         project["workflow"] = describe_workflow(project)
     if saved.custom_assembly_v1 is not None:
         from app.concept_design import compile_concept
@@ -352,7 +364,12 @@ def restore_snapshot(snapshot: object) -> tuple[dict, list[dict]]:
                      saved.labware_plate,
                      saved.tip_rack, saved.inspection_extension, saved.cold_transfer_extension))):
             raise ValueError("A custom assembly must belong to its own general project.")
-        project["concept_design"] = compile_concept(saved.custom_assembly_v1, width)
+        project["concept_design"] = compile_concept(
+            saved.custom_assembly_v1,
+            width,
+            workspace_depth_mm=depth,
+            workspace_height_mm=height,
+        )
         project["workflow"] = describe_workflow(project)
     if saved.inspection_extension is not None and not upgraded:
         from app.inspection import restore_extension
@@ -443,4 +460,7 @@ def restore_snapshot(snapshot: object) -> tuple[dict, list[dict]]:
             restored_prov[key] = validated.model_dump(mode="json", exclude_none=True)
         project["dimension_provenance"] = restored_prov
     refresh_workflow(project)
+    from app.spatial_fit import refresh_spatial_fit
+
+    refresh_spatial_fit(project)
     return project, [entry.model_dump() for entry in saved.history]

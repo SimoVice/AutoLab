@@ -100,6 +100,8 @@ def _summarize_project(project: dict) -> dict:
     return {
         "revision": project.get("revision") if isinstance(project, dict) else None,
         "workspace_width_mm": summary.get("workspace_width_mm"),
+        "workspace_depth_mm": summary.get("workspace_depth_mm"),
+        "workspace_height_mm": summary.get("workspace_height_mm"),
         "cooling_enabled": summary.get("cooling_enabled"),
         "cooling_target_c": summary.get("cooling_target_c"),
         "constraint_status": design.get("constraint_status"),

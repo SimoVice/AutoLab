@@ -86,19 +86,38 @@ SOURCES = {
 }
 
 
-def compile_station(proposal: StationProposal, workspace_width_mm=None) -> dict:
-    """Pack functional surfaces in ordered rows, rejecting impossible bench widths."""
+def compile_station(
+    proposal: StationProposal,
+    workspace_width_mm=None,
+    workspace_depth_mm=None,
+    workspace_height_mm=None,
+) -> dict:
+    """Pack functional surfaces in ordered rows, rejecting impossible bench 3D dimensions."""
     proposal = StationProposal.model_validate(proposal)
-    if workspace_width_mm is not None:
-        if (isinstance(workspace_width_mm, bool)
-                or not isinstance(workspace_width_mm, (int, float))
-                or not math.isfinite(workspace_width_mm) or workspace_width_mm <= 0):
-            raise ValueError('Workspace width must be a finite positive number in mm.')
+    for label, limit in (
+        ("Workspace width", workspace_width_mm),
+        ("Workspace depth", workspace_depth_mm),
+        ("Workspace height", workspace_height_mm),
+    ):
+        if limit is not None and (
+            isinstance(limit, bool)
+            or not isinstance(limit, (int, float))
+            or not math.isfinite(limit)
+            or limit <= 0
+        ):
+            raise ValueError(f"{label} must be a finite positive number in mm.")
     surfaces = [MODULES[op]['size'][0] + 2 * MODULES[op]['clearance']
                 for op in proposal.operations]
     width_limit = workspace_width_mm if workspace_width_mm is not None else sum(surfaces)
     if max(surfaces) > width_limit:
         raise ValueError('Workspace width cannot fit a selected module and its functional surface.')
+    max_module_height = max(MODULES[op]['size'][1] for op in proposal.operations)
+    if workspace_height_mm is not None and max_module_height + 100.0 > workspace_height_mm + 1e-6:
+        raise ValueError(
+            f'Workspace height ({workspace_height_mm:g} mm) cannot fit the '
+            f'{max_module_height:g} mm tallest module plus 100 mm overhead clearance '
+            f'(requires {max_module_height + 100:g} mm).'
+        )
     modules, parts, steps = [], [], [
         'Before use, select equipment and verify bench depth, load capacity, power, '
         'connections and access. This layout contains no automated transport or control.'
@@ -130,8 +149,14 @@ def compile_station(proposal: StationProposal, workspace_width_mm=None) -> dict:
         x += surface_w
         width = max(width, x)
         row_depth = max(row_depth, surface_d)
+    total_depth = y + row_depth
+    if workspace_depth_mm is not None and total_depth + 100.0 > workspace_depth_mm + 1e-6:
+        raise ValueError(
+            f'Workspace depth ({workspace_depth_mm:g} mm) cannot fit the {total_depth:g} mm '
+            f'station depth plus 100 mm front access clearance (requires {total_depth + 100:g} mm).'
+        )
     return {
-        'proposal': proposal.model_dump(mode='json'), 'footprint_mm': [width, y + row_depth],
+        'proposal': proposal.model_dump(mode='json'), 'footprint_mm': [width, total_depth],
         'modules': modules, 'parts': parts, 'steps': steps,
         'limitations': [
             'Conceptual equipment envelopes and separate functional surfaces only; '

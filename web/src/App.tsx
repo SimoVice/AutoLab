@@ -726,6 +726,13 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
   } : project?.design.footprint : undefined;
   const summary = project?.summary;
   const status = project?.design.constraint_status;
+  const spatialViolations = project?.design.spatial_fit?.violations ?? [];
+  const spatialStatusText =
+    status === 'infeasible'
+      ? (spatialViolations.map((v) => v.message).join(' ') || 'Requested dimensions cannot fit this concept')
+      : status === 'fits'
+        ? 'Within 3D workspace envelope'
+        : 'No 3D workspace constraint yet';
   const plan = supportedLiquid ? (project?.plan ?? null) : null;
   const fields = [
     { label: 'Stock', value: summary?.stock_concentration },
@@ -733,6 +740,8 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
     { label: 'Final volume', value: summary?.final_volume },
     { label: 'Equipment', value: summary?.equipment },
     { label: 'Available width', value: summary?.workspace_width_mm != null ? `${formatDimension(summary.workspace_width_mm)} mm` : null },
+    ...(summary?.workspace_depth_mm != null ? [{ label: 'Available depth', value: `${formatDimension(summary.workspace_depth_mm)} mm` }] : []),
+    ...(summary?.workspace_height_mm != null ? [{ label: 'Available height', value: `${formatDimension(summary.workspace_height_mm)} mm` }] : []),
   ];
   const currentProcurement = procurementReport?.project_id === project?.id && procurementReport?.project_revision === project?.revision ? procurementReport : null;
   const isConfirmed = project?.status === 'confirmed';
@@ -909,7 +918,7 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
                     {project && workflow?.kind === 'general' && (project.brief?.objective || project.brief?.process) &&
                       <FunctionalPlan key={`${project.id}:${project.revision}`} id={project.id} revision={project.revision} />}</>
                 ) : status === 'infeasible' ? (
-                  <p className="planning-note">Requested width cannot fit this concept. Adjust the available width in chat to continue.</p>
+                  <p className="planning-note">{spatialStatusText}</p>
                 ) : (
                   <p className="planning-note">No machine has been generated yet. Discuss the equipment in chat so the layout can be proposed for this workflow.</p>
                 )}
@@ -944,14 +953,14 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
                   <div className="scene-origin"><span className="origin-x">X</span><span className="origin-y">Y</span><span className="origin-z">Z</span></div>
                 </div>
                 <div className="viewer-bottomline">
-                  <div className="footprint"><span>Workspace footprint</span><strong>{dimensions ? `${formatDimension(dimensions.width_mm)} × ${formatDimension(dimensions.depth_mm)}` : '—'} <small>mm</small></strong></div>
-                  <div className="viewer-status"><span className={`status-indicator ${status === 'infeasible' ? 'warning' : ''}`} />{status === 'infeasible' ? 'Requested width cannot fit this concept' : status === 'fits' ? 'Within requested width' : 'No width constraint yet'}</div>
+                  <div className="footprint"><span>Workspace 3D envelope</span><strong>{dimensions ? `${formatDimension(dimensions.width_mm)} × ${formatDimension(dimensions.depth_mm)} × ${formatDimension(dimensions.height_mm)}` : '—'} <small>mm</small></strong></div>
+                  <div className="viewer-status"><span className={`status-indicator ${status === 'infeasible' ? 'warning' : ''}`} />{spatialStatusText}</div>
                 </div>
               {motionPlan && <details id="stage-motion-panel" className="stage-motion-disclosure" open={stagePanel === 'motion'}><summary>Motion preview</summary><OperatingPreview machineApproved={Boolean(project?.design_workflow?.machine_approved)} plan={motionPlan} playing={playing && Boolean(currentMotion)} time={currentMotion ? operationTime : 0} speed={operationSpeed} disabled={uiBusy} hasInspection={Boolean(project?.inspection_extension)} hasColdTransfer={Boolean(project?.cold_transfer_extension)} onMode={(mode) => { handleReset(); setOperationMode(mode); }} onPlay={handlePlay} onPause={handlePause} onReset={handleReset} onSpeed={(speed) => { if ([0.5, 1, 2, 4].includes(speed)) setOperationSpeed(speed); }} onSeek={(time) => { if (!Number.isFinite(time) || !motionPlan) return; time = Math.max(0, Math.min(motionPlan.duration_s, time)); setPlaying(false); operationClock.current = time; setOperationTime(time); if (operationMode === 'inspection') setInspectionTime(time); }} /></details>}
               <details id="stage-specifications-panel" className="engineering-inspector" ref={designInspector} open={stagePanel === 'specifications'}><summary>Specifications &amp; files</summary><div className="engineering-inspector-scroll">
               <p className="selected-component-note">{hasFoundation ? 'Approximate source CAD preview with custom layout.' : hasPlatform ? 'Schematic setup; not manufacturer CAD.' : 'Custom concept preview.'} Physical fit unverified.</p>
-              <div className="footprint"><span>Workspace footprint</span><strong>{dimensions ? `${formatDimension(dimensions.width_mm)} × ${formatDimension(dimensions.depth_mm)}` : '—'} <small>mm</small></strong></div>
-              <p className="selected-component-note">{status === 'infeasible' ? 'Requested width cannot fit this concept' : status === 'fits' ? 'Within requested width' : 'No width constraint yet'}</p>
+              <div className="footprint"><span>Workspace 3D envelope</span><strong>{dimensions ? `${formatDimension(dimensions.width_mm)} × ${formatDimension(dimensions.depth_mm)} × ${formatDimension(dimensions.height_mm)}` : '—'} <small>mm</small></strong></div>
+              <p className="selected-component-note">{spatialStatusText}</p>
               <div className="below-viewer">
 
                 {preparationPanel}

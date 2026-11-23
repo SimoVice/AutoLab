@@ -83,7 +83,8 @@ async def custom_assembly_turn(
         patch = {
             k: v
             for k, v in turn.patch().items()
-            if k.startswith("brief_") or k == "workspace_width_mm"
+            if k.startswith("brief_")
+            or k in ("workspace_width_mm", "workspace_depth_mm", "workspace_height_mm")
         }
         if not (
             previous["brief"].get("objective")
@@ -110,12 +111,25 @@ async def custom_assembly_turn(
             status = "needs_input"
             if not design:
                 updated = candidate
-    elif design and turn.workspace_width_mm is not None:
-        candidate = apply_update_fn(previous, {"workspace_width_mm": turn.workspace_width_mm})
-        compiled = compile_concept(design["proposal"], turn.workspace_width_mm)
+    elif design and any(
+        getattr(turn, k, None) is not None
+        for k in ("workspace_width_mm", "workspace_depth_mm", "workspace_height_mm")
+    ):
+        dim_patch = {
+            k: getattr(turn, k)
+            for k in ("workspace_width_mm", "workspace_depth_mm", "workspace_height_mm")
+            if getattr(turn, k, None) is not None
+        }
+        candidate = apply_update_fn(previous, dim_patch)
+        compiled = compile_concept(
+            design["proposal"],
+            candidate["summary"].get("workspace_width_mm"),
+            workspace_depth_mm=candidate["summary"].get("workspace_depth_mm"),
+            workspace_height_mm=candidate["summary"].get("workspace_height_mm"),
+        )
         updated = attach_concept(previous, candidate, compiled)
         status = "accepted"
-        reply = "The assembly layout and downloads now use the updated bench width."
+        reply = "The assembly layout and downloads now use the updated bench dimensions."
     elif design and "confirm" in actions:
         from app.design_workflow import approve_machine, require_approval_request
 

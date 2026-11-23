@@ -434,6 +434,7 @@ def _motion_sweep(bounds, step, pivot, start_rotation_deg=0):
 
 
 def compile_concept(proposal: ConceptProposal | dict, workspace_width_mm=None,
+                    workspace_depth_mm=None, workspace_height_mm=None,
                     *, _skip_work_interfaces=False) -> dict:
     """Compile immutable proposed geometry; pack assembly roots and reserve motion sweeps.
 
@@ -443,11 +444,16 @@ def compile_concept(proposal: ConceptProposal | dict, workspace_width_mm=None,
     interference checks are deliberately conservative.
     """
     proposal = ConceptProposal.model_validate(proposal)
-    if workspace_width_mm is not None and (
-            isinstance(workspace_width_mm, bool)
-            or not isinstance(workspace_width_mm, (int, float))
-            or not math.isfinite(workspace_width_mm) or not 1 <= workspace_width_mm <= 20000):
-        raise ValueError('Workspace width must be a finite number from 1 to 20000 mm.')
+    for label, limit_val in (
+        ('Workspace width', workspace_width_mm),
+        ('Workspace depth', workspace_depth_mm),
+        ('Workspace height', workspace_height_mm),
+    ):
+        if limit_val is not None and (
+                isinstance(limit_val, bool)
+                or not isinstance(limit_val, (int, float))
+                or not math.isfinite(limit_val) or not 1 <= limit_val <= 20000):
+            raise ValueError(f'{label} must be a finite number from 1 to 20000 mm.')
     specs = {c.key: c for c in proposal.components}
     origins, roots = {}, {}
 
@@ -636,11 +642,27 @@ def compile_concept(proposal: ConceptProposal | dict, workspace_width_mm=None,
     software = proposal.software.model_dump(mode='json')
     software = {k: [readable(v) for v in value] if isinstance(value, list) else readable(value)
                 for k, value in software.items()}
+    total_depth = z + row_depth
+    if workspace_depth_mm is not None and total_depth + 100.0 > workspace_depth_mm + EPSILON:
+        raise ValueError(
+            f'Workspace depth ({workspace_depth_mm:g} mm) cannot fit the assembly depth '
+            f'({total_depth:g} mm) plus 100 mm front access clearance '
+            f'(requires {total_depth + 100:g} mm).'
+        )
+    min_y = min(c['swept_bounds_mm']['min'][1] for c in components)
+    max_y = max(c['swept_bounds_mm']['max'][1] for c in components)
+    total_height = max_y - min_y
+    if workspace_height_mm is not None and total_height + 50.0 > workspace_height_mm + EPSILON:
+        raise ValueError(
+            f'Workspace height ({workspace_height_mm:g} mm) cannot fit the assembly swept height '
+            f'({total_height:g} mm) plus 50 mm overhead clearance '
+            f'(requires {total_height + 50:g} mm).'
+        )
     design = {
         'schema_version': '1', 'compiler_version': 'concept-1',
         'proposal': proposal.model_dump(mode='json'), 'workspace_width_mm': workspace_width_mm,
         'title': proposal.title, 'overview': readable(proposal.overview),
-        'footprint_mm': [width, z + row_depth], 'components': components, 'parts': parts,
+        'footprint_mm': [width, total_depth], 'components': components, 'parts': parts,
         'supplies': supplies,
         'work_interfaces': [{**interface.model_dump(mode='json'),
                              'label': readable(interface.label)}

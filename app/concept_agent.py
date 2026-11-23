@@ -316,6 +316,16 @@ async def _request_authoring(instructions, schema, name, context, budget, calls)
 
 def _next_design_step(why: str, width) -> str:
     issue = why.lower()
+    if "workspace depth" in issue:
+        return (
+            "The assembly footprint and 100 mm front access clearance exceed the recorded "
+            "bench depth. Can you allow more depth or compact the layout?"
+        )
+    if "workspace height" in issue:
+        return (
+            "The assembly height and 50 mm overhead clearance exceed the recorded "
+            "bench height. Can you allow more height or lower the vertical envelope?"
+        )
     if "workspace width" in issue:
         return (f"The assembly and its moving parts need more than {width:g} mm of bench width. "
                 "Can you allow more width, or should I design for a shorter travel?"
@@ -344,8 +354,17 @@ async def develop_concept(
                for key, row in concept_sources().items()}
     previous = (project.get("concept_design") or {}).get("proposal")
     width = project["summary"].get("workspace_width_mm")
-    context = {"request": message, "recorded_brief": project["brief"],
-               "maximum_width_mm": width, "prior_design": previous, "reviewed_sources": sources}
+    depth = project["summary"].get("workspace_depth_mm")
+    height = project["summary"].get("workspace_height_mm")
+    context = {
+        "request": message,
+        "recorded_brief": project["brief"],
+        "maximum_width_mm": width,
+        "maximum_depth_mm": depth,
+        "maximum_height_mm": height,
+        "prior_design": previous,
+        "reviewed_sources": sources,
+    }
     if project.get("project_notes"):
         context["user_project_notes"] = project["project_notes"]
     if history:
@@ -451,7 +470,12 @@ async def develop_concept(
             if reply.question:
                 raise ValueError("Put unresolved details in proposal.open_questions.")
             try:
-                compiled = compile_concept(reply.proposal, workspace_width_mm=width)
+                compiled = compile_concept(
+                    reply.proposal,
+                    workspace_width_mm=width,
+                    workspace_depth_mm=depth,
+                    workspace_height_mm=height,
+                )
                 issues = assembly_review_issues(compiled)
                 if issues:
                     raise ValueError(" ".join(issues[:5]))
@@ -461,6 +485,13 @@ async def develop_concept(
                                           width, prior_proposal=previous)
                 if compiled is None:
                     raise
+                if depth is not None or height is not None:
+                    compiled = compile_concept(
+                        compiled["proposal"],
+                        workspace_width_mm=width,
+                        workspace_depth_mm=depth,
+                        workspace_height_mm=height,
+                    )
             compiled = await _register_working_stops(compiled, previous, message,
                                                      project["brief"], calls)
             return compiled, f"{compiled['title']} is ready to review.{fit_note}", calls

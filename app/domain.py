@@ -24,7 +24,14 @@ TEXT_FIELDS = (
     "equipment",
 )
 SUMMARY_FIELDS = frozenset(
-    (*TEXT_FIELDS, "workspace_width_mm", "cooling_enabled", "cooling_target_c")
+    (
+        *TEXT_FIELDS,
+        "workspace_width_mm",
+        "workspace_depth_mm",
+        "workspace_height_mm",
+        "cooling_enabled",
+        "cooling_target_c",
+    )
 )
 PATCH_FIELDS = frozenset((*SUMMARY_FIELDS, "selections"))
 BRIEF_FIELDS = ("objective", "process", "materials", "equipment", "constraints")
@@ -230,7 +237,15 @@ def _finish_design(
 
 def new_project() -> dict:
     """Create a draft project with an illustrative wide workstation."""
-    summary = {name: None for name in (*TEXT_FIELDS, "workspace_width_mm")}
+    summary = {
+        name: None
+        for name in (
+            *TEXT_FIELDS,
+            "workspace_width_mm",
+            "workspace_depth_mm",
+            "workspace_height_mm",
+        )
+    }
     summary["cooling_enabled"] = False
     summary["cooling_target_c"] = None
     selections = default_selections()
@@ -253,8 +268,9 @@ def new_project() -> dict:
     }
     project["workflow"] = describe_workflow(project)
     from app.design_workflow import refresh_workflow
+    from app.spatial_fit import refresh_spatial_fit
 
-    return refresh_workflow(add_geometry(project))
+    return refresh_spatial_fit(refresh_workflow(add_geometry(project)))
 
 
 def _plan_for(summary: dict) -> dict:
@@ -301,13 +317,13 @@ def _validated_patch(patch: dict) -> dict:
                 raise ValueError(
                     "workflow_kind must be one of unclassified, general, liquid_preparation."
                 )
-        elif key == "workspace_width_mm":
+        elif key in ("workspace_width_mm", "workspace_depth_mm", "workspace_height_mm"):
             if value is not None:
                 if isinstance(value, bool) or not isinstance(value, (int, float)):
-                    raise ValueError("workspace_width_mm must be a positive number or null.")
+                    raise ValueError(f"{key} must be a positive number or null.")
                 if not math.isfinite(value) or value <= 0 or value > 5000:
                     raise ValueError(
-                        "workspace_width_mm must be greater than 0 and at most 5000 mm."
+                        f"{key} must be greater than 0 and at most 5000 mm."
                     )
                 value = float(value)
         elif key == "cooling_enabled":
@@ -395,15 +411,24 @@ def _apply_update(project: dict, patch: dict) -> dict:
             brief_patch[key[len("brief_") :]] = updates[key]
 
     current_brief = _current_brief(project)
-    # A width grounded by the model is a project constraint even without a
+    # A bench dimension grounded by the model is a project constraint even without a
     # machine adapter. Preserve it in generic planning rather than losing it
     # when only the general brief is sent to the model in later turns.
     if new_kind != "liquid_preparation" and "constraints" not in brief_patch:
-        width = summary_updates.get("workspace_width_mm")
-        if width is not None:
-            old_lines = (current_brief.get("constraints") or "").splitlines()
-            kept = [line for line in old_lines if not line.startswith("Available width:")]
-            brief_patch["constraints"] = "\n".join([*kept, f"Available width: {width:g} mm"])
+        lines = (current_brief.get("constraints") or "").splitlines()
+        changed_dim = False
+        for key, prefix in (
+            ("workspace_width_mm", "Available width:"),
+            ("workspace_depth_mm", "Available depth:"),
+            ("workspace_height_mm", "Available height:"),
+        ):
+            dim_val = summary_updates.get(key)
+            if dim_val is not None:
+                lines = [line for line in lines if not line.startswith(prefix)]
+                lines.append(f"{prefix} {dim_val:g} mm")
+                changed_dim = True
+        if changed_dim:
+            brief_patch["constraints"] = "\n".join(lines)[:1000]
     # Resolve equipment mirroring in liquid mode.
     if new_kind == "liquid_preparation":
         liquid_equipment = None
@@ -529,10 +554,17 @@ def _apply_update(project: dict, patch: dict) -> dict:
     commercial = project.get("design", {}).get("platform", {}).get("id") == "opentrons-ot2"
     if (project.get("design", {}).get("foundation") or commercial) and not switching_away:
         from app.foundation_design import assembly_bounds, foundation_sourcing
+        from app.spatial_fit import refresh_spatial_fit
 
         geometric = any(
             key in summary_updates and project["summary"].get(key) != summary_updates[key]
-            for key in ("workspace_width_mm", "cooling_enabled", "cooling_target_c")
+            for key in (
+                "workspace_width_mm",
+                "workspace_depth_mm",
+                "workspace_height_mm",
+                "cooling_enabled",
+                "cooling_target_c",
+            )
         ) or not selections_noop
         if not geometric:
             result["design"] = deepcopy(project["design"])
@@ -544,16 +576,12 @@ def _apply_update(project: dict, patch: dict) -> dict:
             result["design"]["cooling"] = _cooling_info(enabled, target, stored_selections)
             # Keep the last actual layout as the next proposal's context.
             # Re-entering the foundation adapter here would reset all positions.
-            required = (result["design"]["platform"]["minimum_operating_width_mm"] if commercial
-                        else result["design"]["foundation"]["bbox_mm"][0])
-            result["design"]["constraint_status"] = (
-                "unconstrained" if width is None else "fits" if width >= required else "infeasible"
-            )
             if not enabled:
                 result["design"]["components"] = [
                     part for part in result["design"]["components"] if part["id"] != "cold-storage"
                 ]
             result["design"]["assembly_bounds"] = assembly_bounds(result)
+            refresh_spatial_fit(result)
         if commercial:
             from app.platform_profiles import commercial_sourcing
 
@@ -565,7 +593,8 @@ def _apply_update(project: dict, patch: dict) -> dict:
 
             _extension_sourcing(result)
         result["design"]["estimated_cost"] = {
-            "amount": None if commercial else result["sourcing"]["subtotal"], "currency": "USD",
+            "amount": None if commercial else result["sourcing"]["subtotal"],
+            "currency": "USD",
         }
         result["revision"] = project["revision"] + 1
         result["status"] = "draft"
@@ -577,24 +606,43 @@ def _apply_update(project: dict, patch: dict) -> dict:
         if result.get("labware_plate"):
             from app.microplates import reapply_plate
 
-            return reapply_plate(result, require_accepted=False)
+            return refresh_spatial_fit(reapply_plate(result, require_accepted=False))
         if result.get("labware_rack"):
             from app.labware import reapply_labware
 
-            return reapply_labware(result, require_accepted=False)
-        return add_geometry(result)
+            return refresh_spatial_fit(reapply_labware(result, require_accepted=False))
+        return refresh_spatial_fit(add_geometry(result))
 
+    from app.spatial_fit import evaluate_spatial_fit
+
+    candidate_design, _, _ = _finish_design(
+        width, cooling_enabled=enabled, target=target, selections=stored_selections
+    )
     if width is not None and width < COMPACT_WIDTH_MM:
+        fit = evaluate_spatial_fit(
+            result,
+            candidate_footprint={
+                "width_mm": float(COMPACT_WIDTH_MM),
+                "depth_mm": float(candidate_design["footprint"]["depth_mm"]),
+                "height_mm": float(candidate_design["footprint"]["height_mm"]),
+            },
+        )
         result["design"]["constraint_status"] = "infeasible"
         # Preserve last geometry but refresh cooling metadata and partial cost.
         result["design"]["cooling"] = _cooling_info(enabled, target, stored_selections)
         result["design"]["estimated_cost"] = {"amount": sourcing["subtotal"], "currency": "USD"}
+        result["design"]["spatial_fit"] = fit
     else:
-        design, _, _ = _finish_design(
-            width, cooling_enabled=enabled, target=target, selections=stored_selections
-        )
-        design["constraint_status"] = "unconstrained" if width is None else "fits"
-        result["design"] = design
+        fit = evaluate_spatial_fit(result, candidate_footprint=candidate_design["footprint"])
+        if fit["status"] == "infeasible":
+            result["design"]["constraint_status"] = "infeasible"
+            result["design"]["cooling"] = _cooling_info(enabled, target, stored_selections)
+            result["design"]["estimated_cost"] = {"amount": sourcing["subtotal"], "currency": "USD"}
+            result["design"]["spatial_fit"] = fit
+        else:
+            candidate_design["constraint_status"] = fit["status"]
+            candidate_design["spatial_fit"] = fit
+            result["design"] = candidate_design
     result["revision"] += 1
     result["status"] = "draft"
     result["workflow"] = describe_workflow(result)
@@ -627,7 +675,9 @@ def confirm_project(project: dict) -> dict:
     if missing:
         raise ValueError(f"Required parameters are missing: {', '.join(missing)}.")
     if project["design"]["constraint_status"] == "infeasible":
-        raise ValueError("The requested workspace width is infeasible for the supported layouts.")
+        raise ValueError(
+            "The requested workspace dimensions are infeasible for the supported layouts."
+        )
     if project.get("labware_plate"):
         from app.microplates import reapply_plate
 

@@ -23,6 +23,8 @@ ASSIGNABLE_COMPONENTS = ("source-rack", "sample-rack", "tip-rack")
 DECK_TOP_MM = 155.0  # illustrative, not a manufacturer dimension
 VENTILATION_CLEARANCE_MM = 200.0
 OPERATING_WIDTH_MM = ENVELOPE_MM[0] + 2 * VENTILATION_CLEARANCE_MM
+OPERATING_DEPTH_MM = ENVELOPE_MM[2] + 400.0  # 200 mm rear ventilation + 200 mm front door access
+OPERATING_HEIGHT_MM = ENVELOPE_MM[1] + 150.0  # 150 mm overhead lid/service clearance
 DECK_PATH = Path(__file__).resolve().parent / "data" / "ot2" / "deck.json"
 PROVENANCE_PATH = DECK_PATH.with_name("provenance.json")
 DECK_SHA256 = "f9bde02d43314e42c64d12f1a0d6d4f4aceb448371d37def27de76ff8a308e90"
@@ -88,8 +90,12 @@ def commercial_metadata() -> dict:
         "slot_size_mm": [slot_box["xDimension"], slot_box["yDimension"]],
         "operating_clearance_mm": VENTILATION_CLEARANCE_MM,
         "minimum_operating_width_mm": OPERATING_WIDTH_MM,
-        "operating_clearance_scope": "Allow 200 mm around the device for ventilation; "
-        "width includes the body plus both side clearances. Other access needs are unchecked.",
+        "minimum_operating_depth_mm": OPERATING_DEPTH_MM,
+        "minimum_operating_height_mm": OPERATING_HEIGHT_MM,
+        "operating_clearance_scope": (
+            "Allow 200 mm side/rear ventilation, 200 mm front door access, "
+            "and 150 mm top service clearance."
+        ),
         "envelope_source_scope": "Catalogue specifies width 630, depth 570 and height 660 mm; "
         "specifications page lists the same dimensions without an axis order.",
         "usable_slot_ids": list(SLOT_IDS),
@@ -248,18 +254,6 @@ def adopt_commercial(project: dict) -> dict:
         part["slot_id"] = slot
     design["components"] = parts
     design["footprint"] = {"width_mm": 630.0, "height_mm": 660.0, "depth_mm": 570.0}
-    width = result.get("summary", {}).get("workspace_width_mm")
-    design["constraint_status"] = (
-        "unconstrained"
-        if width is None
-        else (
-            "fits"
-            if isinstance(width, (int, float))
-            and not isinstance(width, bool)
-            and width >= OPERATING_WIDTH_MM
-            else "infeasible"
-        )
-    )
     design["estimated_cost"] = {"amount": None, "currency": "USD"}
     design["assumptions"] = [
         "Only the published external envelope and deck slot grid are sourced; "
@@ -267,9 +261,13 @@ def adopt_commercial(project: dict) -> dict:
         "Rack and pipette proxies are not selected, measured or confirmed compatible.",
         "Deck slot assignment is not a mounting, reach, collision or physical validation.",
         "Cooling and custom inspection are unsupported on this platform pending integration.",
-        "Allow 200 mm ventilation clearance around the device; access requirements are unchecked.",
+        "Allow 200 mm ventilation clearance around the sides/rear, 200 mm front door access, "
+        "and 150 mm top service clearance.",
     ]
     design["assembly_bounds"] = {"min_mm": [-315, 0, -285], "max_mm": [315, 660, 285]}
+    from app.spatial_fit import refresh_spatial_fit
+
+    refresh_spatial_fit(result)
     result["status"] = "draft"
     return result
 
@@ -284,6 +282,8 @@ def check_commercial_candidate(project: dict, raw: object) -> list[dict]:
     workflow = project.get("workflow") or {}
     summary = project.get("summary") or {}
     width = summary.get("workspace_width_mm")
+    depth = summary.get("workspace_depth_mm")
+    height = summary.get("workspace_height_mm")
     checks = [
         _check(
             "platform",
@@ -308,7 +308,30 @@ def check_commercial_candidate(project: dict, raw: object) -> list[dict]:
                 and width >= OPERATING_WIDTH_MM
             ),
             "The 630 mm body plus 200 mm ventilation clearance on each side requires "
-            "at least 1030 mm; other access requirements are unchecked.",
+            "at least 1030 mm.",
+        ),
+        _check(
+            "workspace_depth",
+            "Workspace depth including ventilation and front access",
+            depth is None
+            or (
+                isinstance(depth, (int, float))
+                and not isinstance(depth, bool)
+                and depth >= OPERATING_DEPTH_MM
+            ),
+            "The 570 mm body plus 200 mm rear ventilation and 200 mm front door access "
+            "requires at least 970 mm depth.",
+        ),
+        _check(
+            "workspace_height",
+            "Workspace height including top service access",
+            height is None
+            or (
+                isinstance(height, (int, float))
+                and not isinstance(height, bool)
+                and height >= OPERATING_HEIGHT_MM
+            ),
+            "The 660 mm body plus 150 mm top service clearance requires at least 810 mm height.",
         ),
         _check(
             "cooling",
@@ -379,5 +402,6 @@ def compile_commercial_layout(project: dict, raw: object, provenance: dict) -> d
         "provenance": deepcopy(provenance),
     }
     from app.geometry import add_geometry
+    from app.spatial_fit import refresh_spatial_fit
 
-    return add_geometry(result)
+    return refresh_spatial_fit(add_geometry(result))
