@@ -627,7 +627,9 @@ def reapply_labware(project: dict, *, require_accepted: bool = True) -> dict:
                                             for component in result["design"]["components"]]
         result["design"]["assembly_bounds"] = deepcopy(extension["assembly_bounds"])
     _sourcing(result)
-    return add_geometry(result)
+    from app.spatial_fit import refresh_spatial_fit
+
+    return refresh_spatial_fit(add_geometry(result))
 
 
 def develop_labware(project: dict) -> tuple[dict, dict]:
@@ -736,4 +738,6 @@ def remove_labware(project: dict) -> dict:
     result["revision"] += 1
     result["status"] = "draft"
     _sourcing(result)
-    return add_geometry(result)
+    from app.spatial_fit import refresh_spatial_fit
+
+    return refresh_spatial_fit(add_geometry(result))

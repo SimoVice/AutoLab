@@ -589,7 +589,9 @@ def reapply_plate(project: dict, *, require_accepted: bool = True) -> dict:
         result["design"]["assembly_bounds"] = deepcopy(extension["assembly_bounds"])
     reconcile_plate_plan(result)
     _sourcing(result)
-    return add_geometry(result)
+    from app.spatial_fit import refresh_spatial_fit
+
+    return refresh_spatial_fit(add_geometry(result))
 
 
 def select_plate(project: dict, selection: LabwareSelection, message: str) -> tuple[dict, dict]:

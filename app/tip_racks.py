@@ -748,7 +748,9 @@ def reapply_tip_rack(project: dict, *, require_accepted: bool = True) -> dict:
         ]
         result["design"]["assembly_bounds"] = deepcopy(extension["assembly_bounds"])
     _sourcing(result)
-    return add_geometry(result)
+    from app.spatial_fit import refresh_spatial_fit
+
+    return refresh_spatial_fit(add_geometry(result))
 
 
 def select_tip_rack(

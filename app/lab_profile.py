@@ -382,25 +382,27 @@ def record_dimension(
     provenance: Literal["reference", "user_measured"],
     source: str | None = None,
     measured_with: str | None = None,
+    recorded_at: str | None = None,
 ) -> dict:
     """Return a copy of the project with a validated dimension provenance entry recorded."""
     existing = (project.get("dimension_provenance") or {}).get(key)
+    resolved_recorded_at = recorded_at
+    if (
+        resolved_recorded_at is None
+        and isinstance(existing, dict)
+        and existing.get("value_mm") == float(value_mm)
+        and existing.get("provenance") == provenance
+        and existing.get("source") == source
+        and existing.get("measured_with") == measured_with
+    ):
+        resolved_recorded_at = existing.get("recorded_at")
     entry = DimensionMeasurement(
         key=key,
         value_mm=value_mm,
         provenance=provenance,
         source=source,
         measured_with=measured_with,
-        recorded_at=(
-            existing.get("recorded_at")
-            if isinstance(existing, dict)
-            and existing.get("value_mm") == float(value_mm)
-            and existing.get("provenance") == provenance
-            and existing.get("source") == source
-            and existing.get("measured_with") == measured_with
-            and existing.get("recorded_at")
-            else datetime.now(timezone.utc).isoformat()
-        ),
+        recorded_at=resolved_recorded_at,
     ).model_dump(mode="json", exclude_none=True)
     updated = deepcopy(project)
     table = dict(updated.get("dimension_provenance") or {})
