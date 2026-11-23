@@ -97,6 +97,8 @@ class Snapshot(StrictModel):
     engineering_design: SavedDesign | None
     bench_station: dict[str, JsonValue] | None = None
     custom_assembly_v1: dict[str, JsonValue] | None = None
+    standalone_fixture: dict[str, JsonValue] | None = None
+    build_logs: list[dict[str, JsonValue]] | None = None
     inspection_extension: dict[str, JsonValue] | None = None
     generic_sample_capacity: Annotated[int, Field(ge=1, le=6)] | None = None
     machine_approval: dict[str, JsonValue] | None = None
@@ -180,6 +182,10 @@ def make_snapshot(project: dict, history: list[dict]) -> dict:
            if project.get("bench_station") else {}),
         **({"custom_assembly_v1": deepcopy(project["concept_design"]["proposal"])}
            if project.get("concept_design") else {}),
+        **({"standalone_fixture": deepcopy(project["standalone_fixture"]["spec"])}
+           if project.get("standalone_fixture") else {}),
+        **({"build_logs": deepcopy(project["build_logs"])}
+           if project.get("build_logs") else {}),
         "platform_id": project.get("design", {}).get("platform", {}).get("id"),
         "engineering": state_for(project),
         "labware_brief": deepcopy(project.get("labware_brief")),
@@ -344,9 +350,9 @@ def restore_snapshot(snapshot: object) -> tuple[dict, list[dict]]:
     if saved.bench_station is not None:
         from app.bench_station import StationProposal, compile_station
         if inputs.workflow_kind != "general" or any((saved.engineering_design,
-                saved.foundation_id, saved.platform_id, saved.inspection_extension,
-                saved.cold_transfer_extension, saved.labware_rack, saved.labware_plate,
-                saved.tip_rack)):
+                saved.standalone_fixture, saved.foundation_id, saved.platform_id,
+                saved.inspection_extension, saved.cold_transfer_extension, saved.labware_rack,
+                saved.labware_plate, saved.tip_rack)):
             raise ValueError("A bench station cannot contain liquid-workflow artifacts.")
         project["bench_station"] = compile_station(
             StationProposal.model_validate(saved.bench_station),
@@ -359,10 +365,10 @@ def restore_snapshot(snapshot: object) -> tuple[dict, list[dict]]:
         from app.concept_design import compile_concept
 
         if (inputs.workflow_kind != "general" or saved.revision < 1 or
-                any((saved.bench_station, saved.engineering_design, saved.foundation_id,
-                     saved.platform_id, saved.labware_brief, saved.labware_rack,
-                     saved.labware_plate,
-                     saved.tip_rack, saved.inspection_extension, saved.cold_transfer_extension))):
+                any((saved.bench_station, saved.standalone_fixture, saved.engineering_design,
+                     saved.foundation_id, saved.platform_id, saved.labware_brief,
+                     saved.labware_rack, saved.labware_plate, saved.tip_rack,
+                     saved.inspection_extension, saved.cold_transfer_extension))):
             raise ValueError("A custom assembly must belong to its own general project.")
         project["concept_design"] = compile_concept(
             saved.custom_assembly_v1,
@@ -370,6 +376,28 @@ def restore_snapshot(snapshot: object) -> tuple[dict, list[dict]]:
             workspace_depth_mm=depth,
             workspace_height_mm=height,
         )
+        project["workflow"] = describe_workflow(project)
+    if saved.standalone_fixture is not None:
+        from app.fixture_adapter import compile_standalone_fixture
+
+        if (inputs.workflow_kind != "general" or saved.revision < 1 or
+                any((saved.custom_assembly_v1, saved.bench_station, saved.engineering_design,
+                     saved.foundation_id, saved.platform_id, saved.labware_brief,
+                     saved.labware_rack, saved.labware_plate, saved.tip_rack,
+                     saved.inspection_extension, saved.cold_transfer_extension))):
+            raise ValueError("A standalone fixture must belong to its own general project.")
+        compiled_fixture = compile_standalone_fixture(
+            saved.standalone_fixture,
+            workspace_width_mm=width,
+            workspace_depth_mm=depth,
+            workspace_height_mm=height,
+        )
+        project["standalone_fixture"] = compiled_fixture
+        project["design"]["footprint"] = {
+            "width_mm": compiled_fixture["footprint_mm"][0],
+            "depth_mm": compiled_fixture["footprint_mm"][1],
+            "height_mm": compiled_fixture["height_mm"],
+        }
         project["workflow"] = describe_workflow(project)
     if saved.inspection_extension is not None and not upgraded:
         from app.inspection import restore_extension
@@ -459,6 +487,8 @@ def restore_snapshot(snapshot: object) -> tuple[dict, list[dict]]:
             validated = DimensionMeasurement.model_validate({**item, "key": key})
             restored_prov[key] = validated.model_dump(mode="json", exclude_none=True)
         project["dimension_provenance"] = restored_prov
+    if saved.build_logs is not None:
+        project["build_logs"] = deepcopy(saved.build_logs)
     refresh_workflow(project)
     from app.spatial_fit import refresh_spatial_fit
 

@@ -92,6 +92,21 @@ CONCEPT_DESIGN_CLEARANCE_SPECS = (
     ),
 )
 
+STANDALONE_FIXTURE_CLEARANCE_SPECS = (
+    (
+        "depth_mm",
+        "front_access_mm",
+        50.0,
+        "Allow 50 mm front operator clearance for manual object insertion and removal.",
+    ),
+    (
+        "height_mm",
+        "top_service_mm",
+        40.0,
+        "Allow 40 mm overhead clearance above the specimen or camera arm for cabling.",
+    ),
+)
+
 GENERIC_WORKSTATION_CLEARANCE_SPECS = (
     (
         "depth_mm",
@@ -179,6 +194,24 @@ def _resolve_subject_and_body(
             else float(span[2] if span else 0.0)
         )
         return "concept_design", (width, depth, height), CONCEPT_DESIGN_CLEARANCE_SPECS
+
+    if project.get("standalone_fixture") and platform_id is None:
+        fixture = project["standalone_fixture"]
+        foot = fixture.get("footprint_mm") or [0.0, 0.0]
+        height = float(fixture.get("height_mm", 0.0))
+        width = (
+            float(candidate_footprint.get("width_mm", foot[0]))
+            if candidate_footprint
+            else float(foot[0])
+        )
+        depth = (
+            float(candidate_footprint.get("depth_mm", foot[1]))
+            if candidate_footprint
+            else float(foot[1])
+        )
+        if candidate_footprint and "height_mm" in candidate_footprint:
+            height = float(candidate_footprint["height_mm"])
+        return "standalone_fixture", (width, depth, height), STANDALONE_FIXTURE_CLEARANCE_SPECS
 
     if project.get("bench_station") and platform_id is None:
         station = project["bench_station"]
@@ -293,6 +326,19 @@ def evaluate_printable_fit(project: dict, lab_profile: dict | None) -> list[dict
                         comp.get("name") or comp["key"],
                         [float(v) for v in size],
                         "custom_concept",
+                    )
+                )
+    if fixture := project.get("standalone_fixture"):
+        prov = (fixture.get("spec") or {}).get("dimension_provenance") or "reference"
+        for part in fixture.get("parts") or []:
+            size = part.get("size_mm")
+            if part.get("printable") and isinstance(size, (list, tuple)) and len(size) == 3:
+                candidates.append(
+                    (
+                        f"fixture:{part['id']}",
+                        part.get("label") or part["id"],
+                        [float(v) for v in size],
+                        prov,
                     )
                 )
 

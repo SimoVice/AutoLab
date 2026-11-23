@@ -96,6 +96,22 @@ def describe_workflow(project: dict) -> dict:
                           capabilities=["custom geometry", "motion preview", "parts planning",
                                         "assembly guide", "control software starter"],
                           scope="Proposed mechanical assembly and software commissioning project.")
+        elif project.get("standalone_fixture"):
+            result.update(
+                label="Standalone printable fixture",
+                status="supported_concept",
+                capabilities=[
+                    "parametric 3d fixture",
+                    "print-ready step/stl",
+                    "2d dimensioned drawings",
+                    "tolerance coupon",
+                    "physical build feedback",
+                ],
+                scope=(
+                    "Printable locating base, sample holder, or imaging rig. Physical fit, "
+                    "repeatability (E13), and thermal/chemical compatibility require verification."
+                ),
+            )
         elif station:
             result.update(
                 label="Human-operated bench station",

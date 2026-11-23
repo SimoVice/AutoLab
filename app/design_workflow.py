@@ -25,6 +25,8 @@ def machine_signature(project: dict) -> str:
                "bench_station": (project.get("bench_station") or {}).get("proposal"),
                "inspection_extension": project.get("inspection_extension"),
                "cold_transfer_extension": cold}
+    if project.get("standalone_fixture"):
+        payload["standalone_fixture"] = project["standalone_fixture"].get("spec")
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
@@ -44,7 +46,7 @@ def refresh_workflow(project: dict) -> dict:
 
 def has_machine(project: dict) -> bool:
     return bool(project.get("engineering_design") or project.get("concept_design")
-                or project.get("bench_station"))
+                or project.get("standalone_fixture") or project.get("bench_station"))
 
 
 def approve_machine(project: dict) -> dict:
