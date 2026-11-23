@@ -154,6 +154,7 @@ class LookupReviewedReferencesArgs(_StrictArgs):
     query: Annotated[str | None, Field(max_length=200)] = None
     reference_id: Annotated[str | None, Field(max_length=100)] = None
     include_platforms: bool = True
+    library_kind: Literal["references", "labware", "hardware", "all"] | None = None
 
 
 class UpdateProjectBriefArgs(_StrictArgs):
@@ -203,7 +204,7 @@ class ConfigureLabwareArgs(_StrictArgs):
     columns: int | None = Field(default=None, ge=1, le=12)
     pitch_mm: float | None = Field(default=None, gt=0, le=300)
     radial_clearance_mm: float | None = Field(default=None, gt=0, le=5)
-    plate_profile_id: Literal["corning_96_wellplate_360ul_flat"] | None = None
+    plate_profile_id: Annotated[str, Field(min_length=1, max_length=120)] | None = None
     tip_profile_id: Literal[
         "tipone_96_tiprack_200ul",
         "opentrons_96_tiprack_300ul",
@@ -663,6 +664,15 @@ def _tool_lookup_references(args: LookupReviewedReferencesArgs, ctx: ToolContext
     }
     if args.include_platforms:
         data["platforms"] = platform_profiles()
+    kind = args.library_kind or "all"
+    if kind in ("labware", "all"):
+        from app.labware_registry import list_labware
+
+        data["labware_catalog"] = list_labware(query=args.query)
+    if kind in ("hardware", "all"):
+        from app.labware_registry import list_hardware_parts
+
+        data["hardware_catalog"] = list_hardware_parts(query=args.query)[:12]
     return ToolResult(
         tool="lookup_reviewed_references",
         ok=True,
@@ -1272,7 +1282,16 @@ def _tool_configure_labware(args: ConfigureLabwareArgs, ctx: ToolContext) -> Too
 
     if args.action == "select_microplate":
         profile = args.plate_profile_id or CORNING_96_ID
-        literal = "Corning 96 well plate"
+        if profile == CORNING_96_ID:
+            literal = "Corning 96 well plate"
+        else:
+            from app.labware_registry import get_labware_definition
+
+            try:
+                summary = get_labware_definition(profile)["summary"]
+            except ValueError as exc:
+                return _fail("configure_labware", "verifying", str(exc))
+            literal = f"{summary['display_name']} ({profile})"
         sel = LabwareSelection(profile_id=profile, source=literal)
         try:
             updated, run = select_plate(previous, sel, literal)

@@ -122,13 +122,21 @@ def _components(project: dict) -> list[dict]:
                 raise ValueError("Rack geometry does not match its compiled specification.")
         plate = project.get("labware_plate")
         is_microplate = (
-            isinstance(plate, dict) and plate.get("kind") == "microplate_96"
+            isinstance(plate, dict)
+            and plate.get("kind") in ("microplate_96", "labware_wellplate", "labware_reservoir")
             and plate.get("target_component_id") == comp["id"]
         )
         if is_microplate:
+            from app.labware_registry import compile_labware_holder
+            from app.microplate_geometry import PROFILE_ID as CORNING_96_ID
             from app.microplate_geometry import compile_microplate
 
-            compiled = compile_microplate(plate.get("profile_id"))
+            if plate.get("profile_id") == CORNING_96_ID and not plate.get("labware_definition"):
+                compiled = compile_microplate(CORNING_96_ID)
+            else:
+                compiled = compile_labware_holder(
+                    plate.get("labware_definition") or plate.get("profile_id")
+                )
             if is_parametric_rack or geometry != compiled["geometry"] or any(
                 abs(a - b) > 1e-7 for a, b in zip(size, compiled["size_mm"])
             ):
@@ -226,7 +234,7 @@ def _cad_box_size(comp: dict) -> tuple[float, float, float]:
 
 def _primitive_solid(comp, primitive):
     """Create one primitive in CAD coordinates from the serialized geometry."""
-    from build123d import Align, Box, Cone, Cylinder, Pos, Rot
+    from build123d import Align, Box, Compound, Cone, Cylinder, Pos, Rot
 
     x, y, z = primitive["position"]
     sx, sy, sz = primitive["size"]
@@ -234,12 +242,20 @@ def _primitive_solid(comp, primitive):
     align = (Align.CENTER,) * 3
     if shape in ("box", "plate"):
         solid = Box(sx, sz, sy, align=align)
-        if shape == "plate":
-            for hole in primitive.get("holes", []):
-                cutter = Pos(hole["x_mm"], hole["z_mm"], 0) * Cylinder(
-                    hole["radius_mm"], sy + 2, align=align
-                )
-                solid = solid - cutter
+        if shape == "plate" and primitive.get("holes"):
+            cutters = []
+            for hole in primitive["holes"]:
+                if "radius_mm" in hole:
+                    cutters.append(
+                        Pos(hole["x_mm"], hole["z_mm"], 0)
+                        * Cylinder(hole["radius_mm"], sy + 2, align=align)
+                    )
+                else:
+                    cutters.append(
+                        Pos(hole["x_mm"], hole["z_mm"], 0)
+                        * Box(hole["size_x_mm"], hole["size_z_mm"], sy + 2, align=align)
+                    )
+            solid = solid - (cutters[0] if len(cutters) == 1 else Compound(children=cutters))
     elif shape in ("cylinder", "frustum", "tube"):
         axis = primitive.get("axis", "y")
         dims = {"x": (sx, sy), "y": (sy, sx), "z": (sz, sx)}
@@ -482,12 +498,23 @@ def _workstation_svg(components: list[dict], project_id, revision) -> bytes:
             )
             if primitive["kind"] == "plate":
                 for hole in primitive.get("holes", []):
-                    parts.append(
-                        f'<circle cx="{px(x + dx + hole["x_mm"]):.2f}" '
-                        f'cy="{py(z + dz + hole["z_mm"]):.2f}" '
-                        f'r="{hole["radius_mm"] * scale:.2f}" fill="#f8fafc" '
-                        f'stroke="#526772"{transform}/>'
-                    )
+                    if "radius_mm" in hole:
+                        parts.append(
+                            f'<circle cx="{px(x + dx + hole["x_mm"]):.2f}" '
+                            f'cy="{py(z + dz + hole["z_mm"]):.2f}" '
+                            f'r="{hole["radius_mm"] * scale:.2f}" fill="#f8fafc" '
+                            f'stroke="#526772"{transform}/>'
+                        )
+                    else:
+                        hw = hole["size_x_mm"] * scale
+                        hh = hole["size_z_mm"] * scale
+                        hx = px(x + dx + hole["x_mm"] - hole["size_x_mm"] / 2)
+                        hy = py(z + dz + hole["z_mm"] + hole["size_z_mm"] / 2)
+                        parts.append(
+                            f'<rect x="{hx:.2f}" y="{hy:.2f}" '
+                            f'width="{hw:.2f}" height="{hh:.2f}" fill="#f8fafc" '
+                            f'stroke="#526772"{transform}/>'
+                        )
         parts.append(
             f'<text x="{px(x):.2f}" y="{py(z):.2f}" font-size="9" '
             f'font-family="sans-serif" fill="#0f172a">{html.escape(comp["id"])}</text>'
@@ -667,10 +694,20 @@ def build_cad_files(project: dict) -> dict[str, bytes]:
         labware_source = LABWARE_GEOMETRY_SOURCE_SHA256
     microplate_source = None
     if project.get("labware_plate"):
+        from app.labware_registry import compile_labware_holder
         from app.microplate_geometry import MICROPLATE_GEOMETRY_SOURCE_SHA256, compile_microplate
+        from app.microplate_geometry import PROFILE_ID as CORNING_96_ID
 
         microplate_source = MICROPLATE_GEOMETRY_SOURCE_SHA256
-        plate_details = compile_microplate(project["labware_plate"]["profile_id"])
+        plate_cfg = project["labware_plate"]
+        if plate_cfg.get("profile_id") == CORNING_96_ID and not plate_cfg.get(
+            "labware_definition"
+        ):
+            plate_details = compile_microplate(CORNING_96_ID)
+        else:
+            plate_details = compile_labware_holder(
+                plate_cfg.get("labware_definition") or plate_cfg["profile_id"]
+            )
     tip_source = None
     if project.get("tip_rack"):
         from app.tiprack_geometry import TIPRACK_GEOMETRY_SOURCE_SHA256, compile_tiprack

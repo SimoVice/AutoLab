@@ -200,12 +200,23 @@ def add_geometry(project: dict) -> dict:
         rack_geometry = compile_labware_rack(labware.get("spec"))
     plate = result.get("labware_plate")
     plate_geometry = None
-    if isinstance(plate, dict) and plate.get("kind") == "microplate_96":
+    if isinstance(plate, dict) and plate.get("kind") in (
+        "microplate_96",
+        "labware_wellplate",
+        "labware_reservoir",
+    ):
         if rack_geometry:
             raise ValueError("Tube rack and microplate cannot both be active.")
+        from app.labware_registry import compile_labware_holder
+        from app.microplate_geometry import PROFILE_ID as CORNING_96_ID
         from app.microplate_geometry import compile_microplate
 
-        plate_geometry = compile_microplate(plate.get("profile_id"))
+        if plate.get("profile_id") == CORNING_96_ID and not plate.get("labware_definition"):
+            plate_geometry = compile_microplate(CORNING_96_ID)
+        else:
+            plate_geometry = compile_labware_holder(
+                plate.get("labware_definition") or plate.get("profile_id")
+            )
     tips = result.get("tip_rack")
     tip_geometry = None
     if isinstance(tips, dict):

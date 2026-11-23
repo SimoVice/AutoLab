@@ -173,6 +173,7 @@ class FixtureSpec(BaseModel):
         "cuvette_12_5mm",
         "custom",
     ] = "custom"
+    labware_load_name: str | None = Field(default=None, max_length=120)
     object_label: str = Field(default="", max_length=120)
     object_shape: Literal["rectangular", "circular"] = "rectangular"
     object_length_mm: float | None = Field(default=None, ge=5.0, le=400.0)
@@ -264,7 +265,32 @@ def normalize_fixture_spec(raw: dict[str, Any] | FixtureSpec) -> FixtureSpec:
     ref_id = parsed.object_reference_id
     updates: dict[str, Any] = {}
 
-    if ref_id != "custom":
+    if parsed.labware_load_name:
+        from app.labware_registry import get_labware_definition
+
+        entry = get_labware_definition(parsed.labware_load_name)["summary"]
+        dims = entry["dimensions_mm"]
+        if "object_shape" not in supplied_keys:
+            updates["object_shape"] = "rectangular"
+        if not parsed.object_label:
+            updates["object_label"] = entry["display_name"]
+        if "object_length_mm" not in supplied_keys:
+            updates["object_length_mm"] = float(dims[0])
+        if "object_width_mm" not in supplied_keys:
+            updates["object_width_mm"] = float(dims[1])
+        if "object_diameter_mm" not in supplied_keys:
+            updates["object_diameter_mm"] = None
+        if "object_height_mm" not in supplied_keys:
+            updates["object_height_mm"] = float(dims[2])
+        user_overrode_dims = bool(
+            {"object_length_mm", "object_width_mm", "object_diameter_mm", "object_height_mm"}
+            & supplied_keys
+        )
+        if "dimension_provenance" not in supplied_keys:
+            updates["dimension_provenance"] = (
+                "user_measured" if user_overrode_dims else "reference"
+            )
+    elif ref_id != "custom":
         ref = FIXTURE_REFERENCES[ref_id]
         if "object_shape" not in supplied_keys:
             updates["object_shape"] = ref["object_shape"]

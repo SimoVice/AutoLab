@@ -27,7 +27,7 @@ class StrictModel(BaseModel):
 class LabwareSelection(StrictModel):
     _reference_context: str | None = PrivateAttr(default=None)
 
-    profile_id: Literal["corning_96_wellplate_360ul_flat", "previous_tube_rack"] | None = None
+    profile_id: Annotated[str | None, Field(min_length=1, max_length=120)] = None
     source: Annotated[str | None, Field(min_length=1, max_length=1000)] = None
 
     def verify_sources(self, message: str) -> None:
@@ -41,10 +41,15 @@ class LabwareSelection(StrictModel):
 
 
 def verify_selection(
-    profile_id: str, source: str, message: str, reference_context: str | None = None,
+    profile_id: str,
+    source: str,
+    message: str,
+    reference_context: str | None = None,
+    *,
+    custom_definition: dict | None = None,
 ) -> None:
     lowered = source.casefold()
-    if re.search(
+    if profile_id == PROFILE_ID and re.search(
         r"\b(?:don't|don’t|do not|never|not)\b.{0,35}"
         r"\b(?:use|select|choose|switch)\b.{0,30}\bcorning\b|"
         r"\b(?:use|select|choose)\b.{0,25}\bnot\b.{0,25}\bcorning\b|"
@@ -57,12 +62,14 @@ def verify_selection(
             "A question, hypothetical or withdrawn plate choice cannot change labware."
         )
     for clause in re.split(r"[,;!?\n]|\.(?!\d)", message):
-        if not re.search(r"plate|piastr|rack|labware|provett|tubes?|96", clause, re.I):
+        if not re.search(
+            r"plate|piastr|rack|labware|provett|tubes?|96|384|24|48|reservoir", clause, re.I
+        ):
             continue
         if re.search(
             r"\b(?:don't|do not|non|never|mai)\s+(?:switch|change|select|use|"
             r"return|restore|passare|cambiare|sostituire|usare|tornare|ripristinare)"
-            r".{0,35}(?:plate|piastr|rack|labware|provett|tubes?)|\bnot now\b",
+            r".{0,35}(?:plate|piastr|rack|labware|provett|tubes?|reservoir)|\bnot now\b",
             clause,
             re.I,
         ):
@@ -74,7 +81,34 @@ def verify_selection(
             raise ValueError("Switching back needs an explicit request for the previous tube rack.")
         return
     if profile_id != PROFILE_ID:
-        raise ValueError("This plate profile is not in the reviewed allowlist.")
+        from app.labware_registry import get_labware_definition, validate_custom_labware
+
+        if custom_definition is not None:
+            summary = validate_custom_labware(custom_definition)["summary"]
+            if summary["load_name"] != profile_id:
+                raise ValueError("Custom labware definition loadName does not match profile_id.")
+        else:
+            summary = get_labware_definition(profile_id)["summary"]
+        if summary["is_tiprack"]:
+            raise ValueError("Tip racks must be configured via the tip-rack interface.")
+        display_tokens = [
+            tok for tok in re.split(r"[\s_/()-]+", summary["display_name"].casefold())
+            if len(tok) >= 3
+        ]
+        msg_lower = message.casefold()
+        family_match = (
+            profile_id.casefold() in msg_lower
+            or summary["display_name"].casefold() in msg_lower
+            or str(summary["well_count"]) in msg_lower
+            or summary["display_category"].casefold() in msg_lower
+            or sum(tok in msg_lower for tok in display_tokens) >= min(2, len(display_tokens))
+        )
+        if not family_match:
+            raise ValueError(
+                f"Explicitly name or confirm {summary['display_name']} ({profile_id}) "
+                "before switching."
+            )
+        return
     contextual = bool(reference_context and re.search(
         r"corning.{0,60}96|96.{0,60}corning", reference_context, re.I,
     ) and re.fullmatch(
@@ -179,12 +213,12 @@ class PreviousSample(StrictModel):
 
 
 class PlateBinding(StrictModel):
-    source_revision: Annotated[str, Field(pattern=r"^[a-f0-9]{40}$")]
+    source_revision: Annotated[str, Field(min_length=1, max_length=64)]
     source_sha256: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
 
 
 class PlateProvenance(StrictModel):
-    compiler: Literal["microplate-v1"]
+    compiler: Literal["microplate-v1", "labware-registry-v2"]
     selection_literal: Annotated[str, Field(min_length=1, max_length=1000)]
     source_project_revision: Annotated[int, Field(strict=True, ge=0, le=1000000)]
     selection_context: Annotated[str | None, Field(max_length=1000)] = None
@@ -192,13 +226,14 @@ class PlateProvenance(StrictModel):
 
 class SavedPlate(StrictModel):
     schema_version: Literal[1]
-    kind: Literal["microplate_96"]
-    profile_id: Literal["corning_96_wellplate_360ul_flat"]
+    kind: Literal["microplate_96", "labware_wellplate", "labware_reservoir"]
+    profile_id: Annotated[str, Field(min_length=1, max_length=120)]
     target_component_id: Literal["sample-rack"]
     profile_binding: PlateBinding
     provenance: PlateProvenance
     previous_sample: PreviousSample
     position_xz_mm: Annotated[list[Coordinate], Field(min_length=2, max_length=2)]
+    labware_definition: dict | None = None
 
 
 def _binding(compiled: dict) -> dict:
@@ -305,7 +340,12 @@ def reconcile_plate_plan(project: dict) -> None:
             "validated working volume."
         )
     if len(targets) > len(order):
-        issues.append("The number of current preparations exceeds the 96-well reference capacity.")
+        issues.append(
+            f"The number of current preparations ({len(targets)}) exceeds the "
+            f"{len(order)}-position reference capacity."
+            if len(order) != 96
+            else "The number of current preparations exceeds the 96-well reference capacity."
+        )
     occupied = order[: len(targets)]
     for step, label in zip(targets, occupied):
         step["well_name"] = label
@@ -352,8 +392,12 @@ def labware_chat_reply(
     compatibility = plate["compatibility"]
     recipe_fields = {"stock_concentration", "target_concentrations", "final_volume"}
     same_profile = (previous.get("labware_plate") or {}).get("profile_id") == plate["profile_id"]
+    display = plate["profile"]["display_name"]
     if same_profile and not recipe_fields.intersection(patch):
-        reply = "Yes—the Corning 96-well 360 µL flat-bottom reference is already selected."
+        if plate["profile_id"] == PROFILE_ID:
+            reply = "Yes—the Corning 96-well 360 µL flat-bottom reference is already selected."
+        else:
+            reply = f"Yes—{display} is already selected."
         if compatibility.get("blocking_issues"):
             reply += " " + " ".join(compatibility["blocking_issues"])
         return reply
@@ -361,6 +405,11 @@ def labware_chat_reply(
         "Replaced the tubes in the sample position with the Corning 96-well "
         "360 µL flat-bottom plate and its proposed holder. "
         "It is a replaceable design reference; you can specify a different plate if you prefer."
+        if plate["profile_id"] == PROFILE_ID
+        else (
+            f"Replaced the sample container with {display} and its proposed holder. "
+            "It is a replaceable software definition; physical fit remains unverified."
+        )
     )
     issues = compatibility.get("blocking_issues")
     if issues:
@@ -503,6 +552,12 @@ def canonical_labware_reply(project: dict, action_runs: list[dict], patch: dict)
     return "\n\n".join(paragraphs)
 
 
+def _compile_plate_entry(profile_id: str, custom_definition: dict | None = None) -> dict:
+    from app.labware_registry import compile_labware_holder
+
+    return compile_labware_holder(custom_definition or profile_id)
+
+
 def _sourcing(project: dict) -> None:
     from app.labware import _sourcing as rack_sourcing
 
@@ -511,23 +566,29 @@ def _sourcing(project: dict) -> None:
         if group["id"] == "fixtures":
             group["component_ids"] = [cid for cid in group["component_ids"] if cid != TARGET]
     module = project["labware_plate"]
+    pid = module["profile_id"]
+    is_default = pid == PROFILE_ID
     project["sourcing"]["groups"].append(
         {
             "id": "labware-plate",
-            "label": "Reference 96-well plate and custom holder",
+            "label": (
+                "Reference 96-well plate and custom holder"
+                if is_default
+                else f"Reference {module['profile']['display_name']} and custom holder"
+            ),
             "quantity": 1,
             "component_ids": [TARGET],
-            "selected_id": PROFILE_ID,
+            "selected_id": pid,
             "options": [
                 {
-                    "id": PROFILE_ID,
+                    "id": pid,
                     "label": module["profile"]["display_name"] + " + proposed holder",
                     "supplier": "Reference profile / custom fabrication",
                     "sku": None,
                     "unit_price": None,
                     "price_kind": "unpriced",
                     "source_url": module["profile"]["source"]["source_url"],
-                    "checked_on": module["profile"]["source"]["checked_on"],
+                    "checked_on": module["profile"]["source"].get("checked_on"),
                     "availability": "Exact plate and holder fabrication need verification",
                     "pros": [],
                     "cons": ["Software definition is not manufacturer CAD"],
@@ -547,12 +608,11 @@ def reapply_plate(project: dict, *, require_accepted: bool = True) -> dict:
         raise ValueError("Tube rack and plate cannot both be active.")
     from app.geometry import add_geometry
     from app.labware import _platform_guard
-    from app.microplate_geometry import compile_microplate
 
     _platform_guard(project, require_accepted)
     result = deepcopy(project)
     module = result["labware_plate"]
-    compiled = compile_microplate(module["profile_id"])
+    compiled = _compile_plate_entry(module["profile_id"], module.get("labware_definition"))
     if module["profile_binding"] != _binding(compiled):
         raise ValueError("Saved plate source binding differs from the pinned reference.")
     parts = _index(result)
@@ -567,10 +627,14 @@ def reapply_plate(project: dict, *, require_accepted: bool = True) -> dict:
     module["metrics"] = deepcopy(compiled["checks"])
     module["checks"] = checks
     sample["kind"] = "rack"
-    sample["label"] = "Corning 96-well software reference + proposed holder"
+    sample["label"] = (
+        "Corning 96-well software reference + proposed holder"
+        if module["profile_id"] == PROFILE_ID
+        else f"{compiled['profile']['display_name']} + proposed holder"
+    )
     sample["size"] = deepcopy(compiled["size_mm"])
     sample["position"] = [x, base["position"][1] + base["size"][1] / 2 + sample["size"][1] / 2, z]
-    sample["labware_module_id"] = COMPILER
+    sample["labware_module_id"] = module["provenance"]["compiler"]
     from app.foundation_design import ensure_park_clearance
 
     ensure_park_clearance(result)
@@ -594,8 +658,25 @@ def reapply_plate(project: dict, *, require_accepted: bool = True) -> dict:
     return refresh_spatial_fit(add_geometry(result))
 
 
-def select_plate(project: dict, selection: LabwareSelection, message: str) -> tuple[dict, dict]:
-    selection.verify_sources(message)
+def select_plate(
+    project: dict,
+    selection: LabwareSelection,
+    message: str,
+    *,
+    custom_definition: dict | None = None,
+) -> tuple[dict, dict]:
+    if custom_definition is None:
+        selection.verify_sources(message)
+    else:
+        if selection.profile_id is None or not selection.source or selection.source not in message:
+            raise ValueError("Custom labware selection needs a profile_id and literal source span.")
+        verify_selection(
+            selection.profile_id,
+            selection.source,
+            message,
+            selection._reference_context,
+            custom_definition=custom_definition,
+        )
     if selection.profile_id == "previous_tube_rack":
         return restore_previous_sample(project), {
             "kind": "select_labware",
@@ -603,20 +684,25 @@ def select_plate(project: dict, selection: LabwareSelection, message: str) -> tu
             "message": "Restored the exact previous tube rack and position; "
             "current recipe edits were kept.",
         }
-    if selection.profile_id != PROFILE_ID:
+    if not selection.profile_id:
         raise ValueError("Choose a supported labware profile in this message.")
     from app.labware import _platform_guard
-    from app.microplate_geometry import compile_microplate
 
     _platform_guard(project, True)
-    if project.get("labware_plate", {}).get("profile_id") == PROFILE_ID:
+    pid = selection.profile_id
+    if project.get("labware_plate", {}).get("profile_id") == pid and custom_definition is None:
         return deepcopy(project), {
-            "kind": "select_labware", "status": "accepted",
-            "message": "The reviewed Corning plate reference is already selected; "
-            "the machine and its approval are unchanged.",
+            "kind": "select_labware",
+            "status": "accepted",
+            "message": (
+                "The reviewed Corning plate reference is already selected; "
+                "the machine and its approval are unchanged."
+                if pid == PROFILE_ID
+                else f"{pid} is already selected; the machine and its approval are unchanged."
+            ),
         }
     result = deepcopy(project)
-    compiled = compile_microplate(PROFILE_ID)
+    compiled = _compile_plate_entry(pid, custom_definition)
     parts = _index(result)
     original = parts[TARGET]
     previous = deepcopy(result.get("labware_plate", {}).get("previous_sample")) or {
@@ -627,14 +713,21 @@ def select_plate(project: dict, selection: LabwareSelection, message: str) -> tu
     }
     result.pop("labware_rack", None)
     x, z = _find_placement(result, compiled["size_mm"])
-    result["labware_plate"] = {
+    category = compiled["profile"].get("display_category", "wellPlate")
+    plate_kind = (
+        "microplate_96"
+        if pid == PROFILE_ID
+        else ("labware_reservoir" if category == "reservoir" else "labware_wellplate")
+    )
+    compiler_name = COMPILER if pid == PROFILE_ID else "labware-registry-v2"
+    plate_entry: dict = {
         "schema_version": 1,
-        "kind": "microplate_96",
-        "profile_id": PROFILE_ID,
+        "kind": plate_kind,
+        "profile_id": pid,
         "target_component_id": TARGET,
         "profile_binding": _binding(compiled),
         "provenance": {
-            "compiler": COMPILER,
+            "compiler": compiler_name,
             "selection_literal": selection.source,
             **({"selection_context": selection._reference_context}
                if selection._reference_context else {}),
@@ -643,6 +736,9 @@ def select_plate(project: dict, selection: LabwareSelection, message: str) -> tu
         "previous_sample": previous,
         "position_xz_mm": [x, z],
     }
+    if custom_definition is not None:
+        plate_entry["labware_definition"] = deepcopy(custom_definition)
+    result["labware_plate"] = plate_entry
     result = reapply_plate(result)
     from app.lab_profile import record_dimension
 
@@ -656,13 +752,17 @@ def select_plate(project: dict, selection: LabwareSelection, message: str) -> tu
             axis_key,
             axis_val,
             provenance="reference",
-            source=PROFILE_ID,
+            source=pid,
         )
     result["revision"] += 1
     result["status"] = "draft"
     compatibility = result["labware_plate"]["compatibility"]
+    display = compiled["profile"]["display_name"]
+    well_cap = compiled["derived"]["well_count"]
     text = (
         "Selected the named Corning 96-well / 360 µL flat software reference and proposed holder. "
+        if pid == PROFILE_ID
+        else f"Selected {display} ({pid}) and proposed holder. "
     )
     text += (
         "Only the sample module moved as needed; the source machine and "
@@ -672,8 +772,9 @@ def select_plate(project: dict, selection: LabwareSelection, message: str) -> tu
         " ".join(compatibility["blocking_issues"])
         if compatibility["blocking_issues"]
         else f"Mapped {compatibility['current_target_count']} existing target(s) to "
-        f"{', '.join(compatibility['occupied_wells']) or 'no assigned wells yet'}; capacity 96 "
-        "does not create 96 preparations. Physical fit and pipette access are unverified."
+        f"{', '.join(compatibility['occupied_wells']) or 'no assigned wells yet'}; "
+        f"capacity {well_cap} does not create {well_cap} preparations. "
+        "Physical fit and pipette access are unverified."
     )
     return result, {"kind": "select_labware", "status": "accepted", "message": text}
 
@@ -728,35 +829,40 @@ def restore_previous_sample(project: dict) -> dict:
 
 
 def plate_inputs(module: dict) -> dict:
-    return {
-        key: deepcopy(module[key])
-        for key in (
-            "schema_version",
-            "kind",
-            "profile_id",
-            "target_component_id",
-            "profile_binding",
-            "provenance",
-            "previous_sample",
-            "position_xz_mm",
-        )
-    }
+    keys = [
+        "schema_version",
+        "kind",
+        "profile_id",
+        "target_component_id",
+        "profile_binding",
+        "provenance",
+        "previous_sample",
+        "position_xz_mm",
+    ]
+    if "labware_definition" in module:
+        keys.append("labware_definition")
+    return {key: deepcopy(module[key]) for key in keys}
 
 
 def restore_plate(project: dict, saved: object) -> dict:
     from app.labware import _brief, validate_saved_brief
-    from app.microplate_geometry import compile_microplate
 
     module = SavedPlate.model_validate(saved).model_dump(exclude_none=True)
     previous = module["previous_sample"]
     previous.setdefault("rack_inputs", None)
-    compiled = compile_microplate(module["profile_id"])
+    compiled = _compile_plate_entry(module["profile_id"], module.get("labware_definition"))
     if module["profile_binding"] != _binding(compiled):
         raise ValueError("The saved plate source/hash does not match the pinned definition.")
     if module["provenance"]["source_project_revision"] > project["revision"]:
         raise ValueError("Saved plate provenance cannot refer to a future project revision.")
     literal = module["provenance"]["selection_literal"]
-    verify_selection(PROFILE_ID, literal, literal, module["provenance"].get("selection_context"))
+    verify_selection(
+        module["profile_id"],
+        literal,
+        literal,
+        module["provenance"].get("selection_context"),
+        custom_definition=module.get("labware_definition"),
+    )
     if previous["rack_inputs"]:
         rack = previous["rack_inputs"]
         validate_saved_brief(_brief(rack["spec"], rack["provenance"]["sources"]))
