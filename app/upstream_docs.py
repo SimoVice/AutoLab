@@ -634,9 +634,22 @@ def build_upstream_package_zip(project: dict[str, Any]) -> bytes:
             if p and Path(p).is_file():
                 files[label] = Path(p).read_bytes()
 
+    from app.bom_engine import bom_to_csv, bom_to_json, build_complete_bom
+    from app.hardware_compatibility import evaluate_hardware_compatibility
+    from app.lab_profile import has_lab_profile_data, load_lab_profile
+
     bom_items = up.get("bom") or []
     files["bom/bom.csv"] = build_upstream_bom_csv(bom_items)
     files["bom/bom.json"] = json.dumps(bom_items, indent=2).encode("utf-8")
+    loaded_prof = load_lab_profile()
+    active_prof = loaded_prof if has_lab_profile_data(loaded_prof) else None
+    complete_bom = build_complete_bom(project, lab_profile=active_prof)
+    compat = evaluate_hardware_compatibility(project, complete_bom, lab_profile=active_prof)
+    files["bom/purchasable-bom.json"] = bom_to_json(complete_bom)
+    files["bom/purchasable-bom.csv"] = bom_to_csv(complete_bom)
+    files["bom/hardware-compatibility.json"] = json.dumps(compat, indent=2, sort_keys=True).encode(
+        "utf-8"
+    )
     files["docs/build-guide.md"] = build_upstream_build_guide_md(up).encode("utf-8")
     files["docs/software-references.json"] = json.dumps(
         up.get("software") or {}, indent=2

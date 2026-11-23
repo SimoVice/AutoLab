@@ -1,6 +1,7 @@
 import StepIllustration from './StepIllustration';
 import type { ImageCapability } from './ModelSelector';
 import PartsProposal from './PartsProposal';
+import PurchasableBomPanel from './PurchasableBomPanel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import ComponentCatalog from './ComponentCatalog';
@@ -219,6 +220,7 @@ export default function ProjectResources({ imageCapability = null, project, busy
       </div>
       {rackOptions}
       <PartsProposal project={project} refreshKey={`${reportId ?? ""}:${costVersion}`} selectedId={selectedId} onSelect={onSelect} />
+      <PurchasableBomPanel project={project} busy={busy || refreshing} onSelectPart={onSelect} />
       <details className="resource-detail"><summary>Supplier reports, pricing refresh details &amp; alternatives</summary>
       {loading && <p role="status">Loading saved catalog report…</p>}
       {refreshing && <p role="status">Retrieving catalog listings. Prices appear after the supplier checks finish.</p>}

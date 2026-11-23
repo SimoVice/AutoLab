@@ -26,7 +26,7 @@ def _walk_schemas(node):
             yield from _walk_schemas(item)
 
 
-def test_all_20_openai_tool_schemas_are_strict_and_complete():
+def test_all_23_openai_tool_schemas_are_strict_and_complete():
     from app.agent_tools import openai_tool_schemas
 
     schemas = openai_tool_schemas(new_project())
@@ -52,6 +52,9 @@ def test_all_20_openai_tool_schemas_are_strict_and_complete():
         "ingest_open_hardware_project",
         "adapt_open_hardware_project",
         "inspect_upstream_project",
+        "generate_purchasable_bom",
+        "check_hardware_compatibility",
+        "search_supplier_components",
     ]
     for entry in schemas:
         assert entry["type"] == "function"

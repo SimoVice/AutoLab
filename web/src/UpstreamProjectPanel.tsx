@@ -3,6 +3,7 @@ import { Canvas, useThree } from '@react-three/fiber';
 import { Component as ReactComponent, Suspense, type ReactNode, useEffect, useState } from 'react';
 import { Mesh, MeshStandardMaterial } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import PurchasableBomPanel from './PurchasableBomPanel';
 import type { Project, UpstreamProjectState } from './types';
 import './upstream-panel.css';
 
@@ -321,6 +322,7 @@ export default function UpstreamProjectPanel({
             )}
           </tbody>
         </table>
+        <PurchasableBomPanel project={project} busy={busy} />
       </div>
 
       <div hidden={panel !== 'instructions'} className="upstream-docs-stage">

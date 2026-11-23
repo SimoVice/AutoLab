@@ -786,6 +786,15 @@ def build_fixture_package_zip(
     revision = int(project.get("revision", 0))
     cad_files = build_fixture_cad_files(fixture, selected_parts=selected_parts)
 
+    from app.bom_engine import bom_to_csv, bom_to_json, build_complete_bom
+    from app.hardware_compatibility import evaluate_hardware_compatibility
+    from app.lab_profile import has_lab_profile_data, load_lab_profile
+
+    loaded_prof = load_lab_profile()
+    active_prof = loaded_prof if has_lab_profile_data(loaded_prof) else None
+    complete_bom = build_complete_bom(project, lab_profile=active_prof)
+    compat = evaluate_hardware_compatibility(project, complete_bom, lab_profile=active_prof)
+
     bundle: dict[str, bytes] = {
         **cad_files,
         "drawing.svg": render_fixture_drawing_svg(fixture, revision),
@@ -793,6 +802,11 @@ def build_fixture_package_zip(
         "build-sheet.html": render_bench_build_sheet_html(fixture, project, revision),
         "build-sheet.md": render_bench_build_sheet_md(fixture, revision),
         "e13-bench-checklist.md": render_e13_checklist_md(fixture, revision),
+        "bom/purchasable-bom.json": bom_to_json(complete_bom),
+        "bom/purchasable-bom.csv": bom_to_csv(complete_bom),
+        "bom/hardware-compatibility.json": json.dumps(compat, indent=2, sort_keys=True).encode(
+            "utf-8"
+        ),
     }
     manifest = {
         "schema_version": 1,

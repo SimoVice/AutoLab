@@ -3,6 +3,7 @@ import { Canvas, useThree } from '@react-three/fiber';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { OrthographicCamera } from 'three';
 import GeometryPart from './GeometryPart';
+import PurchasableBomPanel from './PurchasableBomPanel';
 import type { BuildLogEntry, Project, StandaloneFixture } from './types';
 import './fixture-panel.css';
 
@@ -293,6 +294,10 @@ export default function FixturePanel({
           <a href={`${downloadBase}/e13-bench-checklist.md?revision=${revision}`} download>E13 Checklist (MD)</a>
         </div>
       </div>
+
+      {panel === 'parts' && (
+        <PurchasableBomPanel project={project} busy={busy} onSelectPart={onSelect} />
+      )}
 
       {panel !== 'design' && (
         <div className="fixture-feedback-card">

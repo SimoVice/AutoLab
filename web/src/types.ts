@@ -765,3 +765,111 @@ export type UpstreamProjectState = {
     render_status?: string;
   } | null;
 };
+
+export type BomCurrency = 'USD' | 'CHF' | 'EUR';
+
+export type PrintEstimate = {
+  part_id: string;
+  label: string;
+  quantity: number;
+  bounding_box_mm: [number, number, number];
+  material: string;
+  nozzle_mm: number;
+  layer_height_mm: number;
+  wall_loops: number;
+  infill_percent: number;
+  filament_mass_g: number;
+  filament_length_m: number;
+  print_time_minutes: number;
+  material_cost_usd: number;
+  material_cost: number;
+  currency: BomCurrency;
+  fits_printer_bed?: boolean | null;
+  material_available_in_lab?: boolean | null;
+  printer_fit_detail?: string | null;
+};
+
+export type PurchasableBomLine = {
+  line_id: string;
+  group_id: string;
+  catalog_id: string;
+  label: string;
+  category: string;
+  kind: 'commercial_part' | '3d_printed';
+  component_ids: string[];
+  supplier: string | null;
+  sku: string | null;
+  mpn: string | null;
+  quantity: number;
+  unit: string;
+  pack_size: number;
+  packs_to_order: number;
+  currency: BomCurrency;
+  unit_price: number | null;
+  pack_price: number | null;
+  line_total: number | null;
+  price_source: 'live_api' | 'curated_reference' | 'slicer_material_estimate';
+  availability: string;
+  stock_quantity?: number | null;
+  lead_time_days?: number | null;
+  source_url?: string | null;
+  fetched_at?: string | null;
+  adapter?: string | null;
+  notes?: string | null;
+  print_estimate?: PrintEstimate | null;
+};
+
+export type PurchasableBom = {
+  schema_version: number;
+  generated_at: string;
+  project_id: string;
+  project_revision: number;
+  route_kind: string;
+  currency: BomCurrency;
+  fx_rate_used?: number | null;
+  fx_source?: string | null;
+  fx_rate_date?: string | null;
+  catalog_checked_on: string;
+  lines: PurchasableBomLine[];
+  summary: {
+    line_count: number;
+    commercial_line_count: number;
+    printed_line_count: number;
+    live_api_priced_count: number;
+    reference_priced_count: number;
+    unpriced_placeholder_count: number;
+    live_api_subtotal: number;
+    reference_catalog_subtotal: number;
+    printed_material_subtotal: number;
+    total_estimated_cost: number;
+    total_filament_mass_g: number;
+    total_print_time_minutes: number;
+    max_lead_time_days: number;
+  };
+  shipping_and_tax_scope: string;
+  exclusions: string[];
+};
+
+export type CompatibilityCheck = {
+  id: string;
+  category: string;
+  severity: 'pass' | 'warning' | 'error';
+  passed: boolean;
+  title: string;
+  detail: string;
+  recommended_fix?: string | null;
+  affected_ids: string[];
+};
+
+export type HardwareCompatibilityReport = {
+  schema_version: number;
+  project_id: string;
+  project_revision: number;
+  status: 'compatible' | 'warnings' | 'incompatible';
+  error_count: number;
+  warning_count: number;
+  pass_count: number;
+  summary: string;
+  checks: CompatibilityCheck[];
+  scope_disclaimer: string;
+};

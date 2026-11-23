@@ -1081,4 +1081,21 @@ def build_document_files(project: dict, procurement: dict | None = None) -> dict
             b"in chat; no compatible mount or hardware control is claimed. "
             b"This platform has no physical simulation adapter.\n"
         )
+    from app.bom_engine import bom_to_csv, bom_to_json, build_complete_bom
+    from app.hardware_compatibility import evaluate_hardware_compatibility
+    from app.lab_profile import has_lab_profile_data, load_lab_profile
+
+    loaded_prof = load_lab_profile()
+    active_prof = loaded_prof if has_lab_profile_data(loaded_prof) else None
+    complete_bom = build_complete_bom(
+        project,
+        procurement_report=project.get("procurement_report"),
+        lab_profile=active_prof,
+    )
+    compat = evaluate_hardware_compatibility(project, complete_bom, lab_profile=active_prof)
+    files["bom/purchasable-bom.json"] = bom_to_json(complete_bom)
+    files["bom/purchasable-bom.csv"] = bom_to_csv(complete_bom)
+    files["bom/hardware-compatibility.json"] = json.dumps(
+        compat, indent=2, ensure_ascii=False, allow_nan=False
+    ).encode("utf-8")
     return files

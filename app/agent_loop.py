@@ -42,6 +42,9 @@ _TOOL_STAGES = {
     "ingest_open_hardware_project": "researching",
     "adapt_open_hardware_project": "assembling",
     "inspect_upstream_project": "inspecting",
+    "generate_purchasable_bom": "verifying",
+    "check_hardware_compatibility": "verifying",
+    "search_supplier_components": "researching",
 }
 
 AGENT_SYSTEM_PROMPT = """You are AutoLab's autonomous laboratory engineering assistant.
@@ -107,6 +110,11 @@ CORE PRINCIPLES
   instead of inventing numbers.
 - Human confirmation gates: call approve_machine ONLY when the user explicitly confirms machine
   approval. Stop immediately and ask when any tool indicates requires_human_input=True.
+- BOM, pricing & electrical/mechanical checks: when asked for a BOM, cost breakdown,
+  multi-currency pricing (USD/CHF/EUR), 3D print time/filament, or electronics/motor/power/CSI
+  compatibility, call generate_purchasable_bom and/or check_hardware_compatibility (or
+  search_supplier_components to look up real MPNs), separate live API totals from curated reference
+  and filament estimates, state shipping/VAT/duty exclusions, and justify choices with pros/cons.
 - Language: reply clearly and concisely in the SAME language the user used (e.g. Italian or
   English), citing only facts observed from project state and tool results."""
 

@@ -363,6 +363,21 @@ class InspectUpstreamProjectArgs(_StrictArgs):
     ] = "all"
 
 
+class GeneratePurchasableBomArgs(_StrictArgs):
+    currency: Literal["USD", "CHF", "EUR"] = "USD"
+    refresh_live_prices: bool = False
+
+
+class CheckHardwareCompatibilityArgs(_StrictArgs):
+    include_passed_checks: bool = False
+
+
+class SearchSupplierComponentsArgs(_StrictArgs):
+    query: Annotated[str, Field(min_length=2, max_length=160)]
+    currency: Literal["USD", "CHF", "EUR"] = "USD"
+    max_results: int = Field(default=6, strict=True, ge=1, le=12)
+
+
 _TOOL_SPECS: list[tuple[str, str, type[BaseModel]]] = [
     (
         "inspect_project_state",
@@ -492,6 +507,27 @@ _TOOL_SPECS: list[tuple[str, str, type[BaseModel]]] = [
         "Inspect parsed sections (geometry, license, bom, assembly, software, adaptation) of "
         "the currently ingested open-source hardware project.",
         InspectUpstreamProjectArgs,
+    ),
+    (
+        "generate_purchasable_bom",
+        "Generate a complete itemized purchasable BOM in USD, CHF, or EUR with pack quantities, "
+        "supplier SKUs/MPNs, lead times, analytical FDM filament/print-time estimates, explicit "
+        "shipping/tax exclusions, and hardware compatibility status.",
+        GeneratePurchasableBomArgs,
+    ),
+    (
+        "check_hardware_compatibility",
+        "Run deterministic electrical, I/O, mechanical, and 3D-printer compatibility checks "
+        "(supply rails, motor vs driver currents, power margin, GPIO/CSI ports, NEMA pitch, "
+        "shaft bores, bed fit) on the active design.",
+        CheckHardwareCompatibilityArgs,
+    ),
+    (
+        "search_supplier_components",
+        "Search official supplier APIs (DigiKey v4, Mouser v2) and AutoLab's curated catalog "
+        "for purchasable electronics, motors, PSUs, and mechanical hardware with real MPNs and "
+        "multi-currency pricing.",
+        SearchSupplierComponentsArgs,
     ),
 ]
 
@@ -2262,6 +2298,178 @@ def _tool_inspect_upstream_project(
     )
 
 
+async def _tool_generate_purchasable_bom(
+    args: GeneratePurchasableBomArgs, ctx: ToolContext
+) -> ToolResult:
+    import asyncio
+
+    from app.bom_engine import build_complete_bom
+    from app.hardware_compatibility import evaluate_hardware_compatibility
+    from app.supplier_apis import (
+        SupplierApiError,
+        cached_fx_rates,
+        fetch_fx_rates,
+        fetch_official_quote,
+        supplier_api_capabilities,
+    )
+    from app.supplier_catalogs import PRODUCTS
+
+    fx_rates = None
+    warnings: list[str] = []
+    if args.currency != "USD":
+        fx_rates = cached_fx_rates("USD")
+        if fx_rates is None:
+            try:
+                fx_rates = await fetch_fx_rates("USD")
+            except SupplierApiError as exc:
+                return _fail("generate_purchasable_bom", "verifying", str(exc))
+
+    live_quotes: dict[str, dict[str, Any]] = {}
+    if args.refresh_live_prices:
+        base_bom = build_complete_bom(
+            ctx.project,
+            procurement_report=ctx.procurement_report,
+            lab_profile=ctx.lab_profile,
+            currency="USD",
+        )
+        caps = supplier_api_capabilities()
+        dk_or_ms = caps["digikey_v4"]["configured"] or caps["mouser_v2"]["configured"]
+        sem = asyncio.Semaphore(4)
+
+        async def _pull(line: dict[str, Any]) -> None:
+            cid = line.get("catalog_id")
+            if not cid or line.get("kind") != "commercial_part":
+                return
+            is_shopify = cid in PRODUCTS and PRODUCTS[cid].adapter == "shopify"
+            has_pn = bool(line.get("digikey_pn") or line.get("mouser_pn"))
+            if not is_shopify and not (dk_or_ms and has_pn) and cid not in PRODUCTS:
+                return
+            async with sem:
+                try:
+                    live_quotes[str(cid)] = await fetch_official_quote(
+                        {
+                            "catalog_id": cid,
+                            "option_id": cid,
+                            "mpn": line.get("mpn"),
+                            "digikey_pn": line.get("digikey_pn"),
+                            "mouser_pn": line.get("mouser_pn"),
+                            "sku": line.get("sku"),
+                        },
+                        currency=args.currency,
+                        fx_rates=fx_rates,
+                    )
+                except SupplierApiError as exc:
+                    warnings.append(f"{cid}: {exc}")
+
+        await asyncio.gather(*(_pull(line) for line in base_bom.get("lines") or []))
+
+    bom = build_complete_bom(
+        ctx.project,
+        procurement_report=ctx.procurement_report,
+        lab_profile=ctx.lab_profile,
+        currency=args.currency,
+        fx_rates=fx_rates,
+        live_quotes=live_quotes,
+    )
+    compat = evaluate_hardware_compatibility(ctx.project, bom, lab_profile=ctx.lab_profile)
+    s = bom["summary"]
+    msg = (
+        f"Generated {s['line_count']}-item BOM in {bom['currency']} "
+        f"(total={s['total_estimated_cost']:.2f} {bom['currency']}, "
+        f"live_api={s['live_api_subtotal']:.2f}, ref={s['reference_catalog_subtotal']:.2f}, "
+        f"printed={s['printed_material_subtotal']:.2f}, {s['total_filament_mass_g']} g / "
+        f"{s['total_print_time_minutes']} min, compatibility={compat['status']})."
+    )
+    run = {"kind": "generate_purchasable_bom", "status": "accepted", "message": msg}
+    ctx.action_runs.append(run)
+    return ToolResult(
+        tool="generate_purchasable_bom",
+        ok=True,
+        stage="verifying",
+        mutated=False,
+        summary=msg,
+        data={
+            "currency": bom["currency"],
+            "fx_rate_used": bom.get("fx_rate_used"),
+            "fx_source": bom.get("fx_source"),
+            "summary": s,
+            "shipping_and_tax_scope": bom["shipping_and_tax_scope"],
+            "supplier_api_status": supplier_api_capabilities(),
+            "live_quote_warnings": warnings[:6],
+            "compatibility_summary": {
+                "status": compat["status"],
+                "error_count": compat["error_count"],
+                "warning_count": compat["warning_count"],
+                "issues": [c for c in compat["checks"] if c["severity"] != "pass"][:8],
+            },
+            "lines": [
+                {
+                    "label": ln["label"],
+                    "supplier": ln["supplier"],
+                    "mpn": ln["mpn"],
+                    "qty": ln["quantity"],
+                    "packs_to_order": ln["packs_to_order"],
+                    "line_total": ln["line_total"],
+                    "price_source": ln["price_source"],
+                    "lead_time_days": ln["lead_time_days"],
+                }
+                for ln in bom["lines"][:18]
+            ],
+        },
+        action_run=run,
+    )
+
+
+def _tool_check_hardware_compatibility(
+    args: CheckHardwareCompatibilityArgs, ctx: ToolContext
+) -> ToolResult:
+    from app.hardware_compatibility import evaluate_hardware_compatibility
+
+    report = evaluate_hardware_compatibility(ctx.project, lab_profile=ctx.lab_profile)
+    checks = (
+        report["checks"]
+        if args.include_passed_checks
+        else [c for c in report["checks"] if c["severity"] != "pass"]
+    )
+    return ToolResult(
+        tool="check_hardware_compatibility",
+        ok=True,
+        stage="verifying",
+        mutated=False,
+        summary=report["summary"],
+        data={
+            "status": report["status"],
+            "error_count": report["error_count"],
+            "warning_count": report["warning_count"],
+            "pass_count": report["pass_count"],
+            "checks": checks[:15],
+            "scope_disclaimer": report["scope_disclaimer"],
+        },
+    )
+
+
+async def _tool_search_supplier_components(
+    args: SearchSupplierComponentsArgs, ctx: ToolContext
+) -> ToolResult:
+    from app.supplier_apis import search_official_suppliers
+
+    _ = ctx
+    res = await search_official_suppliers(
+        args.query, currency=args.currency, max_results=args.max_results
+    )
+    return ToolResult(
+        tool="search_supplier_components",
+        ok=True,
+        stage="researching",
+        mutated=False,
+        summary=(
+            f"Supplier search '{args.query}': {len(res['live_api_results'])} live API match(es), "
+            f"{len(res['catalog_matches'])} curated catalog match(es) ({res['currency']})."
+        ),
+        data=res,
+    )
+
+
 _DISPATCH: dict[str, tuple[type[BaseModel], Any, bool]] = {
     "inspect_project_state": (InspectProjectStateArgs, _tool_inspect_project_state, False),
     "check_spatial_fit": (CheckSpatialFitArgs, _tool_check_spatial_fit, False),
@@ -2306,6 +2514,21 @@ _DISPATCH: dict[str, tuple[type[BaseModel], Any, bool]] = {
         InspectUpstreamProjectArgs,
         _tool_inspect_upstream_project,
         False,
+    ),
+    "generate_purchasable_bom": (
+        GeneratePurchasableBomArgs,
+        _tool_generate_purchasable_bom,
+        True,
+    ),
+    "check_hardware_compatibility": (
+        CheckHardwareCompatibilityArgs,
+        _tool_check_hardware_compatibility,
+        False,
+    ),
+    "search_supplier_components": (
+        SearchSupplierComponentsArgs,
+        _tool_search_supplier_components,
+        True,
     ),
 }
 
