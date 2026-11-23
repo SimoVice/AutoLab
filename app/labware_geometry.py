@@ -103,3 +103,38 @@ def compile_labware_rack(spec: dict) -> dict:
                    "rim_land_min_assumed_mm": land, "closed_cap_gap_mm": pitch - cap,
                    "hole_web_min_assumed_mm": pitch - max_bore},
     }
+
+
+def labware_print_sheet(
+    spec: dict, *, lab_profile: dict | None = None
+) -> dict:
+    """Return print orientation, slicer defaults, bed fit, and 3-step coupon offsets."""
+    compiled = compile_labware_rack(spec)
+    w, h, d = compiled["size_mm"]
+    material = spec.get("material") or "PLA"
+    layer_height_mm = float(spec.get("layer_height_mm") or 0.2)
+    bore = compiled["derived"]["bore_diameter_mm"]
+    printer_fit: dict = {"checked": False, "fits": None, "orientation": "unchecked"}
+    if isinstance(lab_profile, dict):
+        vol = (lab_profile.get("printer") or {}).get("build_volume_mm")
+        if isinstance(vol, (list, tuple)) and len(vol) == 3:
+            bx, by, bz = [float(v) for v in vol]
+            std = w <= bx + 1e-6 and d <= by + 1e-6 and h <= bz + 1e-6
+            rot = d <= bx + 1e-6 and w <= by + 1e-6 and h <= bz + 1e-6
+            printer_fit = {
+                "checked": True,
+                "fits": std or rot,
+                "orientation": "standard" if std else ("rotated_90_xy" if rot else "exceeds_bed"),
+                "build_volume_mm": [bx, by, bz],
+            }
+    return {
+        "orientation": "Inverted (top perforated plate flat on build plate; zero supports)",
+        "material": material,
+        "layer_height_mm": layer_height_mm,
+        "chamfer_mm": float(spec.get("chamfer_mm") or 0.6),
+        "fillet_mm": float(spec.get("fillet_mm") or 1.0),
+        "fastener_spec": spec.get("fastener_spec") or "none",
+        "size_mm": [round(w, 2), round(h, 2), round(d, 2)],
+        "tolerance_coupon_bores_mm": [round(bore + o, 3) for o in (-0.30, 0.0, 0.30)],
+        "printer_fit": printer_fit,
+    }

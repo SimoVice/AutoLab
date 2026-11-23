@@ -205,3 +205,43 @@ def compile_microplate(profile_id: str) -> dict:
             "print and mounting unverified.",
         },
     }
+
+
+def compile_print_ready_microplate_holder(
+    *,
+    clearance_per_side_mm: float = FUNCTIONAL_CLEARANCE_PER_SIDE_MM,
+    fdm_undersize_mm: float = ASSUMED_FDM_UNDERSIZE_MM,
+    wall_thickness_mm: float = WALL_THICKNESS_MM,
+    floor_thickness_mm: float = FLOOR_THICKNESS_MM,
+    lip_height_mm: float = LIP_HEIGHT_MM,
+    chamfer_mm: float = 0.6,
+    fillet_mm: float = 1.0,
+    fastener_spec: str = "m3_heatset_insert",
+    material: str = "PLA",
+    lab_profile: dict | None = None,
+) -> dict:
+    """Compile a print-ready SLAS 96-well holder using pinned Opentrons provenance."""
+    from app.fixture_adapter import compile_standalone_fixture
+
+    return compile_standalone_fixture(
+        {
+            "title": "SLAS 96-well microplate print-ready holder",
+            "fixture_kind": "locating_base",
+            "object_reference_id": "slas_96_well_plate",
+            "dimension_provenance": "reference",
+            "clearance_per_side_mm": clearance_per_side_mm,
+            "fdm_undersize_mm": fdm_undersize_mm,
+            "wall_thickness_mm": wall_thickness_mm,
+            "floor_thickness_mm": floor_thickness_mm,
+            "lip_height_mm": lip_height_mm,
+            "chamfer_mm": chamfer_mm,
+            "fillet_mm": fillet_mm,
+            "fastener_spec": fastener_spec,
+            "include_alignment_stops": True,
+            "include_finger_cutouts": True,
+            "include_scale_reference": False,
+            "include_camera_mount": False,
+            "material": material,
+        },
+        lab_profile=lab_profile,
+    )
