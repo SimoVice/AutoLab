@@ -9,7 +9,38 @@ import './concept-workspace.css';
 
 type Vector3 = [number, number, number];
 type Finish = 'frame' | 'steel' | 'polymer' | 'clear' | 'accent' | 'dark';
-type ConceptPrimitive = { shape: 'box' | 'cylinder' | 'sphere'; center_mm: Vector3; size_mm: Vector3; finish: Finish; color?: string | null };
+type ConceptFeature = {
+  kind: 'through_hole' | 'counterbore' | 'pocket' | 'slot' | 'hole_pattern';
+  face?: '+y' | '-y' | '+x' | '-x' | '+z' | '-z';
+  offset_mm?: [number, number];
+  diameter_mm?: number | null;
+  counterbore_diameter_mm?: number | null;
+  width_mm?: number | null;
+  length_mm?: number | null;
+  slot_angle_deg?: number;
+  pattern_type?: 'rect' | 'circle' | null;
+  count_x?: number | null;
+  count_y?: number | null;
+  pitch_x_mm?: number | null;
+  pitch_y_mm?: number | null;
+  bolt_circle_diameter_mm?: number | null;
+  count?: number | null;
+  start_angle_deg?: number;
+};
+type ConceptPrimitive = {
+  shape: 'box' | 'cylinder' | 'sphere' | 'extrusion' | 'bracket' | 'plate';
+  center_mm: Vector3;
+  size_mm: Vector3;
+  finish: Finish;
+  color?: string | null;
+  axis?: 'x' | 'y' | 'z' | null;
+  rotation_deg?: Vector3 | null;
+  profile?: '2020' | '2040' | '4040' | null;
+  wall_thickness_mm?: number | null;
+  fillet_mm?: number | null;
+  chamfer_mm?: number | null;
+  features?: ConceptFeature[];
+};
 type ConceptComponent = { key: string; name: string; role: string; primitives: ConceptPrimitive[]; source: { title: string; url: string } | null; assembly: string; check: string; position_mm: Vector3; size_mm: Vector3 };
 type ConceptSupply = { key: string; name: string; role: string; quantity: number; unit: string; source: { title: string; url: string } | null; catalog_search_url?: string | null; component_names?: string[] };
 type ConceptStep = { name: string; instruction: string; component_keys: string[]; moving_key: string | null; moving_component_keys?: string[]; translation_mm: Vector3; rotation_deg?: number; rotation_axis?: 'x' | 'y' | 'z' | null; pivot_mm?: Vector3 | null; stops?: number[]; rotation_reference?: 'from_rest' | 'previous_index'; index_chain?: boolean; start_rotation_deg?: number; rotation_delta_deg?: number };
@@ -25,26 +56,126 @@ const finishes: Record<Finish, { color: string; metalness: number; roughness: nu
   dark: { color: '#314c51', metalness: .28, roughness: .38 },
 };
 
-function Primitive({ primitive, scale }: { primitive: ConceptPrimitive; scale: number }) {
+function PrimitiveMaterial({ primitive }: { primitive: ConceptPrimitive }) {
   const material = finishes[primitive.finish] || finishes.polymer;
-  const position = primitive.center_mm.map((n) => n * scale) as Vector3;
-  const size = primitive.size_mm.map((n) => Math.max(n * scale, .0001)) as Vector3;
-  return <mesh position={position} castShadow receiveShadow>
-    {primitive.shape === 'box' ? <boxGeometry args={size} /> : primitive.shape === 'cylinder' ? <cylinderGeometry args={[.5, .5, 1, 32]} /> : <sphereGeometry args={[.5, 24, 16]} />}
-    <meshStandardMaterial color={primitive.color ?? material.color} metalness={material.metalness} roughness={material.roughness} transparent={material.opacity != null} opacity={material.opacity ?? 1} depthWrite={material.opacity == null} />
-  </mesh>;
+  return (
+    <meshStandardMaterial
+      color={primitive.color ?? material.color}
+      metalness={material.metalness}
+      roughness={material.roughness}
+      transparent={material.opacity != null}
+      opacity={material.opacity ?? 1}
+      depthWrite={material.opacity == null}
+    />
+  );
 }
 
-// A cylinder or sphere is built at unit size so its three supplied dimensions remain independent.
+function FeatureMarkers({ features, size, scale }: { features: ConceptFeature[]; size: Vector3; scale: number }) {
+  const [sx, sy, sz] = size;
+  const markers: Array<{ key: string; pos: Vector3; rot: Vector3; radius?: number; rect?: [number, number]; angle?: number }> = [];
+  const place = (face: string, u: number, v: number): { pos: Vector3; rot: Vector3 } => {
+    const eps = 0.08 * scale;
+    switch (face) {
+      case '-y': return { pos: [u * scale, -sy / 2 - eps, v * scale], rot: [Math.PI / 2, 0, 0] };
+      case '+z': return { pos: [u * scale, v * scale, sz / 2 + eps], rot: [0, 0, 0] };
+      case '-z': return { pos: [u * scale, v * scale, -sz / 2 - eps], rot: [0, Math.PI, 0] };
+      case '+x': return { pos: [sx / 2 + eps, v * scale, u * scale], rot: [0, Math.PI / 2, 0] };
+      case '-x': return { pos: [-sx / 2 - eps, v * scale, u * scale], rot: [0, -Math.PI / 2, 0] };
+      default: return { pos: [u * scale, sy / 2 + eps, v * scale], rot: [-Math.PI / 2, 0, 0] };
+    }
+  };
+  features.forEach((f, idx) => {
+    const face = f.face ?? '+y';
+    const [u0, v0] = f.offset_mm ?? [0, 0];
+    if (f.kind === 'hole_pattern') {
+      const pts: Array<[number, number]> = [];
+      if (f.pattern_type === 'rect' && f.count_x && f.count_y && f.pitch_x_mm && f.pitch_y_mm) {
+        for (let ix = 0; ix < f.count_x; ix++) {
+          for (let iy = 0; iy < f.count_y; iy++) {
+            pts.push([u0 + (ix - (f.count_x - 1) / 2) * f.pitch_x_mm, v0 + (iy - (f.count_y - 1) / 2) * f.pitch_y_mm]);
+          }
+        }
+      } else if (f.pattern_type === 'circle' && f.count && f.bolt_circle_diameter_mm) {
+        const rad = f.bolt_circle_diameter_mm / 2;
+        const a0 = ((f.start_angle_deg ?? 0) * Math.PI) / 180;
+        for (let i = 0; i < f.count; i++) {
+          pts.push([u0 + rad * Math.cos(a0 + (2 * Math.PI * i) / f.count), v0 + rad * Math.sin(a0 + (2 * Math.PI * i) / f.count)]);
+        }
+      }
+      pts.forEach(([pu, pv], pIdx) => {
+        const placement = place(face, pu, pv);
+        markers.push({ key: `${idx}-${pIdx}`, ...placement, radius: ((f.counterbore_diameter_mm ?? f.diameter_mm ?? 3) / 2) * scale });
+      });
+    } else {
+      const placement = place(face, u0, v0);
+      if (f.kind === 'through_hole' || f.kind === 'counterbore' || (f.kind === 'pocket' && f.diameter_mm)) {
+        const d = f.counterbore_diameter_mm ?? f.diameter_mm ?? 3;
+        markers.push({ key: `${idx}`, ...placement, radius: (d / 2) * scale });
+      } else if (f.width_mm && f.length_mm) {
+        markers.push({ key: `${idx}`, ...placement, rect: [f.length_mm * scale, f.width_mm * scale], angle: ((f.slot_angle_deg ?? 0) * Math.PI) / 180 });
+      }
+    }
+  });
+  return <>
+    {markers.map((m) => (
+      <group key={m.key} position={m.pos} rotation={m.rot}>
+        <mesh rotation={[0, 0, m.angle ?? 0]}>
+          {m.radius != null ? <circleGeometry args={[Math.max(m.radius, 0.0005), 18]} /> : <planeGeometry args={[m.rect![0], m.rect![1]]} />}
+          <meshBasicMaterial color="#1e2d31" />
+        </mesh>
+      </group>
+    ))}
+  </>;
+}
+
 function ShapedPrimitive({ primitive, scale }: { primitive: ConceptPrimitive; scale: number }) {
-  if (primitive.shape === 'box') return <Primitive primitive={primitive} scale={scale} />;
-  const material = finishes[primitive.finish] || finishes.polymer;
   const position = primitive.center_mm.map((n) => n * scale) as Vector3;
-  const size = primitive.size_mm.map((n) => Math.max(n * scale, .0001)) as Vector3;
-  return <mesh position={position} scale={size} castShadow receiveShadow>
-    {primitive.shape === 'cylinder' ? <cylinderGeometry args={[.5, .5, 1, 32]} /> : <sphereGeometry args={[.5, 24, 16]} />}
-    <meshStandardMaterial color={primitive.color ?? material.color} metalness={material.metalness} roughness={material.roughness} transparent={material.opacity != null} opacity={material.opacity ?? 1} depthWrite={material.opacity == null} />
-  </mesh>;
+  const size = primitive.size_mm.map((n) => Math.max(n * scale, 0.0001)) as Vector3;
+  const rotDeg = primitive.rotation_deg ?? [0, 0, 0];
+  const euler = [(rotDeg[0] * Math.PI) / 180, (rotDeg[1] * Math.PI) / 180, (rotDeg[2] * Math.PI) / 180, 'ZYX'] as const;
+  const axis = primitive.axis ?? 'y';
+  let body;
+  if (primitive.shape === 'box' || primitive.shape === 'plate') {
+    body = <mesh castShadow receiveShadow><boxGeometry args={size} /><PrimitiveMaterial primitive={primitive} /></mesh>;
+  } else if (primitive.shape === 'bracket') {
+    const [sx, sy, sz] = size;
+    const rawMin = Math.min(primitive.size_mm[0], primitive.size_mm[1]);
+    const rawT = primitive.wall_thickness_mm ?? Math.min(Math.max(rawMin * 0.25, 2.0), 12.0, rawMin * 0.45);
+    const t = Math.max(rawT * scale, 0.0001);
+    body = <>
+      <mesh position={[0, -sy / 2 + t / 2, 0]} castShadow receiveShadow><boxGeometry args={[sx, t, sz]} /><PrimitiveMaterial primitive={primitive} /></mesh>
+      <mesh position={[-sx / 2 + t / 2, 0, 0]} castShadow receiveShadow><boxGeometry args={[t, sy, sz]} /><PrimitiveMaterial primitive={primitive} /></mesh>
+    </>;
+  } else if (primitive.shape === 'extrusion') {
+    const slotW = 5 * scale;
+    const slotD = 0.6 * scale;
+    const [sx, sy, sz] = size;
+    const grooveRot: Vector3 = axis === 'x' ? [0, 0, Math.PI / 2] : axis === 'z' ? [Math.PI / 2, 0, 0] : [0, 0, 0];
+    const len = axis === 'x' ? sx : axis === 'z' ? sz : sy;
+    const w1 = axis === 'x' ? sy : sx;
+    const w2 = axis === 'z' ? sy : sz;
+    body = <>
+      <mesh castShadow receiveShadow><boxGeometry args={size} /><PrimitiveMaterial primitive={primitive} /></mesh>
+      <group rotation={grooveRot}>
+        <mesh position={[0, 0, w2 / 2 - slotD / 4]}><boxGeometry args={[slotW, len, slotD]} /><meshBasicMaterial color="#47595d" /></mesh>
+        <mesh position={[0, 0, -w2 / 2 + slotD / 4]}><boxGeometry args={[slotW, len, slotD]} /><meshBasicMaterial color="#47595d" /></mesh>
+        <mesh position={[w1 / 2 - slotD / 4, 0, 0]}><boxGeometry args={[slotD, len, slotW]} /><meshBasicMaterial color="#47595d" /></mesh>
+        <mesh position={[-w1 / 2 + slotD / 4, 0, 0]}><boxGeometry args={[slotD, len, slotW]} /><meshBasicMaterial color="#47595d" /></mesh>
+      </group>
+    </>;
+  } else if (primitive.shape === 'cylinder') {
+    const cylRot: Vector3 = axis === 'x' ? [0, 0, Math.PI / 2] : axis === 'z' ? [Math.PI / 2, 0, 0] : [0, 0, 0];
+    const cylScale: Vector3 = axis === 'x' ? [size[1], size[0], size[2]] : axis === 'z' ? [size[0], size[2], size[1]] : size;
+    body = <mesh rotation={cylRot} scale={cylScale} castShadow receiveShadow><cylinderGeometry args={[0.5, 0.5, 1, 32]} /><PrimitiveMaterial primitive={primitive} /></mesh>;
+  } else {
+    body = <mesh scale={size} castShadow receiveShadow><sphereGeometry args={[0.5, 24, 16]} /><PrimitiveMaterial primitive={primitive} /></mesh>;
+  }
+  return (
+    <group position={position} rotation={euler}>
+      {body}
+      {Boolean(primitive.features?.length) && <FeatureMarkers features={primitive.features!} size={size} scale={scale} />}
+    </group>
+  );
 }
 
 function AnimationClock({ playing, progress, onComplete, motionVersion, step, stepIndex }: { playing: boolean; progress: RefObject<number>; onComplete: () => void; motionVersion: number; step: ConceptStep | undefined; stepIndex: number }) {

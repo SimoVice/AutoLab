@@ -98,21 +98,59 @@ def _rotate(vector, axis, angle):
             for i in range(3)]
 
 
+def _inv_rotate_euler(vector, rotation_deg):
+    """Apply transpose of R = Rz @ Ry @ Rx to transform into primitive local frame."""
+    if not rotation_deg or all(abs(a) <= 1e-7 for a in rotation_deg):
+        return list(vector)
+    rx, ry, rz = (math.radians(a) for a in rotation_deg)
+    cx, sx = math.cos(rx), math.sin(rx)
+    cy, sy = math.cos(ry), math.sin(ry)
+    cz, sz = math.cos(rz), math.sin(rz)
+    vx, vy, vz = vector
+    # Transpose rows = columns of R = Rz @ Ry @ Rx.
+    return [
+        (cz * cy) * vx + (sz * cy) * vy + (-sy) * vz,
+        (cz * sy * sx - sz * cx) * vx + (sz * sy * sx + cz * cx) * vy + (cy * sx) * vz,
+        (cz * sy * cx + sz * sx) * vx + (sz * sy * cx - cz * sx) * vy + (cy * cx) * vz,
+    ]
+
+
+def _ray_box_hit(origin, direction, size):
+    near, far = -math.inf, math.inf
+    for i in range(3):
+        if abs(direction[i]) < 1e-12:
+            if abs(origin[i]) > size[i] / 2 + 1e-7:
+                return None
+        else:
+            a, b = ((-size[i] / 2 - origin[i]) / direction[i],
+                    (size[i] / 2 - origin[i]) / direction[i])
+            near, far = max(near, min(a, b)), min(far, max(a, b))
+    return max(near, 0) if far >= max(near, 0) - 1e-7 else None
+
+
 def _ray_hit(origin, direction, primitive):
-    """First positive ray entry into the actual local box, sphere or Y cylinder."""
+    """First positive ray entry into the actual local primitive solid."""
+    rot = primitive.get('rotation_deg')
+    origin = _inv_rotate_euler(origin, rot)
+    direction = _inv_rotate_euler(direction, rot)
     size = primitive['size_mm']
-    if primitive['shape'] == 'box':
-        near, far = -math.inf, math.inf
-        for i in range(3):
-            if abs(direction[i]) < 1e-12:
-                if abs(origin[i]) > size[i]/2 + 1e-7:
-                    return None
-            else:
-                a, b = ((-size[i]/2-origin[i])/direction[i],
-                        (size[i]/2-origin[i])/direction[i])
-                near, far = max(near, min(a, b)), min(far, max(a, b))
-        return max(near, 0) if far >= max(near, 0) - 1e-7 else None
-    if primitive['shape'] == 'sphere':
+    shape = primitive['shape']
+    if shape in ('box', 'plate', 'extrusion'):
+        return _ray_box_hit(origin, direction, size)
+    if shape == 'bracket':
+        sx, sy, sz = size
+        t = primitive.get('wall_thickness_mm')
+        if t is None:
+            t = min(max(min(sx, sy) * 0.25, 2.0), 12.0, min(sx, sy) * 0.45)
+        h1 = _ray_box_hit(
+            [origin[0], origin[1] + sy / 2 - t / 2, origin[2]], direction, [sx, t, sz]
+        )
+        h2 = _ray_box_hit(
+            [origin[0] + sx / 2 - t / 2, origin[1], origin[2]], direction, [t, sy, sz]
+        )
+        hits = [h for h in (h1, h2) if h is not None]
+        return min(hits) if hits else None
+    if shape == 'sphere':
         b = 2 * sum(a*d for a, d in zip(origin, direction))
         c = sum(a*a for a in origin) - (size[0]/2)**2
         discriminant = b*b - 4*c
@@ -121,6 +159,15 @@ def _ray_hit(origin, direction, primitive):
         roots = [(-b - math.sqrt(max(0, discriminant)))/2,
                  (-b + math.sqrt(max(0, discriminant)))/2]
         return max(0, roots[0]) if roots[1] >= -1e-7 else None
+    axis = primitive.get('axis') or 'y'
+    if axis == 'x':
+        origin = [origin[1], origin[0], origin[2]]
+        direction = [direction[1], direction[0], direction[2]]
+        size = [size[1], size[0], size[2]]
+    elif axis == 'z':
+        origin = [origin[0], origin[2], origin[1]]
+        direction = [direction[0], direction[2], direction[1]]
+        size = [size[0], size[2], size[1]]
     radius, height = size[0]/2, size[1]/2
     if origin[0]**2 + origin[2]**2 <= radius*radius and abs(origin[1]) <= height:
         return 0.
@@ -156,8 +203,11 @@ def work_interface_issues(design: dict, *, diagnostics=None) -> list[str]:
         tool_solid = tool['primitives'][interface.tool_primitive]
         target_solid = target['primitives'][interface.target_primitive]
         local_origin = interface.origin_mm or tool_solid['center_mm']
-        if any(abs(a-c) > size/2 + 1e-7 for a, c, size in
-               zip(local_origin, tool_solid['center_mm'], tool_solid['size_mm'])):
+        delta_origin = [a - c for a, c in zip(local_origin, tool_solid['center_mm'])]
+        if tool_solid.get('rotation_deg'):
+            delta_origin = _inv_rotate_euler(delta_origin, tool_solid['rotation_deg'])
+        if any(abs(delta) > size / 2 + 1e-7 for delta, size in
+               zip(delta_origin, tool_solid['size_mm'])):
             issues.append(f'Interface {interface.key!r}: origin_mm {local_origin} lies outside '
                           f'{tool["name"]} primitive {interface.tool_primitive}. '
                           'Place the axis origin within the selected tool envelope.')

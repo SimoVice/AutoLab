@@ -237,8 +237,11 @@ verified performance, physical fit or fabrication readiness.
 
 Compose geometry in millimetres, Y up. Each component has a local origin at the base and MUST
 have at least one primitive with bottom Y exactly zero; center Y = half height for its base.
-Model distinct functional features with a few box, upright cylinder or sphere solids. Cylinder
-X=Z diameter. Sphere X=Y=Z. Give a primitive a #RRGGBB color only when the material, sample or
+Model distinct functional features using box, plate, bracket, extrusion (profile
+"2020"|"2040"|"4040" along axis "x"|"y"|"z"), cylinder (along axis "x"|"y"|"z"), or sphere
+solids, with optional rotation_deg [rx,ry,rz], fillet_mm/chamfer_mm, and subtractive face
+features (through_hole, counterbore, pocket, slot, hole_pattern) for real mounting and
+fastener interfaces. Give a primitive a #RRGGBB color only when the material, sample or
 marker's color matters to the task. Leave color null otherwise and name its role in the guide.
 For a coordinated machine use parent_key and placement_mm of children relative to the parent
 origin; position them on the upper face or beside the parent's solids.

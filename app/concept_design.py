@@ -92,6 +92,48 @@ def _vector(value):
     return value
 
 
+def _vector2(value):
+    if (not isinstance(value, (list, tuple)) or len(value) != 2
+            or any(isinstance(n, bool) or not isinstance(n, (int, float))
+                   or not math.isfinite(n) or abs(n) > 2500 for n in value)):
+        raise ValueError('Feature offset must be two finite bounded numbers in millimetres.')
+    return [float(value[0]), float(value[1])]
+
+
+def _finite_float_or_none(value):
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise ValueError('Numeric geometry parameter must be a finite number.')
+    return float(value)
+
+
+def _rotation_matrix(rotation_deg):
+    """Extrinsic XYZ (= Z @ Y @ X) rotation matrix matching Three.js ZYX and CAD transforms."""
+    if not rotation_deg or all(abs(a) <= EPSILON for a in rotation_deg):
+        return None
+    rx, ry, rz = (math.radians(a) for a in rotation_deg)
+    cx, sx = math.cos(rx), math.sin(rx)
+    cy, sy = math.cos(ry), math.sin(ry)
+    cz, sz = math.cos(rz), math.sin(rz)
+    return (
+        (cz * cy, cz * sy * sx - sz * cx, cz * sy * cx + sz * sx),
+        (sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx),
+        (-sy, cy * sx, cy * cx),
+    )
+
+
+def _mat_mul_vec(mat, vec):
+    return [
+        mat[0][0] * vec[0] + mat[0][1] * vec[1] + mat[0][2] * vec[2],
+        mat[1][0] * vec[0] + mat[1][1] * vec[1] + mat[1][2] * vec[2],
+        mat[2][0] * vec[0] + mat[2][1] * vec[1] + mat[2][2] * vec[2],
+    ]
+
+
+Vector2 = Annotated[list[float], Field(min_length=2, max_length=2)]
+
+
 class _Model(BaseModel):
     model_config = ConfigDict(extra='forbid', str_strip_whitespace=True,
                               revalidate_instances='always')
@@ -105,17 +147,118 @@ class _Model(BaseModel):
         return value
 
 
+class ConceptFeature(_Model):
+    """Subtractive mechanical feature anchored to a primitive face."""
+
+    kind: Literal['through_hole', 'counterbore', 'pocket', 'slot', 'hole_pattern']
+    face: Literal['+y', '-y', '+x', '-x', '+z', '-z'] = '+y'
+    offset_mm: Vector2 = Field(default_factory=lambda: [0.0, 0.0])
+    diameter_mm: float | None = Field(default=None, gt=0.2, le=500)
+    depth_mm: float | None = Field(default=None, gt=0.1, le=1000)
+    counterbore_diameter_mm: float | None = Field(default=None, gt=0.4, le=500)
+    counterbore_depth_mm: float | None = Field(default=None, gt=0.1, le=500)
+    width_mm: float | None = Field(default=None, gt=0.2, le=1000)
+    length_mm: float | None = Field(default=None, gt=0.2, le=2000)
+    slot_angle_deg: float = Field(default=0.0, ge=-180.0, le=180.0)
+    pattern_type: Literal['rect', 'circle'] | None = None
+    count_x: int | None = Field(default=None, strict=True, ge=1, le=24)
+    count_y: int | None = Field(default=None, strict=True, ge=1, le=24)
+    pitch_x_mm: float | None = Field(default=None, gt=0.5, le=500)
+    pitch_y_mm: float | None = Field(default=None, gt=0.5, le=500)
+    bolt_circle_diameter_mm: float | None = Field(default=None, gt=1.0, le=1000)
+    count: int | None = Field(default=None, strict=True, ge=2, le=36)
+    start_angle_deg: float = Field(default=0.0, ge=-360.0, le=360.0)
+
+    @field_validator('offset_mm', mode='before')
+    @classmethod
+    def finite_offset(cls, value):
+        return _vector2(value)
+
+    @field_validator(
+        'diameter_mm', 'depth_mm', 'counterbore_diameter_mm', 'counterbore_depth_mm',
+        'width_mm', 'length_mm', 'slot_angle_deg', 'pitch_x_mm', 'pitch_y_mm',
+        'bolt_circle_diameter_mm', 'start_angle_deg', mode='before',
+    )
+    @classmethod
+    def finite_numbers(cls, value):
+        return _finite_float_or_none(value)
+
+    @model_validator(mode='after')
+    def valid_feature_params(self):
+        if self.kind == 'through_hole':
+            if self.diameter_mm is None:
+                raise ValueError('through_hole requires diameter_mm.')
+        elif self.kind == 'counterbore':
+            if (self.diameter_mm is None or self.counterbore_diameter_mm is None
+                    or self.counterbore_depth_mm is None):
+                raise ValueError(
+                    'counterbore requires diameter_mm, counterbore_diameter_mm, '
+                    'and counterbore_depth_mm.')
+            if self.counterbore_diameter_mm <= self.diameter_mm + EPSILON:
+                raise ValueError('counterbore_diameter_mm must exceed diameter_mm.')
+        elif self.kind == 'pocket':
+            if self.depth_mm is None:
+                raise ValueError('pocket requires depth_mm.')
+            has_circle = self.diameter_mm is not None
+            has_rect = self.width_mm is not None and self.length_mm is not None
+            if not has_circle and not has_rect:
+                raise ValueError('pocket requires diameter_mm or both width_mm and length_mm.')
+        elif self.kind == 'slot':
+            if self.width_mm is None or self.length_mm is None:
+                raise ValueError('slot requires width_mm and length_mm.')
+            if self.length_mm + EPSILON < self.width_mm:
+                raise ValueError('slot length_mm must be >= width_mm.')
+        elif self.kind == 'hole_pattern':
+            if self.diameter_mm is None or self.pattern_type is None:
+                raise ValueError('hole_pattern requires diameter_mm and pattern_type.')
+            if self.pattern_type == 'rect':
+                if (self.count_x is None or self.count_y is None
+                        or self.pitch_x_mm is None or self.pitch_y_mm is None):
+                    raise ValueError(
+                        'rect hole_pattern requires count_x, count_y, pitch_x_mm, and pitch_y_mm.')
+                if self.count_x * self.count_y > 64:
+                    raise ValueError('rect hole_pattern supports at most 64 holes.')
+            else:
+                if self.count is None or self.bolt_circle_diameter_mm is None:
+                    raise ValueError(
+                        'circle hole_pattern requires count and bolt_circle_diameter_mm.')
+            if (self.counterbore_diameter_mm is not None
+                    and (self.counterbore_depth_mm is None
+                         or self.counterbore_diameter_mm <= self.diameter_mm + EPSILON)):
+                raise ValueError(
+                    'hole_pattern counterbore requires counterbore_depth_mm and '
+                    'counterbore_diameter_mm > diameter_mm.')
+        return self
+
+
 class ConceptPrimitive(_Model):
-    shape: Literal['box', 'cylinder', 'sphere']
+    shape: Literal['box', 'cylinder', 'sphere', 'extrusion', 'bracket', 'plate']
     size_mm: Vector
     center_mm: Vector
     finish: Literal['frame', 'steel', 'polymer', 'clear', 'accent', 'dark']
     color: str | None = Field(default=None, pattern=r'^#[0-9a-fA-F]{6}$')
+    axis: Literal['x', 'y', 'z'] | None = None
+    rotation_deg: Vector | None = None
+    profile: Literal['2020', '2040', '4040'] | None = None
+    wall_thickness_mm: float | None = Field(default=None, gt=0.5, le=100.0)
+    fillet_mm: float | None = Field(default=None, gt=0.0, le=50.0)
+    chamfer_mm: float | None = Field(default=None, gt=0.0, le=50.0)
+    features: list[ConceptFeature] = Field(default_factory=list, max_length=24)
 
     @field_validator('size_mm', 'center_mm', mode='before')
     @classmethod
     def finite_vectors(cls, value):
         return _vector(value)
+
+    @field_validator('rotation_deg', mode='before')
+    @classmethod
+    def finite_rotation(cls, value):
+        return None if value is None else _vector(value)
+
+    @field_validator('wall_thickness_mm', 'fillet_mm', 'chamfer_mm', mode='before')
+    @classmethod
+    def finite_scalars(cls, value):
+        return _finite_float_or_none(value)
 
     @model_validator(mode='after')
     def bounded_shape(self):
@@ -123,12 +266,44 @@ class ConceptPrimitive(_Model):
             raise ValueError('Primitive dimensions must be between 0.5 and 2500 mm.')
         if any(abs(n) > 4000 for n in self.center_mm):
             raise ValueError('Primitive centres must be within 4000 mm of the local origin.')
+        if self.rotation_deg is not None and any(abs(a) > 360.0 for a in self.rotation_deg):
+            raise ValueError('Primitive rotation_deg must stay within [-360, 360] degrees.')
+        if self.fillet_mm is not None and self.chamfer_mm is not None:
+            raise ValueError('Specify either fillet_mm or chamfer_mm on a primitive, not both.')
         x, y, z = self.size_mm
-        if self.shape == 'cylinder' and not math.isclose(x, z, abs_tol=EPSILON):
-            raise ValueError('An upright cylinder needs equal X/Z diameters and Y height.')
-        if self.shape == 'sphere' and not (
-                math.isclose(x, y, abs_tol=EPSILON) and math.isclose(x, z, abs_tol=EPSILON)):
-            raise ValueError('A sphere needs the same diameter on all three axes.')
+        ax = self.axis or 'y'
+        if self.shape == 'cylinder':
+            if ax == 'y' and not math.isclose(x, z, abs_tol=EPSILON):
+                raise ValueError('An upright cylinder needs equal X/Z diameters and Y height.')
+            if ax == 'x' and not math.isclose(y, z, abs_tol=EPSILON):
+                raise ValueError('An X-axis cylinder needs equal Y/Z diameters and X length.')
+            if ax == 'z' and not math.isclose(x, y, abs_tol=EPSILON):
+                raise ValueError('A Z-axis cylinder needs equal X/Y diameters and Z length.')
+        if self.shape == 'sphere':
+            if not (math.isclose(x, y, abs_tol=EPSILON) and math.isclose(x, z, abs_tol=EPSILON)):
+                raise ValueError('A sphere needs the same diameter on all three axes.')
+            if self.features:
+                raise ValueError('Spheres do not support subtractive hole or pocket features.')
+        if self.shape == 'extrusion':
+            if self.profile not in ('2020', '2040', '4040'):
+                raise ValueError('An extrusion primitive requires profile 2020, 2040, or 4040.')
+            axial = self.size_mm['xyz'.index(ax)]
+            if axial < 10.0:
+                raise ValueError('Extrusion length along its axis must be at least 10 mm.')
+            transverse = tuple(sorted(
+                round(d, 4) for i, d in enumerate(self.size_mm) if 'xyz'[i] != ax
+            ))
+            expected = {'2020': (20.0, 20.0), '2040': (20.0, 40.0), '4040': (40.0, 40.0)}[
+                self.profile
+            ]
+            if any(abs(a - b) > 1.0 for a, b in zip(transverse, expected)):
+                raise ValueError(
+                    f'Profile {self.profile} expects {expected[0]:g}x{expected[1]:g} mm '
+                    f'transverse dimensions along axis {ax}.')
+        if self.shape == 'bracket':
+            if self.wall_thickness_mm is not None and self.wall_thickness_mm >= min(x, y) / 2:
+                raise ValueError(
+                    'Bracket wall_thickness_mm must be less than half of X and Y leg spans.')
         return self
 
 
@@ -369,8 +544,21 @@ def _bounds(primitives):
     for p in primitives:
         size = p.size_mm if isinstance(p, ConceptPrimitive) else p['size_mm']
         center = p.center_mm if isinstance(p, ConceptPrimitive) else p['center_mm']
-        lows.append([c - s / 2 for c, s in zip(center, size)])
-        highs.append([c + s / 2 for c, s in zip(center, size)])
+        rot = p.rotation_deg if isinstance(p, ConceptPrimitive) else p.get('rotation_deg')
+        mat = _rotation_matrix(rot)
+        if mat is None:
+            lows.append([c - s / 2 for c, s in zip(center, size)])
+            highs.append([c + s / 2 for c, s in zip(center, size)])
+        else:
+            hx, hy, hz = size[0] / 2, size[1] / 2, size[2] / 2
+            corners = [
+                _add(_mat_mul_vec(mat, (sx * hx, sy * hy, sz * hz)), center)
+                for sx in (-1.0, 1.0)
+                for sy in (-1.0, 1.0)
+                for sz in (-1.0, 1.0)
+            ]
+            lows.append([min(v[i] for v in corners) for i in range(3)])
+            highs.append([max(v[i] for v in corners) for i in range(3)])
     return ([min(v[i] for v in lows) for i in range(3)],
             [max(v[i] for v in highs) for i in range(3)])
 
@@ -786,27 +974,142 @@ def assembly_review_issues(design: dict, *, max_issues=8, per_component=True) ->
     return issues
 
 
+def _extrusion_profile_ccw(width_u: float, height_v: float) -> list[tuple[float, float]]:
+    """Build a star-shaped CCW polygon with slotted channels for each 20 mm module."""
+    hu, hv = width_u / 2.0, height_v / 2.0
+    cols = max(1, int(round(width_u / 20.0)))
+    rows = max(1, int(round(height_v / 20.0)))
+    slot_half_mouth = 3.5
+    slot_half_floor = 1.5
+    depth = min(2.2, min(width_u, height_v) * 0.12)
+    pts: list[tuple[float, float]] = [(hu, -hv)]
+    for r in range(rows):
+        yc = -hv + (r + 0.5) * (height_v / rows)
+        pts.extend([
+            (hu, yc - slot_half_mouth),
+            (hu - depth, yc - slot_half_floor),
+            (hu - depth, yc + slot_half_floor),
+            (hu, yc + slot_half_mouth),
+        ])
+    pts.append((hu, hv))
+    # Top edge: +hu -> -hu
+    for c in range(cols - 1, -1, -1):
+        xc = -hu + (c + 0.5) * (width_u / cols)
+        pts.extend([
+            (xc + slot_half_mouth, hv),
+            (xc + slot_half_floor, hv - depth),
+            (xc - slot_half_floor, hv - depth),
+            (xc - slot_half_mouth, hv),
+        ])
+    pts.append((-hu, hv))
+    # Left edge: +hv -> -hv
+    for r in range(rows - 1, -1, -1):
+        yc = -hv + (r + 0.5) * (height_v / rows)
+        pts.extend([
+            (-hu, yc + slot_half_mouth),
+            (-hu + depth, yc + slot_half_floor),
+            (-hu + depth, yc - slot_half_floor),
+            (-hu, yc - slot_half_mouth),
+        ])
+    pts.append((-hu, -hv))
+    # Bottom edge: -hu -> +hu
+    for c in range(cols):
+        xc = -hu + (c + 0.5) * (width_u / cols)
+        pts.extend([
+            (xc - slot_half_mouth, -hv),
+            (xc - slot_half_floor, -hv + depth),
+            (xc + slot_half_floor, -hv + depth),
+            (xc + slot_half_mouth, -hv),
+        ])
+    return pts
+
+
 def _primitive_mesh(p):
     """Return closed, outward-wound triangle shells using the viewer's Y-up dimensions."""
     w, h, d = p['size_mm']
     center = p['center_mm']
-    if p['shape'] == 'box':
+    shape = p['shape']
+    axis = p.get('axis') or 'y'
+    if shape in ('box', 'plate'):
         vertices = [[x * w / 2, y * h / 2, z * d / 2]
-                    for x, y, z in [(-1,-1,-1), (1,-1,-1), (1,1,-1), (-1,1,-1),
-                                    (-1,-1,1), (1,-1,1), (1,1,1), (-1,1,1)]]
-        faces = [(0,2,1), (0,3,2), (4,5,6), (4,6,7), (0,1,5), (0,5,4),
-                 (3,7,6), (3,6,2), (0,4,7), (0,7,3), (1,2,6), (1,6,5)]
-    elif p['shape'] == 'cylinder':
+                    for x, y, z in [(-1, -1, -1), (1, -1, -1), (1, 1, -1), (-1, 1, -1),
+                                    (-1, -1, 1), (1, -1, 1), (1, 1, 1), (-1, 1, 1)]]
+        faces = [(0, 2, 1), (0, 3, 2), (4, 5, 6), (4, 6, 7), (0, 1, 5), (0, 5, 4),
+                 (3, 7, 6), (3, 6, 2), (0, 4, 7), (0, 7, 3), (1, 2, 6), (1, 6, 5)]
+    elif shape == 'bracket':
+        hx, hy, hz = w / 2.0, h / 2.0, d / 2.0
+        t = p.get('wall_thickness_mm')
+        if t is None:
+            t = min(max(min(w, h) * 0.25, 2.0), 12.0, min(w, h) * 0.45)
+        poly = [
+            (-hx, -hy), (hx, -hy), (hx, -hy + t),
+            (-hx + t, -hy + t), (-hx + t, hy), (-hx, hy),
+        ]
+        n = len(poly)
+        vertices = [[px, py, -hz] for px, py in poly] + [[px, py, hz] for px, py in poly]
+        faces = [
+            (0, 2, 1), (0, 3, 2), (0, 4, 3), (0, 5, 4),
+            (n + 0, n + 1, n + 2), (n + 0, n + 2, n + 3),
+            (n + 0, n + 3, n + 4), (n + 0, n + 4, n + 5),
+        ]
+        for i in range(n):
+            j = (i + 1) % n
+            faces += [(i, j, n + j), (i, n + j, n + i)]
+    elif shape == 'extrusion':
+        if axis == 'z':
+            wu, hv, lw = w, h, d
+        elif axis == 'x':
+            wu, hv, lw = d, h, w
+        else:
+            wu, hv, lw = w, d, h
+        poly = _extrusion_profile_ccw(wu, hv)
+        n = len(poly)
+        hw = lw / 2.0
+        raw_verts = (
+            [[pu, pv, -hw] for pu, pv in poly]
+            + [[pu, pv, hw] for pu, pv in poly]
+            + [[0.0, 0.0, -hw], [0.0, 0.0, hw]]
+        )
+        faces = []
+        back_center, front_center = 2 * n, 2 * n + 1
+        for i in range(n):
+            j = (i + 1) % n
+            faces += [
+                (back_center, j, i),
+                (front_center, n + i, n + j),
+                (i, j, n + j),
+                (i, n + j, n + i),
+            ]
+        if axis == 'z':
+            vertices = raw_verts
+        elif axis == 'y':
+            vertices = [[u, w_coord, -v] for u, v, w_coord in raw_verts]
+        else:
+            vertices = [[w_coord, v, -u] for u, v, w_coord in raw_verts]
+    elif shape == 'cylinder':
         segments = 32
-        vertices = [[w / 2 * math.cos(i * 2 * math.pi / segments), y,
-                     d / 2 * math.sin(i * 2 * math.pi / segments)]
-                    for y in (-h / 2, h / 2) for i in range(segments)]
-        vertices += [[0, -h / 2, 0], [0, h / 2, 0]]
+        if axis == 'y':
+            r1, r2, length = w / 2.0, d / 2.0, h
+        elif axis == 'x':
+            r1, r2, length = h / 2.0, d / 2.0, w
+        else:
+            r1, r2, length = w / 2.0, h / 2.0, d
+        upright = [
+            [r1 * math.cos(i * 2 * math.pi / segments), y,
+             r2 * math.sin(i * 2 * math.pi / segments)]
+            for y in (-length / 2.0, length / 2.0) for i in range(segments)
+        ] + [[0.0, -length / 2.0, 0.0], [0.0, length / 2.0, 0.0]]
         faces = []
         for i in range(segments):
             j = (i + 1) % segments
             faces += [(i, i + segments, j + segments), (i, j + segments, j),
                       (2 * segments, i, j), (2 * segments + 1, j + segments, i + segments)]
+        if axis == 'y':
+            vertices = upright
+        elif axis == 'x':
+            vertices = [[vy, vz, vx] for vx, vy, vz in upright]
+        else:
+            vertices = [[vx, vz, -vy] for vx, vy, vz in upright]
     else:
         segments, rings, radius = 32, 16, w / 2
         vertices = [[0, radius, 0]]
@@ -824,6 +1127,9 @@ def _primitive_mesh(p):
                 faces += [(a, b, b + segments), (a, b + segments, a + segments)]
             a, b = 1 + (rings - 2) * segments + i, 1 + (rings - 2) * segments + j
             faces.append((len(vertices) - 1, a, b))
+    mat = _rotation_matrix(p.get('rotation_deg'))
+    if mat is not None:
+        vertices = [_mat_mul_vec(mat, v) for v in vertices]
     return [_add(v, center) for v in vertices], faces
 
 
