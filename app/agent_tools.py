@@ -1,0 +1,1616 @@
+"""Typed OpenAI function-tool registry and deterministic domain execution engine."""
+
+from __future__ import annotations
+
+import logging
+import re
+from copy import deepcopy
+from dataclasses import dataclass, field
+from typing import Annotated, Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from app.bench_station import MODULES as STATION_MODULES
+from app.bench_station import StationProposal, compile_station
+from app.design_sources import reference_library, resolve_reference
+from app.domain import apply_update
+from app.engineering import EngineeringUpdate, apply_engineering_update, state_for
+from app.lab_profile import (
+    LabProfile,
+    apply_profile_to_project,
+    lab_profile_prompt_context,
+    load_lab_profile,
+    record_dimension,
+    save_lab_profile,
+)
+from app.microplates import PROFILE_ID as CORNING_96_ID
+from app.microplates import LabwareSelection, reapply_plate, select_plate
+from app.platform_profiles import platform_profiles
+from app.services.runtime import api_hook
+from app.spatial_fit import (
+    evaluate_printable_fit,
+    evaluate_spatial_fit,
+    format_spatial_violations,
+    refresh_spatial_fit,
+)
+from app.tip_racks import (
+    PREVIOUS_ID as TIP_PREVIOUS_ID,
+)
+from app.tip_racks import (
+    PRINTED_ID as TIP_PRINTED_ID,
+)
+from app.tip_racks import (
+    REQUIRED_FIELDS as TIP_REQUIRED_FIELDS,
+)
+from app.tip_racks import (
+    TipRackUpdate,
+    reapply_tip_rack,
+    select_tip_rack,
+    show_tip_options,
+    tip_rack_options,
+    update_tip_request,
+)
+from app.workflows import (
+    describe_workflow,
+    has_workstation_design_context,
+    workstation_context_question,
+)
+
+LOGGER = logging.getLogger("autolab.tools")
+
+_UNSET = object()
+
+
+def _strict_function_schema(model: type[BaseModel]) -> dict[str, Any]:
+    """Compile a Pydantic parameter model into an OpenAI strict function JSON Schema."""
+    schema = model.model_json_schema()
+
+    def enforce(node: Any) -> None:
+        if isinstance(node, dict):
+            node.pop("default", None)
+            if node.get("type") == "array":
+                node.setdefault("minItems", 0)
+            if "properties" in node:
+                node["required"] = sorted(node["properties"])
+                node["additionalProperties"] = False
+            for child in node.values():
+                enforce(child)
+        elif isinstance(node, list):
+            for child in node:
+                enforce(child)
+
+    enforce(schema)
+    return schema
+
+
+@dataclass
+class ToolContext:
+    """Mutable per-turn execution context wrapping a staged project copy."""
+
+    project: dict
+    user_message: str
+    history: list[dict[str, str]] = field(default_factory=list)
+    lab_profile: dict | None = None
+    procurement_report: dict | None = None
+    cost_estimate: dict | None = None
+    recommendations: list[dict] = field(default_factory=list)
+    action_runs: list[dict] = field(default_factory=list)
+    mutated: bool = False
+
+
+@dataclass
+class ToolResult:
+    """Structured outcome returned to both the autonomous loop and telemetry."""
+
+    tool: str
+    ok: bool
+    stage: str
+    summary: str
+    recoverable: bool = False
+    mutated: bool = False
+    requires_human_input: bool = False
+    question: str | None = None
+    diagnostics: list[str] = field(default_factory=list)
+    data: dict[str, Any] = field(default_factory=dict)
+    action_run: dict | None = None
+
+    def to_tool_message(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "tool": self.tool,
+            "ok": self.ok,
+            "recoverable": self.recoverable,
+            "stage": self.stage,
+            "summary": self.summary,
+            "mutated": self.mutated,
+        }
+        if self.diagnostics:
+            payload["diagnostics"] = self.diagnostics
+        if self.requires_human_input:
+            payload["requires_human_input"] = True
+            if self.question:
+                payload["question"] = self.question
+        if self.data:
+            payload["data"] = self.data
+        return payload
+
+
+class _StrictArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class InspectProjectStateArgs(_StrictArgs):
+    include_components: bool = False
+
+
+class CheckSpatialFitArgs(_StrictArgs):
+    platform_id: Literal["jubilee", "opentrons-ot2"] | None = None
+    candidate_width_mm: float | None = Field(default=None, gt=0, le=5000)
+    candidate_depth_mm: float | None = Field(default=None, gt=0, le=5000)
+    candidate_height_mm: float | None = Field(default=None, gt=0, le=5000)
+    include_printable_parts: bool = True
+
+
+class LookupReviewedReferencesArgs(_StrictArgs):
+    query: Annotated[str | None, Field(max_length=200)] = None
+    reference_id: Annotated[str | None, Field(max_length=100)] = None
+    include_platforms: bool = True
+
+
+class UpdateProjectBriefArgs(_StrictArgs):
+    workflow_kind: Literal["general", "liquid_preparation"] | None = None
+    objective: Annotated[str | None, Field(max_length=1000)] = None
+    process: Annotated[str | None, Field(max_length=1000)] = None
+    materials: Annotated[str | None, Field(max_length=1000)] = None
+    equipment: Annotated[str | None, Field(max_length=1000)] = None
+    constraints: Annotated[str | None, Field(max_length=1000)] = None
+    workspace_width_mm: float | None = Field(default=None, gt=0, le=5000)
+    workspace_depth_mm: float | None = Field(default=None, gt=0, le=5000)
+    workspace_height_mm: float | None = Field(default=None, gt=0, le=5000)
+    cooling_enabled: bool | None = None
+    cooling_target_c: float | None = Field(default=None, ge=2, le=20)
+
+
+class UpdateLiquidRecipeArgs(_StrictArgs):
+    stock_concentration: Annotated[str | None, Field(max_length=500)] = None
+    target_concentrations: Annotated[str | None, Field(max_length=500)] = None
+    final_volume: Annotated[str | None, Field(max_length=500)] = None
+
+
+class SelectPlatformArgs(_StrictArgs):
+    platform_id: Literal["jubilee", "opentrons-ot2"]
+    rationale: Annotated[str | None, Field(max_length=300)] = None
+
+
+class DevelopWorkstationLayoutArgs(_StrictArgs):
+    instruction: Annotated[str, Field(min_length=1, max_length=1000)]
+
+
+class ConfigureLabwareArgs(_StrictArgs):
+    action: Literal[
+        "configure_tube_rack",
+        "remove_tube_rack",
+        "select_microplate",
+        "revert_to_tube_rack",
+        "configure_tip_rack",
+        "show_tip_rack_options",
+    ]
+    body_diameter_max_mm: float | None = Field(default=None, gt=0, le=300)
+    rim_diameter_min_mm: float | None = Field(default=None, gt=0, le=300)
+    rim_diameter_max_mm: float | None = Field(default=None, gt=0, le=300)
+    cap_diameter_max_mm: float | None = Field(default=None, gt=0, le=300)
+    below_rim_height_mm: float | None = Field(default=None, gt=0, le=300)
+    count: int | None = Field(default=None, ge=1, le=96)
+    columns: int | None = Field(default=None, ge=1, le=12)
+    pitch_mm: float | None = Field(default=None, gt=0, le=300)
+    radial_clearance_mm: float | None = Field(default=None, gt=0, le=5)
+    plate_profile_id: Literal["corning_96_wellplate_360ul_flat"] | None = None
+    tip_profile_id: Literal[
+        "tipone_96_tiprack_200ul",
+        "opentrons_96_tiprack_300ul",
+        "custom_printed_tip_rack",
+        "previous_tip_rack",
+    ] | None = None
+    printer_available: Literal["yes", "no", "unknown"] | None = None
+    confirm_tip_rack_shift: bool = False
+
+
+class ManageExtensionArgs(_StrictArgs):
+    extension: Literal["inspection", "cold_transfer"]
+    operation: Literal["add", "remove"]
+    instruction: Annotated[str | None, Field(max_length=1000)] = None
+
+
+class DevelopBenchStationArgs(_StrictArgs):
+    operations: list[Literal["weigh", "print_label", "read_barcode", "inspect"]] = Field(
+        min_length=1, max_length=4
+    )
+
+
+class DevelopCustomEquipmentArgs(_StrictArgs):
+    instruction: Annotated[str, Field(min_length=1, max_length=1200)]
+
+
+class ApproveMachineArgs(_StrictArgs):
+    explicit_user_confirmation: bool
+
+
+class UpdateLabProfileArgs(_StrictArgs):
+    lab_name: Annotated[str | None, Field(max_length=120)] = None
+    printer_name: Annotated[str | None, Field(max_length=120)] = None
+    printer_build_volume_mm: list[float] | None = Field(default=None, min_length=3, max_length=3)
+    bench_width_mm: float | None = Field(default=None, gt=0, le=5000)
+    bench_depth_mm: float | None = Field(default=None, gt=0, le=5000)
+    bench_height_mm: float | None = Field(default=None, gt=0, le=5000)
+    measuring_tools: list[Annotated[str, Field(max_length=80)]] | None = Field(
+        default=None, max_length=16
+    )
+    owned_equipment: list[Annotated[str, Field(max_length=100)]] | None = Field(
+        default=None, max_length=32
+    )
+    apply_to_current_project: bool = True
+
+
+_TOOL_SPECS: list[tuple[str, str, type[BaseModel]]] = [
+    (
+        "inspect_project_state",
+        "Read the current project state (workflow, brief, 3D dimensions, platform, "
+        "active modules, dilution plan, labware, and lab profile) without mutating anything.",
+        InspectProjectStateArgs,
+    ),
+    (
+        "check_spatial_fit",
+        "Evaluate 3D width/depth/height fit, ventilation/access clearances, and 3D printer "
+        "build-volume checks for the current project or a candidate platform/footprint.",
+        CheckSpatialFitArgs,
+    ),
+    (
+        "lookup_reviewed_references",
+        "Search reviewed hardware platforms, open-hardware CAD references, commercial tip-rack "
+        "profiles, and verified supplier candidate entries in AutoLab's internal library.",
+        LookupReviewedReferencesArgs,
+    ),
+    (
+        "update_project_brief",
+        "Record or update workflow classification, brief fields, 3D workspace dimensions "
+        "(width, depth, height in mm), or cooling requirements on the project.",
+        UpdateProjectBriefArgs,
+    ),
+    (
+        "update_liquid_recipe",
+        "Set or revise liquid preparation recipe parameters (stock_concentration, "
+        "target_concentrations, final_volume) and recompute the dilution plan.",
+        UpdateLiquidRecipeArgs,
+    ),
+    (
+        "select_platform",
+        "Explicitly select a reviewed liquid-preparation platform (jubilee or opentrons-ot2) "
+        "after checking 3D workspace dimensions and clearances.",
+        SelectPlatformArgs,
+    ),
+    (
+        "develop_workstation_layout",
+        "Generate or revise the 3D workstation deck layout or OT-2 slot assignments for the "
+        "currently selected liquid-preparation platform.",
+        DevelopWorkstationLayoutArgs,
+    ),
+    (
+        "configure_labware",
+        "Configure custom tube racks, switch to or revert from the reviewed Corning 96-well "
+        "plate, or configure commercial/printed tip racks on a Jubilee workstation.",
+        ConfigureLabwareArgs,
+    ),
+    (
+        "manage_extension",
+        "Add or remove the Jubilee camera inspection arm or dedicated cold-transfer plate "
+        "refrigerator extension.",
+        ManageExtensionArgs,
+    ),
+    (
+        "develop_bench_station",
+        "Compile or update a schematic human-operated bench station from ordered operations "
+        "(weigh, print_label, read_barcode, inspect) under 3D bench constraints.",
+        DevelopBenchStationArgs,
+    ),
+    (
+        "develop_custom_equipment",
+        "Author or revise an original general-purpose 3D custom benchtop assembly from the "
+        "project brief and user request (jigs, imaging fixtures, custom mechanisms).",
+        DevelopCustomEquipmentArgs,
+    ),
+    (
+        "approve_machine",
+        "Approve the current hardware design so software protocol planning becomes active. "
+        "Only call when the user explicitly confirms approval of the machine.",
+        ApproveMachineArgs,
+    ),
+    (
+        "update_lab_profile",
+        "Persist laboratory 3D printer specs, bench dimensions, measuring tools, and owned "
+        "equipment, and optionally apply them to the active project.",
+        UpdateLabProfileArgs,
+    ),
+]
+
+
+def openai_tool_schemas(project: dict, lab_profile: dict | None = None) -> list[dict[str, Any]]:
+    """Return strict OpenAI chat-completions function tool definitions."""
+    _ = project, lab_profile
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": description,
+                "strict": True,
+                "parameters": _strict_function_schema(model),
+            },
+        }
+        for name, description, model in _TOOL_SPECS
+    ]
+
+
+def _fail(
+    tool: str,
+    stage: str,
+    message: str,
+    *,
+    recoverable: bool = True,
+    diagnostics: list[str] | None = None,
+    data: dict[str, Any] | None = None,
+    action_run: dict | None = None,
+) -> ToolResult:
+    return ToolResult(
+        tool=tool,
+        ok=False,
+        recoverable=recoverable,
+        stage=stage,
+        summary=message,
+        diagnostics=diagnostics or [message],
+        data=data or {},
+        action_run=action_run,
+    )
+
+
+def _format_validation_error(exc: ValidationError) -> list[str]:
+    return [
+        f"{'.'.join(str(part) for part in err['loc']) or 'arguments'}: {err['msg']}"
+        for err in exc.errors(include_url=False, include_input=False)[:6]
+    ]
+
+
+def _compact_project_state(project: dict, lab_profile: dict | None) -> dict[str, Any]:
+    from app.design_workflow import workflow_state
+
+    design = project.get("design") or {}
+    eng = state_for(project)
+    active_modules = [
+        name
+        for name in (
+            "engineering_design",
+            "bench_station",
+            "concept_design",
+            "labware_rack",
+            "labware_plate",
+            "tip_rack",
+            "inspection_extension",
+            "cold_transfer_extension",
+        )
+        if project.get(name)
+    ]
+    compact: dict[str, Any] = {
+        "revision": project.get("revision"),
+        "status": project.get("status"),
+        "workflow": project.get("workflow"),
+        "design_workflow": workflow_state(project),
+        "summary": project.get("summary"),
+        "brief": project.get("brief"),
+        "selected_platform_id": eng.get("selected_platform_id"),
+        "constraint_status": design.get("constraint_status"),
+        "footprint": design.get("footprint"),
+        "spatial_fit": design.get("spatial_fit") or evaluate_spatial_fit(project),
+        "plan": project.get("plan"),
+        "active_modules": active_modules,
+    }
+    if project.get("labware_brief"):
+        compact["labware_brief"] = project["labware_brief"]
+    if project.get("tip_rack_request"):
+        compact["tip_rack_request"] = project["tip_rack_request"]
+    if project.get("dimension_provenance"):
+        compact["dimension_provenance"] = project["dimension_provenance"]
+    if bench := project.get("bench_station"):
+        compact["bench_station"] = {
+            "operations": bench["proposal"]["operations"],
+            "footprint_mm": bench["footprint_mm"],
+            "steps_count": len(bench["steps"]),
+        }
+    if concept := project.get("concept_design"):
+        compact["concept_design"] = {
+            "title": concept.get("title"),
+            "footprint_mm": concept.get("footprint_mm"),
+            "bounds_mm": concept.get("bounds_mm"),
+            "components": [c.get("key") for c in concept.get("components", [])],
+        }
+    profile_ctx = lab_profile_prompt_context(lab_profile)
+    if profile_ctx:
+        compact["lab_profile"] = profile_ctx
+    return compact
+
+
+def _tool_inspect_project_state(args: InspectProjectStateArgs, ctx: ToolContext) -> ToolResult:
+    data = _compact_project_state(ctx.project, ctx.lab_profile)
+    if args.include_components:
+        design = ctx.project.get("design") or {}
+        data["components"] = [
+            {
+                "id": p.get("id"),
+                "kind": p.get("kind"),
+                "label": p.get("label"),
+                "position": p.get("position"),
+                "size": p.get("size"),
+            }
+            for p in design.get("components", [])
+        ]
+    return ToolResult(
+        tool="inspect_project_state",
+        ok=True,
+        stage="inspecting",
+        summary=(
+            f"Revision {data['revision']}, workflow={data['workflow']['kind']}, "
+            f"constraint_status={data['constraint_status']}, "
+            f"modules={data['active_modules']}."
+        ),
+        data=data,
+    )
+
+
+def _tool_check_spatial_fit(args: CheckSpatialFitArgs, ctx: ToolContext) -> ToolResult:
+    candidate_foot = None
+    if any(
+        v is not None
+        for v in (args.candidate_width_mm, args.candidate_depth_mm, args.candidate_height_mm)
+    ):
+        candidate_foot = {}
+        if args.candidate_width_mm is not None:
+            candidate_foot["width_mm"] = float(args.candidate_width_mm)
+        if args.candidate_depth_mm is not None:
+            candidate_foot["depth_mm"] = float(args.candidate_depth_mm)
+        if args.candidate_height_mm is not None:
+            candidate_foot["height_mm"] = float(args.candidate_height_mm)
+
+    profile = ctx.lab_profile if args.include_printable_parts else None
+    fit = evaluate_spatial_fit(
+        ctx.project,
+        lab_profile=profile,
+        candidate_footprint=candidate_foot,
+        platform_id=args.platform_id,
+    )
+    msg = (
+        f"Spatial check ({fit['subject']}): status={fit['status']}. "
+        + (format_spatial_violations(fit) if fit["violations"] else "No 3D violations.")
+    )
+    return ToolResult(
+        tool="check_spatial_fit",
+        ok=True,
+        stage="verifying",
+        summary=msg.strip(),
+        diagnostics=[v["message"] for v in fit["violations"]],
+        data={"spatial_fit": fit},
+    )
+
+
+def _tool_lookup_references(args: LookupReviewedReferencesArgs, ctx: ToolContext) -> ToolResult:
+    refs = reference_library().get("references", [])
+    matched_refs = []
+    if args.reference_id:
+        try:
+            ref = resolve_reference(args.reference_id)
+            matched_refs = [ref]
+            if not any(r["reference"]["id"] == ref["id"] for r in ctx.recommendations):
+                ctx.recommendations.append(
+                    {"reference": ref, "reason": "Consulted during tool-assisted planning."}
+                )
+        except ValueError as exc:
+            return _fail("lookup_reviewed_references", "researching", str(exc))
+    elif args.query:
+        q = args.query.casefold().strip()
+        for entry in refs:
+            haystack = " ".join(
+                str(entry.get(k, ""))
+                for k in ("id", "title", "kind", "publisher", "use", "limits")
+            ).casefold()
+            if any(token in haystack for token in q.split() if len(token) >= 2):
+                matched_refs.append(entry)
+    else:
+        matched_refs = list(refs)
+
+    compact_refs = [
+        {
+            k: entry.get(k)
+            for k in ("id", "title", "kind", "publisher", "url", "checked_on", "use", "limits")
+            if entry.get(k) is not None
+        }
+        for entry in matched_refs[:6]
+    ]
+    data: dict[str, Any] = {
+        "references": compact_refs,
+        "bench_station_operations": {
+            op: {"label": info["label"], "size_mm": info["size"], "clearance_mm": info["clearance"]}
+            for op, info in STATION_MODULES.items()
+        },
+        "tip_rack_profiles": [
+            {"id": o["id"], "label": o["label"], "size_mm": o.get("geometry", {}).get("size_mm")}
+            for o in tip_rack_options(ctx.project).get("options", [])
+        ],
+    }
+    if args.include_platforms:
+        data["platforms"] = platform_profiles()
+    return ToolResult(
+        tool="lookup_reviewed_references",
+        ok=True,
+        stage="researching",
+        summary=f"Found {len(compact_refs)} reviewed reference(s).",
+        data=data,
+    )
+
+
+def _tool_update_project_brief(args: UpdateProjectBriefArgs, ctx: ToolContext) -> ToolResult:
+    apply_fn = api_hook("apply_update", apply_update)
+    patch: dict[str, Any] = {}
+    if args.workflow_kind is not None:
+        patch["workflow_kind"] = args.workflow_kind
+    for field_name in ("objective", "process", "materials", "equipment", "constraints"):
+        val = getattr(args, field_name)
+        if val is not None:
+            patch[f"brief_{field_name}"] = val
+    for dim_key in ("workspace_width_mm", "workspace_depth_mm", "workspace_height_mm"):
+        val = getattr(args, dim_key)
+        if val is not None:
+            patch[dim_key] = float(val)
+    if args.cooling_enabled is not None:
+        patch["cooling_enabled"] = args.cooling_enabled
+    if args.cooling_target_c is not None:
+        patch["cooling_target_c"] = float(args.cooling_target_c)
+
+    if not patch:
+        return ToolResult(
+            tool="update_project_brief",
+            ok=True,
+            stage="designing",
+            summary="No brief or workspace fields supplied; project unchanged.",
+        )
+
+    previous = ctx.project
+    try:
+        candidate = apply_fn(previous, patch)
+        for dim_key, prov_key in (
+            ("workspace_width_mm", "bench_width_mm"),
+            ("workspace_depth_mm", "bench_depth_mm"),
+            ("workspace_height_mm", "bench_height_mm"),
+        ):
+            if dim_key in patch:
+                candidate = record_dimension(
+                    candidate,
+                    prov_key,
+                    float(patch[dim_key]),
+                    provenance="user_measured",
+                    source="user_chat_specification",
+                )
+        if candidate.get("bench_station"):
+            station = compile_station(
+                StationProposal.model_validate(candidate["bench_station"]["proposal"]),
+                workspace_width_mm=candidate["summary"].get("workspace_width_mm"),
+                workspace_depth_mm=candidate["summary"].get("workspace_depth_mm"),
+                workspace_height_mm=candidate["summary"].get("workspace_height_mm"),
+            )
+            candidate["bench_station"] = station
+        if candidate.get("concept_design"):
+            from app.concept_design import compile_concept
+
+            concept = compile_concept(
+                candidate["concept_design"]["proposal"],
+                candidate["summary"].get("workspace_width_mm"),
+                workspace_depth_mm=candidate["summary"].get("workspace_depth_mm"),
+                workspace_height_mm=candidate["summary"].get("workspace_height_mm"),
+            )
+            candidate["concept_design"] = concept
+        refresh_spatial_fit(candidate)
+    except ValueError as exc:
+        return _fail("update_project_brief", "verifying", str(exc))
+
+    mutated = candidate != previous
+    ctx.project = candidate
+    if mutated:
+        ctx.mutated = True
+    fit = candidate["design"].get("spatial_fit") or evaluate_spatial_fit(candidate)
+    diagnostics = [v["message"] for v in fit.get("violations", [])]
+    return ToolResult(
+        tool="update_project_brief",
+        ok=True,
+        stage="designing",
+        mutated=mutated,
+        summary=(
+            f"Updated project brief/constraints (revision {candidate['revision']}, "
+            f"workflow={candidate['workflow']['kind']}, spatial={fit['status']})."
+        ),
+        diagnostics=diagnostics,
+        data={
+            "workflow": candidate["workflow"],
+            "summary": candidate["summary"],
+            "brief": candidate["brief"],
+            "spatial_fit": fit,
+        },
+    )
+
+
+def _tool_update_liquid_recipe(args: UpdateLiquidRecipeArgs, ctx: ToolContext) -> ToolResult:
+    from app.design_workflow import workflow_state
+
+    apply_fn = api_hook("apply_update", apply_update)
+    patch: dict[str, Any] = {}
+    for key in ("stock_concentration", "target_concentrations", "final_volume"):
+        val = getattr(args, key)
+        if val is not None:
+            patch[key] = val
+    if not patch:
+        return _fail("update_liquid_recipe", "designing", "No liquid recipe fields provided.")
+
+    previous = ctx.project
+    try:
+        candidate = apply_fn(previous, patch)
+        if workflow_state(previous)["machine_approved"] and (
+            candidate.get("plan", {}).get("status") != "ready"
+        ):
+            raise ValueError(candidate["plan"]["message"])
+        if candidate.get("labware_plate"):
+            candidate = reapply_plate(candidate, require_accepted=False)
+        if candidate.get("labware_rack"):
+            from app.labware import reapply_labware
+
+            candidate = reapply_labware(candidate, require_accepted=False)
+        if candidate.get("tip_rack"):
+            candidate = reapply_tip_rack(candidate, require_accepted=False)
+    except ValueError as exc:
+        return _fail("update_liquid_recipe", "verifying", str(exc))
+
+    mutated = candidate != previous
+    ctx.project = candidate
+    if mutated:
+        ctx.mutated = True
+
+    plan = candidate.get("plan") or {}
+    diagnostics = []
+    if plan.get("status") != "ready" and plan.get("message"):
+        diagnostics.append(plan["message"])
+    if plate := candidate.get("labware_plate"):
+        compat = plate.get("compatibility") or {}
+        diagnostics.extend(compat.get("blocking_issues") or [])
+    return ToolResult(
+        tool="update_liquid_recipe",
+        ok=True,
+        stage="designing",
+        mutated=mutated,
+        summary=f"Recipe updated (plan status={plan.get('status')}).",
+        diagnostics=diagnostics,
+        data={"plan": plan, "summary": candidate["summary"]},
+    )
+
+
+def _tool_select_platform(args: SelectPlatformArgs, ctx: ToolContext) -> ToolResult:
+    from app.commercial_design import adopt_commercial
+    from app.foundation_design import adopt_foundation, is_source_based
+    from app.platform_profiles import commercial_sourcing
+
+    previous = ctx.project
+    if previous.get("workflow", {}).get("kind") != "liquid_preparation":
+        return _fail(
+            "select_platform",
+            "verifying",
+            "Liquid preparation workflow must be established before selecting a liquid platform.",
+        )
+    if args.platform_id == "opentrons-ot2" and (
+        previous.get("labware_rack")
+        or previous.get("labware_plate")
+        or previous.get("tip_rack")
+    ):
+        return _fail(
+            "select_platform",
+            "verifying",
+            "Remove custom Jubilee labware before switching platforms to Opentrons OT-2.",
+        )
+
+    fit = evaluate_spatial_fit(previous, platform_id=args.platform_id)
+    if fit["status"] == "infeasible":
+        detail = format_spatial_violations(fit)
+        return _fail(
+            "select_platform",
+            "verifying",
+            f"Cannot select {args.platform_id} because it does not fit the 3D workspace: {detail}",
+            diagnostics=[v["message"] for v in fit["violations"]],
+            data={"spatial_fit": fit},
+        )
+
+    try:
+        candidate = deepcopy(previous)
+        canonical_choice = (
+            "Use Opentrons OT-2" if args.platform_id == "opentrons-ot2" else "Use Jubilee"
+        )
+        if state_for(candidate).get("selected_platform_id") != args.platform_id:
+            candidate = apply_engineering_update(
+                candidate,
+                EngineeringUpdate(
+                    platform_choice=args.platform_id, choice_source=canonical_choice
+                ),
+                canonical_choice,
+                bump=True,
+            )
+        if args.platform_id == "opentrons-ot2":
+            if candidate.get("design", {}).get("platform", {}).get("id") != "opentrons-ot2":
+                candidate = adopt_commercial(candidate)
+                candidate["sourcing"] = commercial_sourcing()
+        else:
+            if not is_source_based(candidate):
+                candidate = adopt_foundation(candidate)
+        refresh_spatial_fit(candidate)
+        candidate["workflow"] = describe_workflow(candidate)
+    except ValueError as exc:
+        return _fail("select_platform", "designing", str(exc))
+
+    mutated = candidate != previous
+    ctx.project = candidate
+    if mutated:
+        ctx.mutated = True
+    return ToolResult(
+        tool="select_platform",
+        ok=True,
+        stage="designing",
+        mutated=mutated,
+        summary=f"Selected platform {args.platform_id} (3D fit status={fit['status']}).",
+        data={
+            "selected_platform_id": args.platform_id,
+            "spatial_fit": candidate["design"].get("spatial_fit"),
+        },
+    )
+
+
+async def _tool_develop_workstation_layout(
+    args: DevelopWorkstationLayoutArgs, ctx: ToolContext
+) -> ToolResult:
+    from app.commercial_design import adopt_commercial
+    from app.design_agent import develop_design
+    from app.foundation_design import adopt_foundation, is_source_based
+    from app.labware import reapply_labware
+    from app.platform_profiles import commercial_sourcing
+
+    previous = ctx.project
+    selected = state_for(previous).get("selected_platform_id")
+    if selected is None:
+        return ToolResult(
+            tool="develop_workstation_layout",
+            ok=True,
+            stage="verifying",
+            requires_human_input=True,
+            question=(
+                "Should we design around the open-hardware Jubilee system or an assembled "
+                "Opentrons OT-2 platform?"
+            ),
+            summary="Platform choice is required before developing the liquid layout.",
+        )
+    if previous.get("workflow", {}).get("kind") != "liquid_preparation":
+        return _fail(
+            "develop_workstation_layout",
+            "verifying",
+            "Workflow must be liquid_preparation before developing a workstation layout.",
+        )
+    if not has_workstation_design_context(previous):
+        question = workstation_context_question(previous)
+        return ToolResult(
+            tool="develop_workstation_layout",
+            ok=True,
+            stage="inspecting",
+            requires_human_input=True,
+            question=question,
+            summary="Need liquid workstation process/materials context before layout design.",
+        )
+    if (
+        previous.get("labware_rack")
+        or previous.get("labware_plate")
+        or previous.get("tip_rack")
+    ) and selected != "jubilee":
+        return _fail(
+            "develop_workstation_layout",
+            "verifying",
+            "Custom Jubilee labware must be removed before developing a non-Jubilee layout.",
+        )
+
+    fit = evaluate_spatial_fit(previous, platform_id=selected)
+    if fit["status"] == "infeasible":
+        detail = format_spatial_violations(fit)
+        return _fail(
+            "develop_workstation_layout",
+            "verifying",
+            f"Workspace 3D limits do not fit {selected}: {detail}",
+            diagnostics=[v["message"] for v in fit["violations"]],
+            data={"spatial_fit": fit},
+        )
+
+    commercial = selected == "opentrons-ot2"
+    if commercial:
+        base = (
+            deepcopy(previous)
+            if previous.get("design", {}).get("platform", {}).get("id") == selected
+            else adopt_commercial(previous)
+        )
+        base["sourcing"] = commercial_sourcing()
+    else:
+        base = deepcopy(previous) if is_source_based(previous) else adopt_foundation(previous)
+
+    develop_fn = api_hook("develop_design", develop_design)
+    result, run = await develop_fn(base, args.instruction)
+    run_entry = {**run, "kind": "develop_layout"}
+    ctx.action_runs.append(run_entry)
+    if run.get("status") != "accepted":
+        return _fail(
+            "develop_workstation_layout",
+            "repairing",
+            run.get("message") or "Layout proposal failed validation checks.",
+            action_run=run_entry,
+        )
+
+    try:
+        if result.get("labware_rack"):
+            result = reapply_labware(result)
+        if result.get("labware_plate"):
+            result = reapply_plate(result)
+        if result.get("tip_rack"):
+            result = reapply_tip_rack(result)
+    except ValueError as exc:
+        return _fail("develop_workstation_layout", "repairing", str(exc), action_run=run_entry)
+
+    if commercial:
+        result["sourcing"] = commercial_sourcing()
+    refresh_spatial_fit(result)
+    result["workflow"] = describe_workflow(result)
+    ctx.project = result
+    ctx.mutated = True
+    return ToolResult(
+        tool="develop_workstation_layout",
+        ok=True,
+        stage="designing",
+        mutated=True,
+        summary=run.get("message") or "Workstation layout updated.",
+        data={
+            "revision": result["revision"],
+            "spatial_fit": result["design"].get("spatial_fit"),
+        },
+        action_run=run_entry,
+    )
+
+
+def _tube_spec_patch_from_args(args: ConfigureLabwareArgs) -> tuple[dict[str, Any], dict[str, str]]:
+    labels = {
+        "body_diameter_max_mm": "body diameter",
+        "rim_diameter_min_mm": "rim diameter",
+        "cap_diameter_max_mm": "closed cap diameter",
+        "below_rim_height_mm": "length below the rim",
+        "pitch_mm": "pitch",
+        "radial_clearance_mm": "radial clearance",
+    }
+    patch: dict[str, Any] = {}
+    sources: dict[str, str] = {}
+    for key, label in labels.items():
+        val = getattr(args, key)
+        if val is not None:
+            patch[key] = float(val)
+            sources[key] = f"{label} {float(val):g} mm"
+    if args.count is not None:
+        patch["count"] = int(args.count)
+        sources["count"] = f"{int(args.count)} tubes"
+    if args.columns is not None:
+        patch["columns"] = int(args.columns)
+        sources["columns"] = f"{int(args.columns)} columns"
+    return patch, sources
+
+
+def _apply_typed_tube_rack(args: ConfigureLabwareArgs, ctx: ToolContext) -> ToolResult:
+    from app.labware import (
+        FIELD_LABELS,
+        REQUIRED_FIELDS,
+        _brief,
+        develop_labware,
+    )
+
+    previous = ctx.project
+    patch, sources = _tube_spec_patch_from_args(args)
+    prior_brief = previous.get("labware_brief") or _brief({}, {})
+    spec = deepcopy(prior_brief["spec"])
+    src_map = deepcopy(prior_brief["sources"])
+    candidate = deepcopy(previous)
+    for key, val in patch.items():
+        spec[key] = val
+        src_map[key] = {
+            "literal": sources[key],
+            "value": val,
+            "recorded_at_revision": candidate["revision"],
+        }
+        if key.endswith("_mm"):
+            candidate = record_dimension(
+                candidate,
+                f"tube_{key}",
+                float(val),
+                provenance="user_measured",
+                source="user_chat_specification",
+            )
+    new_brief = _brief(spec, src_map)
+    if new_brief != prior_brief:
+        candidate["labware_brief"] = new_brief
+        candidate["revision"] += 1
+        candidate["status"] = "draft"
+
+    missing = list(new_brief["missing_fields"])
+    if missing:
+        mutated = candidate != previous
+        if mutated:
+            ctx.project = candidate
+            ctx.mutated = True
+        readable = [FIELD_LABELS.get(k, k) for k in missing]
+        return ToolResult(
+            tool="configure_labware",
+            ok=True,
+            stage="inspecting",
+            mutated=mutated,
+            requires_human_input=True,
+            question="Please provide the missing tube dimensions: " + "; ".join(readable) + ".",
+            summary=f"Recorded partial tube dimensions; still missing {len(missing)} field(s).",
+            data={"missing_fields": [k for k in REQUIRED_FIELDS if k in missing]},
+        )
+
+    try:
+        built, run = develop_labware(candidate)
+    except ValueError as exc:
+        return _fail("configure_labware", "verifying", str(exc))
+
+    refresh_spatial_fit(built)
+    printable = evaluate_printable_fit(built, ctx.lab_profile)
+    diagnostics = [c["detail"] for c in printable if not c["fits"]]
+    ctx.project = built
+    ctx.mutated = True
+    ctx.action_runs.append(run)
+    return ToolResult(
+        tool="configure_labware",
+        ok=True,
+        stage="designing",
+        mutated=True,
+        summary=run.get("message") or "Custom tube rack built.",
+        diagnostics=diagnostics,
+        data={"labware_rack_size_mm": built["labware_rack"]["size_mm"], "printable": printable},
+        action_run=run,
+    )
+
+
+def _apply_typed_tip_rack(args: ConfigureLabwareArgs, ctx: ToolContext) -> ToolResult:
+    from app.tip_racks import REQUIRED_FIELDS as TIP_FIELDS
+
+    previous = ctx.project
+    candidate = deepcopy(previous)
+    if args.printer_available is not None:
+        candidate["fabrication_capabilities"] = {
+            "printer_available": args.printer_available,
+            "source": "agent_tool_declaration",
+        }
+    spec_fields = (
+        "body_diameter_max_mm",
+        "rim_diameter_min_mm",
+        "rim_diameter_max_mm",
+        "below_rim_height_mm",
+        "count",
+        "columns",
+        "pitch_mm",
+        "radial_clearance_mm",
+    )
+    spec_vals = {}
+    spec_srcs = {}
+    for key in spec_fields:
+        val = getattr(args, key)
+        if val is None:
+            continue
+        spec_vals[key] = int(val) if key in ("count", "columns") else float(val)
+        if key == "count":
+            spec_srcs[key] = f"{int(val)} positions"
+        elif key == "columns":
+            spec_srcs[key] = f"{int(val)} columns"
+        elif key == "rim_diameter_min_mm":
+            spec_srcs[key] = f"rim diameter minimum {float(val):g} mm"
+        elif key == "rim_diameter_max_mm":
+            spec_srcs[key] = f"rim diameter maximum {float(val):g} mm"
+        elif key == "body_diameter_max_mm":
+            spec_srcs[key] = f"body diameter {float(val):g} mm"
+        elif key == "below_rim_height_mm":
+            spec_srcs[key] = f"below rim {float(val):g} mm"
+        elif key == "pitch_mm":
+            spec_srcs[key] = f"pitch {float(val):g} mm"
+        elif key == "radial_clearance_mm":
+            spec_srcs[key] = f"radial clearance {float(val):g} mm"
+
+    profile_id = args.tip_profile_id
+    alias_text = {
+        "tipone_96_tiprack_200ul": "TipOne 200 uL tip rack",
+        "opentrons_96_tiprack_300ul": "Opentrons 96 Tip Rack 300 uL",
+        TIP_PRINTED_ID: "custom printed tip holder",
+        TIP_PREVIOUS_ID: "previous tip rack",
+    }.get(profile_id or "", "")
+    synthetic_parts = [alias_text] if alias_text else []
+    synthetic_parts.extend(spec_srcs.values())
+    synthetic_msg = ", ".join(synthetic_parts) or "tip rack"
+
+    tip_update = TipRackUpdate.model_validate(
+        {
+            "profile_id": profile_id,
+            "source": synthetic_msg if profile_id else None,
+            "spec": spec_vals,
+            "spec_sources": spec_srcs,
+        }
+    )
+    if spec_vals or args.printer_available is not None or profile_id:
+        candidate = update_tip_request(candidate, tip_update, synthetic_msg)
+
+    eff_profile = profile_id or (candidate.get("tip_rack_request") or {}).get("profile_id")
+    if eff_profile == TIP_PRINTED_ID:
+        printer_state = (candidate.get("fabrication_capabilities") or {}).get(
+            "printer_available", "unknown"
+        )
+        if printer_state != "yes":
+            merged_ctx = candidate
+        else:
+            merged_spec = {
+                **(candidate.get("tip_rack_request") or {}).get("spec", {}),
+                **spec_vals,
+            }
+            missing = [k for k in TIP_FIELDS if k not in merged_spec]
+            if missing:
+                ctx.project = candidate
+                ctx.mutated = candidate != previous
+                return ToolResult(
+                    tool="configure_labware",
+                    ok=True,
+                    stage="inspecting",
+                    mutated=ctx.mutated,
+                    requires_human_input=True,
+                    question="Please provide the missing pipette tip dimensions: "
+                    + ", ".join(missing)
+                    + ".",
+                    summary=f"Saved tip holder specs; still missing {len(missing)} field(s).",
+                    data={"missing_fields": list(TIP_REQUIRED_FIELDS)},
+                )
+            merged_ctx = candidate
+    else:
+        merged_ctx = candidate
+
+    try:
+        tip_call = TipRackUpdate.model_validate(
+            {
+                "profile_id": eff_profile,
+                "source": alias_text or (profile_id or "custom printed tip holder")
+                if eff_profile
+                else None,
+                "spec": spec_vals,
+                "spec_sources": spec_srcs,
+            }
+        )
+        updated, run = select_tip_rack(
+            merged_ctx, tip_call, synthetic_msg, accept_placement=args.confirm_tip_rack_shift
+        )
+    except ValueError as exc:
+        return _fail("configure_labware", "verifying", str(exc))
+
+    refresh_spatial_fit(updated)
+    printable = evaluate_printable_fit(updated, ctx.lab_profile)
+    mutated = updated != previous
+    ctx.project = updated
+    if mutated:
+        ctx.mutated = True
+    ctx.action_runs.append(run)
+    pending_req = updated.get("tip_rack_request") or {}
+    needs_input = bool(
+        pending_req.get("awaiting_printer") or pending_req.get("awaiting_placement")
+    )
+    return ToolResult(
+        tool="configure_labware",
+        ok=run.get("status") != "rejected",
+        recoverable=run.get("status") == "rejected",
+        stage="inspecting" if needs_input else "designing",
+        mutated=mutated,
+        requires_human_input=needs_input,
+        question=run.get("message") if needs_input else None,
+        summary=run.get("message") or "Tip rack configuration updated.",
+        diagnostics=[c["detail"] for c in printable if not c["fits"]],
+        data={"printable": printable},
+        action_run=run,
+    )
+
+
+def _tool_configure_labware(args: ConfigureLabwareArgs, ctx: ToolContext) -> ToolResult:
+    from app.labware import remove_labware
+
+    previous = ctx.project
+    if args.action == "configure_tube_rack":
+        return _apply_typed_tube_rack(args, ctx)
+
+    if args.action == "remove_tube_rack":
+        try:
+            updated = remove_labware(previous)
+        except ValueError as exc:
+            return _fail("configure_labware", "verifying", str(exc))
+        refresh_spatial_fit(updated)
+        ctx.project = updated
+        ctx.mutated = updated != previous
+        return ToolResult(
+            tool="configure_labware",
+            ok=True,
+            stage="designing",
+            mutated=ctx.mutated,
+            summary="Removed custom tube rack and restored generic rack envelope.",
+        )
+
+    if args.action == "select_microplate":
+        profile = args.plate_profile_id or CORNING_96_ID
+        literal = "Corning 96 well plate"
+        sel = LabwareSelection(profile_id=profile, source=literal)
+        try:
+            updated, run = select_plate(previous, sel, literal)
+        except ValueError as exc:
+            return _fail("configure_labware", "verifying", str(exc))
+        refresh_spatial_fit(updated)
+        printable = evaluate_printable_fit(updated, ctx.lab_profile)
+        mutated = updated != previous
+        ctx.project = updated
+        if mutated:
+            ctx.mutated = True
+        ctx.action_runs.append(run)
+        compat = (updated.get("labware_plate") or {}).get("compatibility") or {}
+        diagnostics = list(compat.get("blocking_issues") or []) + [
+            c["detail"] for c in printable if not c["fits"]
+        ]
+        return ToolResult(
+            tool="configure_labware",
+            ok=run.get("status") not in ("rejected", "failed"),
+            recoverable=True,
+            stage="designing",
+            mutated=mutated,
+            summary=run.get("message") or "Selected Corning 96-well microplate reference.",
+            diagnostics=diagnostics,
+            data={"compatibility": compat, "printable": printable},
+            action_run=run,
+        )
+
+    if args.action == "revert_to_tube_rack":
+        literal = "previous tube rack"
+        sel = LabwareSelection(profile_id="previous_tube_rack", source=literal)
+        try:
+            updated, run = select_plate(previous, sel, literal)
+        except ValueError as exc:
+            return _fail("configure_labware", "verifying", str(exc))
+        refresh_spatial_fit(updated)
+        mutated = updated != previous
+        ctx.project = updated
+        if mutated:
+            ctx.mutated = True
+        ctx.action_runs.append(run)
+        return ToolResult(
+            tool="configure_labware",
+            ok=True,
+            stage="designing",
+            mutated=mutated,
+            summary=run.get("message") or "Restored previous tube rack.",
+            action_run=run,
+        )
+
+    if args.action == "show_tip_rack_options":
+        try:
+            updated, run = show_tip_options(previous)
+        except ValueError as exc:
+            return _fail("configure_labware", "verifying", str(exc))
+        ctx.project = updated
+        ctx.mutated = updated != previous
+        ctx.action_runs.append(run)
+        return ToolResult(
+            tool="configure_labware",
+            ok=True,
+            stage="researching",
+            mutated=ctx.mutated,
+            summary=run.get("message") or "Listed tip-rack options.",
+            data={"tip_rack_options": tip_rack_options(updated)},
+            action_run=run,
+        )
+
+    return _apply_typed_tip_rack(args, ctx)
+
+
+async def _tool_manage_extension(args: ManageExtensionArgs, ctx: ToolContext) -> ToolResult:
+    from app.cold_transfer import apply_cold_transfer, clear_cold_transfer
+    from app.inspection import clear_extension, develop_inspection
+
+    previous = ctx.project
+    if args.extension == "inspection":
+        if args.operation == "remove":
+            if not previous.get("inspection_extension"):
+                return ToolResult(
+                    tool="manage_extension",
+                    ok=True,
+                    stage="designing",
+                    summary="No inspection extension active; project unchanged.",
+                )
+            updated = clear_extension(previous)
+            updated["revision"] += 1
+            updated["status"] = "draft"
+            refresh_spatial_fit(updated)
+            ctx.project = updated
+            ctx.mutated = True
+            return ToolResult(
+                tool="manage_extension",
+                ok=True,
+                stage="designing",
+                mutated=True,
+                summary="Removed the inspection module.",
+            )
+        try:
+            updated, run = await develop_inspection(
+                previous, args.instruction or "Add inspection camera module."
+            )
+        except Exception as exc:
+            return _fail("manage_extension", "repairing", str(exc))
+        ctx.action_runs.append(run)
+        if run.get("status") != "accepted":
+            return _fail(
+                "manage_extension",
+                "repairing",
+                run.get("message") or "Inspection extension failed checks.",
+                action_run=run,
+            )
+        ctx.project = updated
+        ctx.mutated = True
+        return ToolResult(
+            tool="manage_extension",
+            ok=True,
+            stage="designing",
+            mutated=True,
+            summary=run.get("message") or "Added inspection extension.",
+            data={"spatial_fit": updated["design"].get("spatial_fit")},
+            action_run=run,
+        )
+
+    # cold_transfer
+    if args.operation == "remove":
+        if not previous.get("cold_transfer_extension"):
+            return ToolResult(
+                tool="manage_extension",
+                ok=True,
+                stage="designing",
+                summary="No cold-transfer extension active; project unchanged.",
+            )
+        updated = clear_cold_transfer(previous)
+        updated["revision"] += 1
+        updated["status"] = "draft"
+        refresh_spatial_fit(updated)
+        ctx.project = updated
+        ctx.mutated = True
+        return ToolResult(
+            tool="manage_extension",
+            ok=True,
+            stage="designing",
+            mutated=True,
+            summary="Removed cold-transfer refrigerator extension.",
+        )
+
+    try:
+        updated = apply_cold_transfer(previous)
+    except ValueError as exc:
+        return _fail("manage_extension", "verifying", str(exc))
+    ctx.project = updated
+    ctx.mutated = True
+    return ToolResult(
+        tool="manage_extension",
+        ok=True,
+        stage="designing",
+        mutated=True,
+        summary="Added dedicated refrigerated 96-well plate cold-transfer concept.",
+        data={"spatial_fit": updated["design"].get("spatial_fit")},
+    )
+
+
+def _tool_develop_bench_station(args: DevelopBenchStationArgs, ctx: ToolContext) -> ToolResult:
+    apply_fn = api_hook("apply_update", apply_update)
+    previous = ctx.project
+    if (
+        previous.get("workflow", {}).get("kind") == "liquid_preparation"
+        and (previous.get("engineering_design") or previous.get("cold_transfer_extension"))
+    ):
+        return _fail(
+            "develop_bench_station",
+            "verifying",
+            "Start a new project for a bench station so the liquid machine is preserved.",
+            recoverable=False,
+        )
+
+    if len(set(args.operations)) != len(args.operations):
+        return _fail(
+            "develop_bench_station",
+            "verifying",
+            "Select each station operation at most once in the ordered sequence.",
+        )
+
+    candidate = deepcopy(previous)
+    if candidate.get("workflow", {}).get("kind") != "general":
+        candidate = apply_fn(candidate, {"workflow_kind": "general"})
+
+    summary = candidate.get("summary") or {}
+    try:
+        proposal = StationProposal(schema_version="1", operations=list(args.operations))
+        station = compile_station(
+            proposal,
+            workspace_width_mm=summary.get("workspace_width_mm"),
+            workspace_depth_mm=summary.get("workspace_depth_mm"),
+            workspace_height_mm=summary.get("workspace_height_mm"),
+        )
+    except ValueError as exc:
+        return _fail("develop_bench_station", "verifying", str(exc))
+
+    if not candidate["brief"].get("process"):
+        candidate["brief"]["process"] = " -> ".join(m["label"] for m in station["modules"])
+    candidate["bench_station"] = station
+    candidate["revision"] = max(previous["revision"] + 1, candidate["revision"])
+    candidate["status"] = "draft"
+    candidate["workflow"] = describe_workflow(candidate)
+    refresh_spatial_fit(candidate)
+    run = {
+        "kind": "develop_bench_station",
+        "status": "accepted",
+        "message": "The bench station layout, parts list, and operating steps are ready to review.",
+    }
+    ctx.project = candidate
+    ctx.mutated = True
+    ctx.action_runs.append(run)
+    return ToolResult(
+        tool="develop_bench_station",
+        ok=True,
+        stage="designing",
+        mutated=True,
+        summary=(
+            f"Compiled bench station with {station['proposal']['operations']} "
+            f"(footprint {station['footprint_mm'][0]:g} x {station['footprint_mm'][1]:g} mm)."
+        ),
+        data={
+            "operations": station["proposal"]["operations"],
+            "footprint_mm": station["footprint_mm"],
+            "spatial_fit": candidate["design"].get("spatial_fit"),
+        },
+        action_run=run,
+    )
+
+
+async def _tool_develop_custom_equipment(
+    args: DevelopCustomEquipmentArgs, ctx: ToolContext
+) -> ToolResult:
+    from app.concept_agent import attach_concept, develop_concept
+
+    apply_fn = api_hook("apply_update", apply_update)
+    previous = ctx.project
+    if (
+        previous.get("bench_station")
+        or previous.get("engineering_design")
+        or state_for(previous).get("selected_platform_id")
+        or previous.get("workflow", {}).get("kind") == "liquid_preparation"
+    ):
+        return _fail(
+            "develop_custom_equipment",
+            "verifying",
+            "Start a new project for a custom assembly to keep this existing workstation.",
+            recoverable=False,
+        )
+
+    patch: dict[str, Any] = {"workflow_kind": "general"}
+    if not (previous["brief"].get("objective") or previous["brief"].get("process")):
+        patch["brief_objective"] = args.instruction[:1000]
+    candidate = apply_fn(previous, patch)
+    develop_fn = api_hook("develop_concept", develop_concept)
+    try:
+        compiled, reply, calls = await develop_fn(
+            candidate, args.instruction, history=ctx.history
+        )
+    except Exception as exc:
+        if getattr(exc, "failure_kind", None) == "concept_validation":
+            return _fail(
+                "develop_custom_equipment",
+                "repairing",
+                str(exc),
+                diagnostics=[str(exc)],
+            )
+        raise
+
+    if compiled is None:
+        if not previous.get("concept_design") and candidate != previous:
+            ctx.project = candidate
+            ctx.mutated = True
+        return ToolResult(
+            tool="develop_custom_equipment",
+            ok=True,
+            stage="inspecting",
+            mutated=ctx.mutated,
+            requires_human_input=True,
+            question=reply,
+            summary="Need missing mating/process details before generating custom equipment.",
+        )
+
+    updated = attach_concept(previous, candidate, compiled)
+    refresh_spatial_fit(updated)
+    printable = evaluate_printable_fit(updated, ctx.lab_profile)
+    run = {
+        "kind": "develop_concept",
+        "status": "accepted",
+        "message": reply,
+        "model_calls": calls,
+    }
+    ctx.project = updated
+    ctx.mutated = True
+    ctx.action_runs.append(run)
+    return ToolResult(
+        tool="develop_custom_equipment",
+        ok=True,
+        stage="designing",
+        mutated=True,
+        summary=reply,
+        diagnostics=[c["detail"] for c in printable if not c["fits"]],
+        data={
+            "title": compiled["title"],
+            "footprint_mm": compiled["footprint_mm"],
+            "bounds_mm": compiled["bounds_mm"],
+            "spatial_fit": updated["design"].get("spatial_fit"),
+            "printable": printable,
+        },
+        action_run=run,
+    )
+
+
+def _tool_approve_machine(args: ApproveMachineArgs, ctx: ToolContext) -> ToolResult:
+    from app.design_workflow import approve_machine, has_machine
+
+    if not args.explicit_user_confirmation:
+        return _fail(
+            "approve_machine",
+            "verifying",
+            "Explicit user confirmation is required before approving the machine.",
+        )
+    previous = ctx.project
+    if not has_machine(previous):
+        return _fail(
+            "approve_machine",
+            "verifying",
+            "No machine or station design exists yet to approve.",
+        )
+    fit = previous.get("design", {}).get("spatial_fit") or evaluate_spatial_fit(previous)
+    if fit.get("status") == "infeasible":
+        return _fail(
+            "approve_machine",
+            "verifying",
+            f"Cannot approve an infeasible 3D layout: {format_spatial_violations(fit)}",
+        )
+    try:
+        updated = approve_machine(previous)
+    except ValueError as exc:
+        return _fail("approve_machine", "verifying", str(exc))
+    ctx.project = updated
+    ctx.mutated = updated != previous
+    return ToolResult(
+        tool="approve_machine",
+        ok=True,
+        stage="verifying",
+        mutated=ctx.mutated,
+        summary="Machine design approved; software protocol planning is now unlocked.",
+    )
+
+
+def _tool_update_lab_profile(args: UpdateLabProfileArgs, ctx: ToolContext) -> ToolResult:
+    current = load_lab_profile()
+    merged = deepcopy(current)
+    if args.lab_name is not None:
+        merged["lab_name"] = args.lab_name
+    printer = dict(merged.get("printer") or {})
+    if args.printer_name is not None:
+        printer["name"] = args.printer_name
+    if args.printer_build_volume_mm is not None:
+        printer["build_volume_mm"] = [float(v) for v in args.printer_build_volume_mm]
+    merged["printer"] = printer
+
+    bench = dict(merged.get("bench") or {})
+    if args.bench_width_mm is not None:
+        bench["width_mm"] = float(args.bench_width_mm)
+    if args.bench_depth_mm is not None:
+        bench["depth_mm"] = float(args.bench_depth_mm)
+    if args.bench_height_mm is not None:
+        bench["height_mm"] = float(args.bench_height_mm)
+    merged["bench"] = bench
+
+    if args.measuring_tools is not None:
+        merged["measuring_tools"] = list(args.measuring_tools)
+    if args.owned_equipment is not None:
+        merged["owned_equipment"] = list(args.owned_equipment)
+
+    try:
+        validated = LabProfile.model_validate(merged)
+        saved = save_lab_profile(validated)
+    except ValueError as exc:
+        return _fail("update_lab_profile", "verifying", str(exc))
+
+    ctx.lab_profile = saved
+    if args.apply_to_current_project:
+        previous = ctx.project
+        try:
+            updated = apply_profile_to_project(previous, saved)
+            refresh_spatial_fit(updated)
+        except ValueError as exc:
+            return _fail("update_lab_profile", "verifying", str(exc))
+        ctx.project = updated
+        if updated != previous:
+            ctx.mutated = True
+    return ToolResult(
+        tool="update_lab_profile",
+        ok=True,
+        stage="designing",
+        mutated=ctx.mutated,
+        summary=(
+            "Saved laboratory profile and applied bench limits to current project."
+            if args.apply_to_current_project
+            else "Saved laboratory profile."
+        ),
+        data={"lab_profile": lab_profile_prompt_context(saved) or saved},
+    )
+
+
+_DISPATCH: dict[str, tuple[type[BaseModel], Any, bool]] = {
+    "inspect_project_state": (InspectProjectStateArgs, _tool_inspect_project_state, False),
+    "check_spatial_fit": (CheckSpatialFitArgs, _tool_check_spatial_fit, False),
+    "lookup_reviewed_references": (LookupReviewedReferencesArgs, _tool_lookup_references, False),
+    "update_project_brief": (UpdateProjectBriefArgs, _tool_update_project_brief, False),
+    "update_liquid_recipe": (UpdateLiquidRecipeArgs, _tool_update_liquid_recipe, False),
+    "select_platform": (SelectPlatformArgs, _tool_select_platform, False),
+    "develop_workstation_layout": (
+        DevelopWorkstationLayoutArgs,
+        _tool_develop_workstation_layout,
+        True,
+    ),
+    "configure_labware": (ConfigureLabwareArgs, _tool_configure_labware, False),
+    "manage_extension": (ManageExtensionArgs, _tool_manage_extension, True),
+    "develop_bench_station": (DevelopBenchStationArgs, _tool_develop_bench_station, False),
+    "develop_custom_equipment": (DevelopCustomEquipmentArgs, _tool_develop_custom_equipment, True),
+    "approve_machine": (ApproveMachineArgs, _tool_approve_machine, False),
+    "update_lab_profile": (UpdateLabProfileArgs, _tool_update_lab_profile, False),
+}
+
+
+async def execute_tool(name: str, arguments: dict[str, Any], ctx: ToolContext) -> ToolResult:
+    """Validate arguments strictly and execute the requested domain tool atomically."""
+    entry = _DISPATCH.get(name)
+    if entry is None:
+        return _fail(name, "verifying", f"Unknown tool: {name!r}.")
+    model_cls, handler, is_async = entry
+    try:
+        parsed = model_cls.model_validate(arguments or {})
+    except ValidationError as exc:
+        issues = _format_validation_error(exc)
+        return _fail(
+            name,
+            "verifying",
+            "Invalid tool arguments: " + "; ".join(issues),
+            diagnostics=issues,
+        )
+
+    snapshot = deepcopy(ctx.project)
+    try:
+        if is_async:
+            return await handler(parsed, ctx)
+        return handler(parsed, ctx)
+    except Exception as exc:
+        ctx.project = snapshot
+        LOGGER.warning("Tool %s rolled back after error=%s", name, type(exc).__name__)
+        if re.search(r"API key|OpenAI|timeout|reach OpenAI", str(exc), re.I):
+            raise
+        return _fail(name, "repairing", str(exc), diagnostics=[str(exc)])
