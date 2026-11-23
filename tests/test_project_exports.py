@@ -14,7 +14,6 @@ from fastapi.testclient import TestClient
 
 import app.api as api
 import app.project_exports as exports
-import app.simulation_jobs as simulations
 from app.domain import apply_update, configure_project, confirm_project, new_project
 
 
@@ -26,9 +25,6 @@ def client(monkeypatch):
         return {"cad/workstation.step": b"test-only CAD"}
 
     monkeypatch.setattr(exports, "_execute_cad", fixture_cad)
-    monkeypatch.setattr(
-        simulations, "simulation_files_for_project", lambda p: {"simulation/result.json": b"{}"}
-    )
     with TestClient(api.app) as test_client:
         yield test_client
     api._sessions.clear()

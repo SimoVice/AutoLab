@@ -31,11 +31,10 @@ import LabwareRackPanel from './LabwareRackPanel';
 import MicroplatePanel from './MicroplatePanel';
 import TipRackOptions, { tipDimensions } from './TipRackOptions';
 import ProjectFiles from './ProjectFiles';
-import PhysicsPanel from './PhysicsPanel';
 import CameraPanel from './CameraPanel';
 import DesignSources from './DesignSources';
 import './chat-workspace.css';
-import type { ConversationEntry, PhysicsView, PreparationPlan, ProcurementReport, Project, ProjectBrief, ProjectResponse } from './types';
+import type { ConversationEntry, PreparationPlan, ProcurementReport, Project, ProjectBrief, ProjectResponse } from './types';
 
 const WELCOME = 'What would you like to automate in your lab? Describe the task and what makes it difficult.';
 const LIQUID_NOTE = 'Develop a sequence of operations, or use this brief to design the equipment, model its moving parts and prepare assembly instructions.';
@@ -238,8 +237,6 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
     return () => { document.removeEventListener('visibilitychange', pauseWhenHidden); narrow.removeEventListener('change', pauseWhenHidden); };
   }, [mobileView, operationMode]);
   const [resetKey, setResetKey] = useState(0);
-  const [physicsView, setPhysicsView] = useState<PhysicsView | null>(null);
-  const [physicsActive, setPhysicsActive] = useState(false);
   const [agentPhase, setAgentPhase] = useState<AgentPhase | null>(null);
   const [pendingActivityTitle, setPendingActivityTitle] = useState<string | null>(null);
   const [actionRuns, setActionRuns] = useState<ActionRun[]>([]);
@@ -336,7 +333,6 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
     if (seenRevision.current !== key) {
       seenRevision.current = key;
       setPlaying(false);
-      setPhysicsView(null);
       setInspectionTime(0);
       setResetKey((value) => value + 1);
     }
@@ -378,7 +374,6 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
 
   const coldPreviewPlan = project?.cold_transfer_extension ? compileMotionPlan(project, 'cold-transfer') : null;
   const coldPreviewUnavailable = coldPreviewPlan?.status !== 'ready';
-  const showPreview = project?.plan?.status === 'ready' && hasEngineeringDesign;
   const acceptedLayoutId = project?.engineering_design?.provenance.run_id;
   useEffect(() => {
     if (actionRuns.some((run) => run.status === 'ready' && !['show_build_plan', 'show_tip_rack_options'].includes(run.kind)) && details.current) {
@@ -404,7 +399,6 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
     if (!project?.cold_transfer_extension || compileMotionPlan(project, 'cold-transfer').status !== 'ready') return;
     if (softwareOpen || hardwareDestination !== 'design' || mobileView !== 'design') openHardware();
     setStagePanel(null); setSelectedId(null);
-    setPhysicsActive(false); setPhysicsView(null);
     setColdTransferFocusKey(value => value + 1);
     if (operationMode === 'cold-transfer' && currentMotion) {
       handleReset(); setPlaying(true);
@@ -416,7 +410,7 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
   function handlePlay() {
     if (!motionPlan || motionPlan.status !== 'ready' || !currentMotion) return;
     if (operationClock.current >= motionPlan.duration_s) { operationClock.current = 0; setOperationTime(0); }
-    setPhysicsActive(false); setPhysicsView(null); setPlaying(true);
+    setPlaying(true);
   }
   function handlePause() { setPlaying(false); setOperationTime(operationClock.current); if (operationMode === 'inspection') setInspectionTime(operationClock.current); }
   function handleReset() {
@@ -424,8 +418,6 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
     setPlaying(false);
     setResetKey((value) => value + 1);
   }
-  const handlePhysicsView = useCallback((view: PhysicsView | null) => { setPhysicsView(view); }, []);
-  const handlePhysicsActivate = useCallback(() => { setResetKey((value) => value + 1); setInspectionTime(0); setPlaying(false); setPhysicsActive(true); }, []);
   const uiBusy = busy || storageBusy || modelBusy;
   useEffect(() => { if (uiBusy) setPlaying(false); }, [uiBusy]);
   const appendTranscript = useCallback((text: string) => {
@@ -443,7 +435,7 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
     setProject(data.project); setMessages(restoredMessages(data));
     setSavedTitle(data.title);
     setRecovery(null); setSelectedId(null); setInput(''); setPlaying(false);
-    setPhysicsView(null); setPhysicsActive(false); setInspectionTime(0);
+    setInspectionTime(0);
     setProcurementReport(null); setResetKey(value => value + 1);
     setStorageNotice(data.project.rebuild_notice ?? `Opened ${data.title}.`);
     field.current?.focus({ preventScroll: true });
@@ -496,8 +488,6 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
       setSelectedId(null);
       setInput('');
       setPlaying(false);
-      setPhysicsView(null);
-      setPhysicsActive(false);
       setStorageNotice(data.project.rebuild_notice ?? 'Project reopened. Geometry was rebuilt; previous runs are ready to regenerate.');
       field.current?.focus({ preventScroll: true });
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'The project could not be opened.'); }
@@ -526,7 +516,7 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
       setSavedTitle(''); setProcurementReport(null);
       setMessages([{ id: Date.now(), role: 'assistant', text: WELCOME }]);
       setSelectedId(null); setInput(''); setPlaying(false);
-      setPhysicsView(null); setPhysicsActive(false); setInspectionTime(0);
+      setInspectionTime(0);
       setResetKey((value) => value + 1);
     } catch (reason) {
       setError(`New project could not be created. Your workspace and draft are kept. Try New project again. ${reason instanceof Error ? reason.message : ''}`);
@@ -945,7 +935,7 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
                 </>}
                 components={project?.design.components ?? []} selectedPart={part} onSelect={setSelectedId}>
                 <div aria-busy={agentPhase === 'pending' || agentPhase === 'updating'} className={`viewer-canvas${isConfirmed ? ' viewer-canvas-compact' : ''}`}>
-                  {project ? <Scene coldTransferFocusKey={coldTransferFocusKey} captureRef={sceneCapture} project={project} selectedId={selectedId} onSelect={setSelectedId} inspectionTime={inspectionTime} inspectionPlayback={{ timeRef: operationClock, playing: !uiBusy && Boolean(currentMotion) && operationMode === 'inspection' && playing }} operation={{ playing: !uiBusy && operationMode !== 'inspection' && currentMotion && !physicsView ? playing : false, steps: plan?.steps ?? [], onComplete: handlePreviewComplete, resetKey, timeline: !physicsView ? motionPlan ?? undefined : undefined, time_s: currentMotion ? operationTime : 0, timeRef: operationClock }} physics={physicsView} /> : <div className="scene-fallback">{initializing ? 'Preparing your workspace…' : 'Connect the local server to view your design.'}</div>}
+                  {project ? <Scene coldTransferFocusKey={coldTransferFocusKey} captureRef={sceneCapture} project={project} selectedId={selectedId} onSelect={setSelectedId} inspectionTime={inspectionTime} inspectionPlayback={{ timeRef: operationClock, playing: !uiBusy && Boolean(currentMotion) && operationMode === 'inspection' && playing }} operation={{ playing: !uiBusy && operationMode !== 'inspection' && currentMotion ? playing : false, steps: plan?.steps ?? [], onComplete: handlePreviewComplete, resetKey, timeline: motionPlan ?? undefined, time_s: currentMotion ? operationTime : 0, timeRef: operationClock }} /> : <div className="scene-fallback">{initializing ? 'Preparing your workspace…' : 'Connect the local server to view your design.'}</div>}
                   {agentPhase && <AgentActivity phase={agentPhase} pendingTitle={pendingActivityTitle} scene />}
                   <div className="scene-hint"><Icon name="rotate" size={15} /> Drag to rotate <span>·</span> Scroll to zoom</div>
                   <div className="scene-origin"><span className="origin-x">X</span><span className="origin-y">Y</span><span className="origin-z">Z</span></div>
@@ -954,7 +944,7 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
                   <div className="footprint"><span>Workspace footprint</span><strong>{dimensions ? `${formatDimension(dimensions.width_mm)} × ${formatDimension(dimensions.depth_mm)}` : '—'} <small>mm</small></strong></div>
                   <div className="viewer-status"><span className={`status-indicator ${status === 'infeasible' ? 'warning' : ''}`} />{status === 'infeasible' ? 'Requested width cannot fit this concept' : status === 'fits' ? 'Within requested width' : 'No width constraint yet'}</div>
                 </div>
-              {motionPlan && <details id="stage-motion-panel" className="stage-motion-disclosure" open={stagePanel === 'motion'}><summary>Motion preview</summary><OperatingPreview machineApproved={Boolean(project?.design_workflow?.machine_approved)} plan={motionPlan} playing={playing && Boolean(currentMotion)} time={currentMotion ? operationTime : 0} speed={operationSpeed} disabled={uiBusy} hasInspection={Boolean(project?.inspection_extension)} hasColdTransfer={Boolean(project?.cold_transfer_extension)} onMode={(mode) => { handleReset(); setOperationMode(mode); }} onPlay={handlePlay} onPause={handlePause} onReset={handleReset} onSpeed={(speed) => { if ([0.5, 1, 2, 4].includes(speed)) setOperationSpeed(speed); }} onSeek={(time) => { if (!Number.isFinite(time) || !motionPlan) return; time = Math.max(0, Math.min(motionPlan.duration_s, time)); setPlaying(false); operationClock.current = time; setOperationTime(time); setPhysicsView(null); setPhysicsActive(false); if (operationMode === 'inspection') setInspectionTime(time); }} /></details>}
+              {motionPlan && <details id="stage-motion-panel" className="stage-motion-disclosure" open={stagePanel === 'motion'}><summary>Motion preview</summary><OperatingPreview machineApproved={Boolean(project?.design_workflow?.machine_approved)} plan={motionPlan} playing={playing && Boolean(currentMotion)} time={currentMotion ? operationTime : 0} speed={operationSpeed} disabled={uiBusy} hasInspection={Boolean(project?.inspection_extension)} hasColdTransfer={Boolean(project?.cold_transfer_extension)} onMode={(mode) => { handleReset(); setOperationMode(mode); }} onPlay={handlePlay} onPause={handlePause} onReset={handleReset} onSpeed={(speed) => { if ([0.5, 1, 2, 4].includes(speed)) setOperationSpeed(speed); }} onSeek={(time) => { if (!Number.isFinite(time) || !motionPlan) return; time = Math.max(0, Math.min(motionPlan.duration_s, time)); setPlaying(false); operationClock.current = time; setOperationTime(time); if (operationMode === 'inspection') setInspectionTime(time); }} /></details>}
               <details id="stage-specifications-panel" className="engineering-inspector" ref={designInspector} open={stagePanel === 'specifications'}><summary>Specifications &amp; files</summary><div className="engineering-inspector-scroll">
               <p className="selected-component-note">{hasFoundation ? 'Approximate source CAD preview with custom layout.' : hasPlatform ? 'Schematic setup; not manufacturer CAD.' : 'Custom concept preview.'} Physical fit unverified.</p>
               <div className="footprint"><span>Workspace footprint</span><strong>{dimensions ? `${formatDimension(dimensions.width_mm)} × ${formatDimension(dimensions.depth_mm)}` : '—'} <small>mm</small></strong></div>
@@ -1005,9 +995,6 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
                 )}
                 {project && hasEngineeringDesign && <IllustrationPanel key={`${project.id}:${project.revision}`} projectId={project.id} revision={project.revision} capability={imageCapability} disabled={uiBusy} capture={captureIllustration} />}
                 {project && isConfirmed && <div ref={filesSection} tabIndex={-1} aria-label="Project files" className="project-files-section"><ProjectFiles project={project} onSelect={setSelectedId} /></div>}
-                {project && !hasFoundation && !hasPlatform && showPreview && (
-                  <PhysicsPanel project={project} active={physicsActive} onView={handlePhysicsView} onActivate={handlePhysicsActivate} />
-                )}
               </details>
               </div></details>
               </PresentationStage>

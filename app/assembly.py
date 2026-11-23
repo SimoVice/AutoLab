@@ -471,7 +471,7 @@ The diagrams show component envelopes, not source-CAD renders or physical assemb
 The custom sample insert follows the target count without changing its outside dimensions.
 Tube and tip consumables remain separate assumed proxies. The numbered plan below is a
 simplified position guide; mechanical fits, materials and fabrication remain unverified.</p>
-<p>Physics uses conservative component envelopes. Fine openings and visual details do not
+<p>No physical simulation adapter is active. Fine openings and visual details do not
 establish insertion clearance, material mass or collision-safe hardware.</p></div>
 <div class="card"><h2>Components (mm, y up)</h2>
 <div class="table-scroll" role="region" aria-label="Component dimensions" tabindex="0">
@@ -515,7 +515,7 @@ STEPS
             "and the same bed pose and custom parts.",
         )
         page = page.replace(
-            "Physics uses conservative component envelopes.",
+            "No physical simulation adapter is active.",
             "Jubilee physical simulation is not implemented.",
         )
     if project.get("design", {}).get("platform"):
@@ -531,7 +531,7 @@ STEPS
             "Rack proxies mark the chosen software slots; exact labware fit is unverified.",
         )
         page = page.replace(
-            "Physics uses conservative component envelopes.",
+            "No physical simulation adapter is active.",
             "OT-2 physical simulation is not implemented.",
         )
     if project.get("labware_rack"):
@@ -673,15 +673,11 @@ def build_readme(project: dict) -> bytes:
         "- To regenerate CAD, use the AutoLab README's locked Python .venv\n"
         "  (build123d==0.13.0) and run `python cad/deck-model.py`. Outputs are written "
         "beside it.\n\n"
-        "## Physical motion model\n\n"
-        "- simulation/result.json contains the nominal MuJoCo result for this revision.\n"
-        "  A blocked/failed result does not establish a successful operating cycle.\n"
-        "- Read simulation/README.md and run `python simulation/run.py` with the locked\n"
-        "  .venv (mujoco==3.17.0) to rerun the packaged inputs. No hardware is operated.\n"
-        "- Detailed concept shapes are checked inside their declared envelopes; contact tests\n"
-        "  still use envelopes, without resolving fine bores, vents or cutouts.\n"
-        "- The model assumes rigid guides, masses, force limits and contact proxies;\n"
-        "  station actions are logical holds above containers, without liquid simulation.\n\n"
+        "## Physical simulation\n\n"
+        "- simulation/result.json records not_run: no physical simulation adapter is "
+        "implemented for this project revision.\n"
+        "- Visual previews in the app do not establish insertion clearance, material mass, "
+        "or collision-safe hardware.\n\n"
         "## Logical preview\n\n"
         "- Run `python automation/preview.py` with a standard Python 3 interpreter (no "
         "dependencies).\n"
@@ -727,7 +723,8 @@ def build_readme(project: dict) -> bytes:
             "inspection-module.json preserves its accepted proposal, source revision, "
             "model record, checks, attachment and four kinematic poses; "
             "inspection-poses.csv lists those poses. All added hardware remains unpriced. "
-            "The MuJoCo result covers liquid_preparation_only and excludes arm/camera dynamics, "
+            "Physical simulation is not active for this revision; any liquid_preparation_only "
+            "preview excludes arm/camera dynamics, "
             "collisions and coverage. No physical mounting, calibration or control is claimed.\n"
         )
     basis = project.get("design_basis")
@@ -741,15 +738,14 @@ def build_readme(project: dict) -> bytes:
             "Jubilee are documented alternative foundations, not this machine's imported CAD.\n"
         )
     if project.get("design", {}).get("foundation"):
-        start = text.index("## Physical motion model")
+        start = text.index("## Physical simulation")
         end = text.index("\n## ", start + 4)
         text = (
             text[:start]
             + (
-                "## Physical motion model\n\n"
+                "## Physical simulation\n\n"
                 "simulation/result.json records not_run: the imported Jubilee platform has no "
-                "physical simulation adapter. The legacy XYZ result cannot validate this "
-                "assembly.\n"
+                "physical simulation adapter.\n"
             )
             + text[end:]
         )
@@ -848,7 +844,7 @@ def build_extension_plan(project: dict) -> bytes:
                            "inspection_extension":project.get("inspection_extension"),
                            "cooling_transfer_mode":cooling["transfer_mode"],
                            "on_deck_cold_bay_transfer_mode":"manual",
-                           "physics_scope":"not_run_imported_foundation"},
+                           "simulation_scope":"not_run"},
                           indent=2, sort_keys=True).encode("utf-8")
     if project.get("inspection_extension"):
         return json.dumps(
@@ -858,11 +854,7 @@ def build_extension_plan(project: dict) -> bytes:
                 "status": "digital_concept",
                 "installed": False,
                 "inspection_extension": project["inspection_extension"],
-                "physics_scope": (
-                    "not_run_imported_foundation"
-                    if project["design"].get("foundation")
-                    else "liquid_preparation_only"
-                ),
+                "simulation_scope": "not_run",
                 "cooling_transfer_mode": cooling["transfer_mode"],
             },
             indent=2,
@@ -912,9 +904,6 @@ def build_extension_plan(project: dict) -> bytes:
 
 
 def build_extensions_md(project: dict) -> bytes:
-    from app.commercial_design import PLATFORM_ID
-    from app.foundation_design import is_source_based
-
     cooling = _cooling(project)
     if project.get("cold_transfer_extension"):
         module = project["cold_transfer_extension"]
@@ -936,13 +925,8 @@ def build_extensions_md(project: dict) -> bytes:
     extension = project.get("inspection_extension")
     if extension:
         simulation_scope = (
-            "This platform has no simulation adapter. Neither the workstation nor the "
-            "inspection extension has a MuJoCo validation result.\n\n"
-            if is_source_based(project)
-            or project.get("design", {}).get("platform", {}).get("id") == PLATFORM_ID
-            else "The legacy XYZ MuJoCo adapter covers nominal liquid preparation only; "
-            "the inspection extension is excluded. "
-            "This does not establish physical performance.\n\n"
+            "No physical simulation adapter is implemented. Neither the workstation nor the "
+            "inspection extension has a physical simulation result.\n\n"
         )
         text = (
             "# Inspection extension — digital concept\n\n"
@@ -1095,6 +1079,6 @@ def build_document_files(project: dict, procurement: dict | None = None) -> dict
             b"# Integration scope\n\nCustom inspection/cooling "
             b"integration on the assembled platform is not implemented. Discuss requirements "
             b"in chat; no compatible mount or hardware control is claimed. "
-            b"This platform has no simulation adapter; no MuJoCo validation result is claimed.\n"
+            b"This platform has no physical simulation adapter.\n"
         )
     return files

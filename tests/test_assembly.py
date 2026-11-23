@@ -34,17 +34,17 @@ def test_extension_document_reports_only_the_route_simulation_scope(route):
     project["inspection_extension"] = {"limitations": ["Physical validation remains open."]}
     document = build_extensions_md(project).decode()
     if route == "legacy":
-        assert "legacy XYZ MuJoCo adapter covers nominal liquid preparation only" in document
-        assert "inspection extension is excluded" in document
+        assert "No physical simulation adapter is implemented" in document
+        assert "inspection extension" in document
     else:
-        assert "This platform has no simulation adapter" in document
+        assert "No physical simulation adapter is implemented" in document
         assert "Neither the workstation nor the inspection extension" in document
         assert "covers nominal liquid preparation" not in document
     if route == "opentrons-ot2":
         project.pop("inspection_extension")
         exported = build_document_files(project)["extensions.md"].decode()
-        assert "This platform has no simulation adapter" in exported
-        assert "no MuJoCo validation result is claimed" in exported
+        assert "This platform has no physical simulation adapter" in exported
+        assert "MuJoCo" not in exported
 
 
 def _confirmed(cooling: bool = False) -> dict:

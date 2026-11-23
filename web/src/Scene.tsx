@@ -6,7 +6,7 @@ import type { ErrorInfo, ReactNode, RefObject } from 'react';
 import { DoubleSide, PMREMGenerator, Spherical, Vector3 } from 'three';
 import type { Group, Mesh, OrthographicCamera } from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import type { Component, InspectionExtension, LabwarePlate, LabwareRack, PhysicsFrame, PhysicsView, Project } from './types';
+import type { Component, InspectionExtension, LabwarePlate, LabwareRack, Project } from './types';
 import GeometryPart from './GeometryPart';
 import ColdTransferScene from './ColdTransferScene';
 import { sampleColdTransfer } from './coldTransferMotion';
@@ -549,65 +549,6 @@ function ColdInspection({ extension, parkFrame, operation, plan, initialTime, ce
     playback={playback} time={0} coldClock={{ plan, operation }} />;
 }
 
-function samplePhysicsFrames(frames: PhysicsFrame[], time: number): PhysicsFrame | null {
-  if (!frames.length) return null;
-  if (time <= frames[0].time_s) return frames[0];
-  const last = frames[frames.length - 1];
-  if (time >= last.time_s) return last;
-  // Linear scan is fine for <=6500 frames; binary search keeps it lightweight.
-  let lo = 0;
-  let hi = frames.length - 1;
-  while (hi - lo > 1) {
-    const mid = (lo + hi) >> 1;
-    if (frames[mid].time_s <= time) lo = mid;
-    else hi = mid;
-  }
-  const a = frames[lo];
-  const b = frames[hi];
-  const span = b.time_s - a.time_s;
-  const t = span <= 0 ? 0 : (time - a.time_s) / span;
-  return {
-    ...b,
-    carriage_mm: lerp3(a.carriage_mm, b.carriage_mm, t),
-    pipette_mm: lerp3(a.pipette_mm, b.pipette_mm, t),
-    tip_mm: lerp3(a.tip_mm, b.tip_mm, t),
-    target_mm: lerp3(a.target_mm, b.target_mm, t),
-    time_s: time,
-  };
-}
-
-function PhysicalHead({ carriage, pipette, frame, center, selectedId, onSelect }: {
-  carriage: Component;
-  pipette: Component;
-  frame: PhysicsFrame;
-  center: [number, number, number];
-  selectedId: string | null;
-  onSelect: (id: string) => void;
-}) {
-  const toCentered = (mm: [number, number, number]): Vec3 => [
-    (mm[0] - center[0]) / SCALE,
-    (mm[1] - center[1]) / SCALE,
-    (mm[2] - center[2]) / SCALE,
-  ];
-  const carriagePos = toCentered(frame.carriage_mm);
-  const pipettePos = toCentered(frame.pipette_mm);
-  const tipPos = toCentered(frame.tip_mm);
-  // tip_mm is the lowest point reported by the engine, not the mesh centre.
-  const tipHeight = 0.19;
-  const tipOffset: Vec3 = [tipPos[0] - carriagePos[0], tipPos[1] + tipHeight / 2 - carriagePos[1], tipPos[2] - carriagePos[2]];
-  const pipetteOffset: Vec3 = [pipettePos[0] - carriagePos[0], pipettePos[1] - carriagePos[1], pipettePos[2] - carriagePos[2]];
-  return (
-    <group position={carriagePos}>
-      <GeometryPart part={carriage} position={[0, 0, 0]} selected={selectedId === carriage.id} onSelect={onSelect} />
-      <GeometryPart part={pipette} position={pipetteOffset} selected={selectedId === pipette.id} onSelect={onSelect} />
-      <mesh position={tipOffset} onClick={(event) => { event.stopPropagation(); onSelect(pipette.id); }}>
-        <cylinderGeometry args={[0.035, 0.035, tipHeight, 16]} />
-        <meshStandardMaterial color="#f7fbfb" metalness={0.05} roughness={0.4} />
-      </mesh>
-    </group>
-  );
-}
-
 function RackDetails({ components, center, stepCount, selectedId, onSelect, labwareRack, labwarePlate, showPlateLabels, showOpenTubes, hidePlateDetails }: {
   components: Component[];
   center: [number, number, number];
@@ -773,12 +714,11 @@ function TipInventory({ rack, center, operation, active, onSelect }: {
   </mesh>)}</group>;
 }
 
-export default function Scene({ project, selectedId, onSelect, operation, physics, inspectionTime = 0, inspectionPlayback, captureRef, coldTransferFocusKey = 0 }: {
+export default function Scene({ project, selectedId, onSelect, operation, inspectionTime = 0, inspectionPlayback, captureRef, coldTransferFocusKey = 0 }: {
   project: Project;
   selectedId: string | null;
   onSelect: (id: string) => void;
   operation?: OperationSpec;
-  physics?: PhysicsView | null;
   inspectionTime?: number;
   inspectionPlayback?: { timeRef: { current: number }; playing: boolean };
   captureRef?: RefObject<(() => Promise<string>) | null>;
@@ -794,11 +734,10 @@ export default function Scene({ project, selectedId, onSelect, operation, physic
   }, []);
   const extension = project.inspection_extension;
   const cold = project.cold_transfer_extension;
-  const physicsActive = Boolean(physics && physics.result.project_id === project.id && physics.result.revision === project.revision && physics.result.frames.length > 0 && designComponents.some((part) => part.id === 'carriage') && designComponents.some((part) => part.id === 'pipette'));
   const coldSample = designComponents.find((part) => part.id === cold?.payload_component_id);
   const coldTimeline = operation?.timeline;
   const inspectionPark = (coldTimeline as ColdTransferPlan | undefined)?.inspection_park_frame;
-  const showColdHardware = Boolean(!physicsActive && cold && coldSample && project.labware_plate &&
+  const showColdHardware = Boolean(cold && coldSample && project.labware_plate &&
     ['cold-transfer-lid', 'cold-transfer-carriage', 'cold-transfer-gripper', 'cold-transfer-shaft'].every((id) => cold.components.some((part) => part.id === id)));
   const showCold = Boolean(showColdHardware && cold && coldSample && project.labware_plate && coldTimeline &&
     coldTimeline.status === 'ready' && coldTimeline.mode === 'cold-transfer' &&
@@ -808,12 +747,12 @@ export default function Scene({ project, selectedId, onSelect, operation, physic
   const coldIds = useMemo(() => new Set(cold?.component_ids ?? []), [cold]);
   const components = useMemo(() => {
     if (!extension) return designComponents;
-    const displayed = sampleInspection(extension, physicsActive ? 0 : inspectionTime);
+    const displayed = sampleInspection(extension, inspectionTime);
     const replacements = new Map(displayed.map((part) => [part.id, part]));
     const existing = new Set(designComponents.map((part) => part.id));
     return [...designComponents.map((part) => replacements.get(part.id) ?? part), ...displayed.filter((part) => !existing.has(part.id))];
-  }, [designComponents, extension, inspectionTime, physicsActive]);
-  const smoothInspection = Boolean(extension && inspectionPlayback && !physicsActive);
+  }, [designComponents, extension, inspectionTime]);
+  const smoothInspection = Boolean(extension && inspectionPlayback);
   const [viewKey, setViewKey] = useState(0);
   const [isolation, setIsolation] = useState<Isolation | null>(null);
   const [coldFocus, setColdFocus] = useState<FocusRequest | null>(null);
@@ -915,18 +854,14 @@ export default function Scene({ project, selectedId, onSelect, operation, physic
   };
   const carriagePart = byId.get('carriage');
   const pipettePart = byId.get('pipette');
-  const physicsFrame = useMemo(
-    () => (physicsActive && physics ? samplePhysicsFrames(physics.result.frames, physics.time_s) : null),
-    [physicsActive, physics],
-  );
   const timelineFrame = useMemo(() => {
     const timeline = operation?.timeline;
     if (!timeline || timeline.status !== 'ready' || timeline.mode !== 'preparation' ||
         timeline.project_id !== project.id || timeline.revision !== project.revision || !timeline.keyframes.length) return null;
     return sampleMotionPlan(timeline, operation.time_s ?? 0);
   }, [operation?.timeline, operation?.time_s, project.id, project.revision]);
-  const showTimeline = Boolean(!physicsActive && timelineFrame && carriagePart && pipettePart);
-  const showAnimation = Boolean(!operation?.timeline && !project.labware_rack && !project.labware_plate && !physicsActive && operation && carriagePart && pipettePart);
+  const showTimeline = Boolean(timelineFrame && carriagePart && pipettePart);
+  const showAnimation = Boolean(!operation?.timeline && !project.labware_rack && !project.labware_plate && operation && carriagePart && pipettePart);
 
   const normalizedStepCount = useMemo(() => {
     if (!operation) return 0;
@@ -997,9 +932,9 @@ export default function Scene({ project, selectedId, onSelect, operation, physic
   }, [project.labware_rack, project.labware_plate, byId, bounds.center, carriagePart, pipettePart, normalizedStepCount, operation?.steps]);
 
   const staticParts = useMemo(() => {
-    if (!showAnimation && !showTimeline && !showCold && !physicsActive) return components;
+    if (!showAnimation && !showTimeline && !showCold) return components;
     return components.filter((part) => part.id !== 'carriage' && part.id !== 'pipette');
-  }, [components, showAnimation, showTimeline, showCold, physicsActive]);
+  }, [components, showAnimation, showTimeline, showCold]);
   const bedPartForDisplay = (part: Component): Component => {
     if (!showCold || part.id !== coldSample?.id || !part.geometry) return part;
     return { ...part, geometry: { ...part.geometry, primitives: part.geometry.primitives.filter((primitive) => !primitive.id.startsWith('reference-plate-')) } };
@@ -1014,7 +949,7 @@ export default function Scene({ project, selectedId, onSelect, operation, physic
         dpr={[1, 1.5]}
         shadows="percentage"
         frameloop="demand"
-        aria-label={physicsActive ? 'MuJoCo state replay in the interactive workstation view.' : 'Interactive schematic 3D workstation model. Drag to rotate and scroll to zoom.'}
+        aria-label="Interactive schematic 3D workstation model. Drag to rotate and scroll to zoom."
       >
         <color attach="background" args={['#edf2ef']} />
         <StudioEnvironment />
@@ -1056,22 +991,6 @@ export default function Scene({ project, selectedId, onSelect, operation, physic
           center={bounds.center} operation={showCold ? operation : undefined} selectedId={selectedId} onSelect={onSelect} visibleIds={isolated?.ids ?? null} renderPayload={showCold} />}
         {showCold && coldTimeline && operation && carriagePart && pipettePart && <ColdParkedHead carriage={carriagePart} pipette={pipettePart}
           plan={coldTimeline} operation={operation} center={bounds.center} selectedId={selectedId} onSelect={onSelect} visibleIds={isolated?.ids ?? null} />}
-        {!isolated && physicsActive && physics && physics.result.obstacles.map((obstacle) => (
-          <mesh
-            key={obstacle.id}
-            position={[
-              (obstacle.position_mm[0] - bounds.center[0]) / SCALE,
-              (obstacle.position_mm[1] - bounds.center[1]) / SCALE,
-              (obstacle.position_mm[2] - bounds.center[2]) / SCALE,
-            ]}
-          >
-            <boxGeometry args={[obstacle.size_mm[0] / SCALE, obstacle.size_mm[1] / SCALE, obstacle.size_mm[2] / SCALE]} />
-            <meshStandardMaterial color="#e08a2e" transparent opacity={0.75} roughness={0.5} metalness={0.05} />
-          </mesh>
-        ))}
-        {!isolated && physicsActive && carriagePart && pipettePart && physicsFrame && (
-          <PhysicalHead carriage={carriagePart} pipette={pipettePart} frame={physicsFrame} center={bounds.center} selectedId={selectedId} onSelect={onSelect} />
-        )}
         {showTimeline && carriagePart && pipettePart && timelineFrame && <TimelineHead
           carriage={carriagePart} pipette={pipettePart} frame={timelineFrame} center={bounds.center}
           plan={operation!.timeline!} timeRef={operation!.timeRef} time={operation!.time_s ?? 0} playing={operation!.playing} bedMotion={Boolean(project.design.foundation)}

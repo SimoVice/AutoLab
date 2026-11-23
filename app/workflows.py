@@ -24,7 +24,7 @@ REGISTRY = {
     "liquid_preparation": {
         "label": "Liquid preparation",
         "status": "supported_concept",
-        "capabilities": ["discovery", "brief planning", "3d", "calculation", "physics", "build"],
+        "capabilities": ["discovery", "brief planning", "3d", "calculation", "build"],
     },
 }
 
