@@ -20,6 +20,7 @@ def local_configuration(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "synthetic-test-key")
     monkeypatch.setenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
     monkeypatch.setenv("OPENAI_MODEL", DEFAULT_MODEL)
+    monkeypatch.setenv("AUTOLAB_AGENT_MODE", "legacy")
     api._sessions.clear()
     jobs._jobs.clear()
     jobs._cache.clear()

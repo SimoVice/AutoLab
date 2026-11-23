@@ -12,6 +12,7 @@ import os
 from fastapi import FastAPI, HTTPException
 
 from app import project_library
+from app.agent_loop import run_agent_turn
 from app.chat_actions import execute_chat_actions
 from app.chat_activity import install_activity
 from app.design_agent import develop_design
@@ -77,6 +78,7 @@ __all__ = [
     "new_project",
     "project_library",
     "refresh_procurement",
+    "run_agent_turn",
     "send_message",
     "session_for",
     "start_export",

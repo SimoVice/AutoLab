@@ -4,6 +4,7 @@ import re
 import time
 from contextlib import contextmanager
 from contextvars import ContextVar
+from copy import deepcopy
 
 from fastapi import HTTPException, Request
 
@@ -11,11 +12,50 @@ _current = ContextVar("chat_activity", default=None)
 _activities: dict[tuple[str, str], dict] = {}
 _valid_id = re.compile(r"^[a-zA-Z0-9_-]{16,80}$")
 
+MAX_ACTIVITIES = 512
+MAX_TRACE_ITEMS = 16
+RETENTION_SECONDS = 60
 
-def report_activity(stage: str) -> None:
+
+def report_activity(
+    stage: str,
+    *,
+    detail: str | None = None,
+    tool: str | None = None,
+    step: int | None = None,
+    max_steps: int | None = None,
+) -> None:
+    """Update the active request stage and optional step/tool telemetry."""
     key = _current.get()
-    if key in _activities:
-        _activities[key]["stage"] = stage
+    if key not in _activities:
+        return
+    entry = _activities[key]
+    entry["stage"] = stage
+    entry["updated"] = time.monotonic()
+
+    if detail is None and tool is None and step is None and max_steps is None:
+        return
+
+    if detail is not None:
+        entry["detail"] = detail[:240]
+    if tool is not None:
+        entry["tool"] = tool[:64]
+    if step is not None:
+        entry["step"] = step
+    if max_steps is not None:
+        entry["max_steps"] = max_steps
+
+    trace = entry.setdefault("trace", [])
+    trace_item = {"stage": stage}
+    if tool is not None:
+        trace_item["tool"] = tool[:64]
+    if detail is not None:
+        trace_item["detail"] = detail[:160]
+    if step is not None:
+        trace_item["step"] = step
+    trace.append(trace_item)
+    if len(trace) > MAX_TRACE_ITEMS:
+        del trace[:-MAX_TRACE_ITEMS]
 
 
 @contextmanager
@@ -28,10 +68,6 @@ def activity_scope(stage: str):
     finally:
         if previous is not None:
             report_activity(previous)
-
-
-MAX_ACTIVITIES = 512
-RETENTION_SECONDS = 60
 
 
 def _prune():
@@ -78,4 +114,10 @@ def install_activity(app) -> None:
         entry = _activities.get((project_id, request_id))
         if entry is None:
             raise HTTPException(404, "No active request with this identifier.")
-        return {"stage": entry["stage"], "active": entry["active"]}
+        payload = {"stage": entry["stage"], "active": entry["active"]}
+        for optional_key in ("detail", "tool", "step", "max_steps"):
+            if entry.get(optional_key) is not None:
+                payload[optional_key] = entry[optional_key]
+        if entry.get("trace"):
+            payload["trace"] = deepcopy(entry["trace"])
+        return payload

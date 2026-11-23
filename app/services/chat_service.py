@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from copy import deepcopy
 from typing import Annotated
 
@@ -9,6 +10,7 @@ from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
+from app.agent_loop import run_agent_turn
 from app.chat_actions import execute_chat_actions, extension_only_patch
 from app.chat_activity import report_activity
 from app.conversation_history import DISPLAY_HISTORY_LIMIT, MODEL_HISTORY_LIMIT
@@ -270,6 +272,82 @@ async def handle_chat_message(project_id: str, request: MessageRequest) -> dict 
             offline_cold_transfer_intent,
             semantic_cold_transfer_intent,
         )
+
+        use_autonomous = (
+            os.getenv("AUTOLAB_AGENT_MODE", "autonomous").strip().lower() != "legacy"
+            and generate_turn_fn is generate_turn
+        )
+        if use_autonomous:
+            run_agent_fn = api_hook("run_agent_turn", run_agent_turn)
+            try:
+                agent_result = await run_agent_fn(
+                    deepcopy(current),
+                    request.message,
+                    list(session.history[-MODEL_HISTORY_LIMIT:]),
+                    procurement_report=session.procurement_report,
+                    cost_estimate=session.cost_estimate,
+                )
+            except ModelClientError as exc:
+                cold_intent = (
+                    offline_cold_transfer_intent(request.message)
+                    if exc.failure_kind == "provider_unavailable"
+                    else None
+                )
+                if cold_intent is not None:
+                    return _handle_cold_transfer_turn(
+                        session, current, cold_intent, request.message, {}
+                    )
+                return JSONResponse(
+                    status_code=502,
+                    content={
+                        "detail": str(exc),
+                        "failure_kind": getattr(exc, "failure_kind", "model_request"),
+                        "usage": {"model": session.model, **getattr(exc, "usage", {})},
+                    },
+                )
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=422, detail=f"{exc} The project was not changed."
+                ) from None
+
+            updated = agent_result["project"]
+            updated["workflow"] = describe_workflow_fn(updated)
+            from app.platform_profiles import engineering_guidance
+
+            action_runs = list(agent_result.get("action_runs", []))
+            if not updated.get("bench_station") and (
+                state_for(updated)["selected_platform_id"]
+                or any(run.get("kind") == "show_build_plan" for run in action_runs)
+            ):
+                updated["engineering_guidance"] = engineering_guidance(updated)
+            accept_fn(session, updated)
+            display_reply = agent_result["assistant_message"]
+            recommendations = list(agent_result.get("recommendations", []))
+            history_reply = display_reply
+            if recommendations:
+                history_reply += "\n\nReviewed references:\n" + "\n".join(
+                    f"{r['reference']['title']} [{r['reference']['id']}]: {r['reason']}"
+                    for r in recommendations
+                )
+            session.history.extend(
+                [
+                    {"role": "user", "content": request.message},
+                    {"role": "assistant", "content": history_reply},
+                ]
+            )
+            session.history = session.history[-DISPLAY_HISTORY_LIMIT:]
+            return {
+                "project": deepcopy(updated),
+                "assistant_message": display_reply,
+                "usage": agent_result.get("usage", {}),
+                "recommendations": recommendations,
+                "action_runs": action_runs,
+                "tool_trace": agent_result.get("tool_trace", []),
+                "repairs_used": agent_result.get("repairs_used", 0),
+                "assistant_message_origin": agent_result.get(
+                    "assistant_message_origin", "agent_loop"
+                ),
+            }
 
         try:
             turn = None
