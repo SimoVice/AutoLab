@@ -1,4 +1,4 @@
-"""Complete, purchasable BOM engine across all AutoLab hardware workflows."""
+"""Compile project requirements, identifiable purchase lines, and fabrication estimates."""
 
 from __future__ import annotations
 
@@ -43,12 +43,12 @@ def load_purchasable_catalog() -> dict[str, Any]:
 
 
 def _resolve_currency_and_fx(
-    currency: str, fx_rates: dict[str, Any] | None
+    currency: str, fx_rates: dict[str, Any] | None, *, requires_rates: bool
 ) -> tuple[str, dict[str, Any] | None]:
     curr = str(currency or "USD").strip().upper()
     if curr not in ("USD", "CHF", "EUR"):
         raise ValueError(f"Unsupported currency {currency!r}. Choose USD, CHF, or EUR.")
-    if curr == "USD":
+    if curr == "USD" or not requires_rates:
         return curr, fx_rates
     eff_fx = fx_rates or cached_fx_rates("USD")
     if eff_fx is None:
@@ -76,11 +76,10 @@ def _catalog_line(
     if entry is None:
         raise ValueError(f"Unknown purchasable catalog item {item_id!r}.")
     pack_size = max(1, int(entry.get("pack_size") or 1))
-    packs_needed = math.ceil(quantity / pack_size)
 
     live = None
     if live_rows:
-        live = live_rows.get(item_id) or live_rows.get(group_id)
+        live = live_rows.get(item_id)
         if live and not (
             live.get("status") == "priced"
             and live.get("freshness") == "fresh"
@@ -89,6 +88,8 @@ def _catalog_line(
             live = None
 
     if live is not None:
+        pack_size = max(1, int(live.get("pack_size") or pack_size))
+        packs_needed = math.ceil(quantity / pack_size)
         live_curr = str(live.get("currency") or "USD").upper()
         raw_pack_price = live.get("pack_price")
         if raw_pack_price is None:
@@ -110,6 +111,7 @@ def _catalog_line(
         fetched_at = live.get("fetched_at")
         adapter = live.get("adapter") or live.get("parser")
     else:
+        packs_needed = math.ceil(quantity / pack_size)
         ref_usd = float(entry["reference_unit_price_usd"])
         pack_price = (
             _money_float(ref_usd)
@@ -133,6 +135,7 @@ def _catalog_line(
         "label": override_label or entry["label"],
         "category": entry["category"],
         "kind": "commercial_part",
+        "resolution_status": "catalog_identified",
         "component_ids": list(component_ids or []),
         "supplier": entry.get("supplier"),
         "sku": entry.get("sku"),
@@ -203,6 +206,7 @@ def _printed_line(
         "label": label,
         "category": "3d_printed",
         "kind": "3d_printed",
+        "resolution_status": "fabricate",
         "component_ids": [part_id],
         "supplier": "In-house FDM 3D Printer",
         "sku": f"FDM-{est['material']}",
@@ -247,9 +251,8 @@ def _collect_live_rows(
         for row in procurement_report.get("rows") or []:
             if not isinstance(row, dict):
                 continue
-            for key in (row.get("selected_id"), row.get("group_id"), row.get("sku")):
-                if key:
-                    by_id[str(key)] = row
+            if selected_id := row.get("selected_id"):
+                by_id[str(selected_id)] = row
     if isinstance(live_quotes, dict):
         for key, quote in live_quotes.items():
             if not isinstance(quote, dict):
@@ -264,6 +267,7 @@ def _collect_live_rows(
                 "currency": quote.get("currency", "USD"),
                 "status": "unavailable" if unavail else "priced",
                 "freshness": "fresh",
+                "pack_size": pack_size,
                 "pack_price": _money_float(pack_price),
                 "unit_price": _money_float(pack_price / pack_size),
                 "line_total": None if unavail else _money_float(pack_price),
@@ -402,6 +406,71 @@ def _fixture_bom_lines(
     return lines
 
 
+def _requirement_line(
+    part: dict[str, Any],
+    *,
+    requirement_id: str,
+    group_id: str,
+    component_ids: list[str],
+    currency: str,
+    fx_rates: dict[str, Any] | None,
+    live_rows: dict[str, dict[str, Any]],
+    catalog_items: dict[str, dict[str, Any]],
+    stock_item: str | None = None,
+) -> dict[str, Any]:
+    """Keep the design requirement separate from an identifiable supplier item."""
+    name = part.get("name") or part.get("label") or requirement_id
+    quantity = part.get("quantity", 1)
+    unit = part.get("unit") or "unit"
+    requirement = {"name": name, "quantity": quantity, "unit": unit}
+    for field in ("source_id", "source_url", "source_file", "sku", "mpn", "part_number",
+                  "supplier", "role", "notes"):
+        if part.get(field) is not None:
+            requirement[field] = part[field]
+    source_id = part.get("source_id")
+    mpn = str(part.get("mpn") or "").strip().casefold()
+    sku = str(part.get("sku") or "").strip().casefold()
+    supplier = str(part.get("supplier") or "").strip().casefold()
+    if source_id:
+        stock_item = source_id if source_id in catalog_items else None
+    elif mpn or sku or part.get("part_number"):
+        matches = [
+            key for key, item in catalog_items.items()
+            if (mpn or (sku and supplier))
+            and (not mpn or mpn == str(item.get("mpn") or "").casefold())
+            and (not sku or sku == str(item.get("sku") or "").casefold())
+            and (not supplier or supplier == str(item.get("supplier") or "").casefold())
+        ]
+        stock_item = matches[0] if len(matches) == 1 else None
+
+    unit_known = True
+    if stock_item and part.get("source_file"):
+        catalog_unit = str(catalog_items[stock_item].get("unit") or "unit").casefold()
+        count_units = {catalog_unit, "unit", "item", "each", "pc", "pcs", "ea"}
+        unit_known = str(unit).casefold() in count_units
+    if stock_item and unit_known and type(quantity) is int and quantity > 0:
+        line = _catalog_line(
+            stock_item, quantity, group_id=group_id, component_ids=component_ids,
+            role_note=part.get("role") or part.get("notes") or "",
+            currency=currency, fx_rates=fx_rates, live_rows=live_rows, catalog_items=catalog_items,
+        )
+    else:
+        line = {
+            "group_id": group_id, "component_ids": component_ids, "catalog_id": None,
+            "label": name, "category": "requirement", "kind": "requirement",
+            "resolution_status": "selection_required", "quantity": quantity, "unit": unit,
+            "supplier": None, "sku": None, "mpn": None, "digikey_pn": None, "mouser_pn": None,
+            "pack_size": None, "packs_to_order": None, "currency": currency,
+            "unit_price": None, "pack_price": None, "line_total": None,
+            "price_source": "unpriced", "availability": "selection_required",
+            "stock_quantity": None, "lead_time_days": None, "source_url": None,
+            "fetched_at": None, "adapter": None, "specs": {}, "print_estimate": None,
+            "notes": part.get("notes") or part.get("role") or "",
+        }
+    line.update(line_id=requirement_id, requirement=requirement)
+    return line
+
+
 def _upstream_bom_lines(
     project: dict[str, Any],
     *,
@@ -416,116 +485,41 @@ def _upstream_bom_lines(
     adapt = up.get("adaptation") or {}
     cgeom = adapt.get("custom_geometry") or {}
     if isinstance(cgeom.get("app_size_mm"), (list, tuple)) and len(cgeom["app_size_mm"]) == 3:
-        dims_xyz = [
-            float(cgeom["app_size_mm"][0]),
-            float(cgeom["app_size_mm"][2]),
-            float(cgeom["app_size_mm"][1]),
-        ]
-        lines.append(
-            _printed_line(
-                adapt.get("part_id") or "custom-adapter",
-                f"Custom adapted mating part ({adapt.get('mode', 'mating')})",
-                dims_xyz,
-                volume_mm3=cgeom.get("volume_mm3"),
-                group_id="upstream-custom-adaptation",
-                material="PETG",
-                lab_profile=lab_profile,
-                currency=currency,
-                fx_rates=fx_rates,
-                role_note="Non-destructive AutoLab mating part fitted to upstream CAD.",
-            )
-        )
-    lines.append(
-        _catalog_line(
-            "m3-shcs-assortment",
-            8,
-            group_id="upstream-fasteners",
-            component_ids=["custom-adapter"],
-            role_note="M3 fasteners for mating adapter installation.",
-            currency=currency,
-            fx_rates=fx_rates,
-            live_rows=live_rows,
-            catalog_items=catalog_items,
-        )
-    )
-    for idx, raw_item in enumerate(up.get("bom") or []):
-        if raw_item.get("source") == "autolab_adaptation":
+        x, y, z = cgeom["app_size_mm"]
+        lines.append(_printed_line(
+            adapt.get("part_id") or "custom-adapter",
+            f"Custom adapted mating part ({adapt.get('mode', 'mating')})",
+            [float(x), float(z), float(y)], volume_mm3=cgeom.get("volume_mm3"),
+            group_id="upstream-custom-adaptation", material="PETG", lab_profile=lab_profile,
+            currency=currency, fx_rates=fx_rates, role_note="Custom part fitted to the source CAD.",
+        ))
+    adaptation_modeled = bool(lines)
+    for idx, part in enumerate(up.get("bom") or []):
+        if adaptation_modeled and part.get("source") in {
+            "autolab_adaptation", "autolab_custom_adaptation"
+        }:
             continue
-        name = str(raw_item.get("name") or f"Upstream part {idx + 1}")
-        qty = max(1, int(raw_item.get("quantity") or 1))
-        name_l = name.lower()
-        matched_id = None
-        if "nema 17" in name_l or "nema17" in name_l:
-            matched_id = "nema17-17hs4401"
-        elif "nema 14" in name_l or "nema14" in name_l:
-            matched_id = "pololu-1209"
-        elif "mgn12" in name_l:
-            matched_id = "rail-mgn12h-300"
-        elif "leadscrew" in name_l or "tr8" in name_l:
-            matched_id = "leadscrew-tr8x8-300"
-        elif "pico" in name_l:
-            matched_id = "pico"
-        elif "drv8825" in name_l:
-            matched_id = "drv8825"
-        elif "tmc2209" in name_l:
-            matched_id = "tmc2209"
-        if matched_id:
-            lines.append(
-                _catalog_line(
-                    matched_id,
-                    qty,
-                    group_id=f"upstream-bom-{idx}",
-                    role_note=f"Matched from upstream repo BOM: {name}",
-                    currency=currency,
-                    fx_rates=fx_rates,
-                    live_rows=live_rows,
-                    catalog_items=catalog_items,
-                    override_label=f"{name} -> {catalog_items[matched_id]['label']}",
-                )
-            )
-        else:
-            unit_usd = 8.0
-            conv = (
-                unit_usd
-                if currency == "USD"
-                else convert_currency(unit_usd, "USD", currency, fx_rates)
-            )
-            lines.append(
-                {
-                    "line_id": f"upstream-item:{idx}",
-                    "group_id": "upstream-bom-items",
-                    "catalog_id": f"upstream-bom-{idx}",
-                    "label": name,
-                    "category": "upstream_hardware",
-                    "kind": "commercial_part",
-                    "component_ids": [],
-                    "supplier": raw_item.get("supplier") or "Specify vendor from upstream BOM",
-                    "sku": raw_item.get("sku") or f"UPSTREAM-{idx + 1}",
-                    "mpn": raw_item.get("sku") or f"UPSTREAM-{idx + 1}",
-                    "digikey_pn": None,
-                    "mouser_pn": None,
-                    "quantity": qty,
-                    "unit": "unit",
-                    "pack_size": 1,
-                    "packs_to_order": qty,
-                    "currency": currency,
-                    "unit_price": conv,
-                    "pack_price": conv,
-                    "line_total": _money_float(Decimal(str(conv)) * qty),
-                    "price_source": "curated_reference",
-                    "availability": "verify_upstream_bom",
-                    "stock_quantity": None,
-                    "lead_time_days": 7,
-                    "source_url": up.get("provenance", {}).get("repo_url"),
-                    "fetched_at": None,
-                    "adapter": "upstream_bom_allowance",
-                    "specs": {"kind": "upstream_bom_item"},
-                    "notes": raw_item.get("notes")
-                    or "Parsed from upstream repository BOM; confirm exact vendor SKU.",
-                    "print_estimate": None,
-                }
-            )
+        part_id = part.get("id") or str(idx + 1)
+        lines.append(_requirement_line(
+            part, requirement_id=f"upstream:{part.get('source_file') or ''}:{part_id}",
+            group_id="upstream-bom-items", component_ids=[], currency=currency,
+            fx_rates=fx_rates, live_rows=live_rows, catalog_items=catalog_items,
+        ))
     return lines
+
+
+def _extrusion_stock(component: dict, catalog: dict[str, dict]) -> str | None:
+    primitives = component.get("primitives") or []
+    if len(primitives) != 1 or primitives[0].get("shape") != "extrusion":
+        return None
+    primitive = primitives[0]
+    length = primitive["size_mm"]["xyz".index(primitive.get("axis") or "y")]
+    for item_id, item in catalog.items():
+        specs = item.get("specs") or {}
+        if (specs.get("kind") == "extrusion" and specs.get("profile") == primitive["profile"]
+                and specs.get("stock_length_mm", 0) >= length):
+            return item_id
+    return None
 
 
 def _concept_bom_lines(
@@ -538,160 +532,32 @@ def _concept_bom_lines(
     lab_profile: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
     concept = project["concept_design"]
+    components = {c["key"]: c for c in concept.get("components") or []}
     lines: list[dict[str, Any]] = []
-    comp_map = {c["key"]: c for c in concept.get("components") or []}
-    has_extrusion = False
     for part in concept.get("parts") or []:
-        key = part["key"]
-        name = part["name"]
-        qty = max(1, int(part.get("quantity") or 1))
-        comp = comp_map.get(key)
-        text = f"{key} {name} {part.get('role', '')}".lower()
-        is_extrusion = bool(
-            comp and any(p.get("shape") == "extrusion" for p in comp.get("primitives") or [])
-        ) or "extrusion" in text or "2020" in text
-        is_printed = bool(
-            comp
-            and all(
-                p.get("finish") in ("polymer", "accent") for p in comp.get("primitives") or []
-            )
-        ) or any(tok in text for tok in ("printed", "holder", "bracket", "cradle", "mast"))
-
-        if is_extrusion:
-            has_extrusion = True
-            cat_id = "extrusion-2040-500" if "2040" in text else "extrusion-2020-500"
-            lines.append(
-                _catalog_line(
-                    cat_id,
-                    qty,
-                    group_id=f"concept-{key}",
-                    component_ids=[key],
-                    role_note=part.get("role") or "",
-                    currency=currency,
-                    fx_rates=fx_rates,
-                    live_rows=live_rows,
-                    catalog_items=catalog_items,
-                )
-            )
-        elif "camera" in text and "mount" not in text and "mast" not in text:
-            cam_id = "usb-webcam-1080p" if "usb" in text else "camera-module-3"
-            lines.append(
-                _catalog_line(
-                    cam_id,
-                    qty,
-                    group_id=f"concept-{key}",
-                    component_ids=[key],
-                    role_note=part.get("role") or "",
-                    currency=currency,
-                    fx_rates=fx_rates,
-                    live_rows=live_rows,
-                    catalog_items=catalog_items,
-                )
-            )
-        elif "motor" in text or "stepper" in text:
-            mot_id = "nema17-17hs4401" if "17" in text else "pololu-1209"
-            lines.append(
-                _catalog_line(
-                    mot_id,
-                    qty,
-                    group_id=f"concept-{key}",
-                    component_ids=[key],
-                    role_note=part.get("role") or "",
-                    currency=currency,
-                    fx_rates=fx_rates,
-                    live_rows=live_rows,
-                    catalog_items=catalog_items,
-                )
-            )
-        elif "controller" in text or "pico" in text or "board" in text:
-            lines.append(
-                _catalog_line(
-                    "rpi-zero-2w" if "pi zero" in text or "csi" in text else "pico",
-                    qty,
-                    group_id=f"concept-{key}",
-                    component_ids=[key],
-                    role_note=part.get("role") or "",
-                    currency=currency,
-                    fx_rates=fx_rates,
-                    live_rows=live_rows,
-                    catalog_items=catalog_items,
-                )
-            )
-        elif "rail" in text or "linear" in text:
-            lines.append(
-                _catalog_line(
-                    "rail-mgn12h-300",
-                    qty,
-                    group_id=f"concept-{key}",
-                    component_ids=[key],
-                    role_note=part.get("role") or "",
-                    currency=currency,
-                    fx_rates=fx_rates,
-                    live_rows=live_rows,
-                    catalog_items=catalog_items,
-                )
-            )
-        elif is_printed and comp:
-            s = comp.get("size_mm") or [80.0, 20.0, 80.0]
-            lines.append(
-                _printed_line(
-                    key,
-                    name,
-                    [float(s[0]), float(s[2]), float(s[1])],
-                    group_id=f"concept-{key}",
-                    quantity=qty,
-                    material="PETG",
-                    lab_profile=lab_profile,
-                    currency=currency,
-                    fx_rates=fx_rates,
-                    role_note=part.get("role") or "",
-                )
-            )
-        else:
-            fallback_id = (
-                "fastener-m5-tnut-kit"
-                if "fastener" in text or "nut" in text
-                else "m3-shcs-assortment"
-            )
-            lines.append(
-                _catalog_line(
-                    fallback_id,
-                    qty,
-                    group_id=f"concept-{key}",
-                    component_ids=[key],
-                    role_note=part.get("role") or name,
-                    currency=currency,
-                    fx_rates=fx_rates,
-                    live_rows=live_rows,
-                    catalog_items=catalog_items,
-                    override_label=name,
-                )
-            )
-    if has_extrusion:
-        lines.append(
-            _catalog_line(
-                "corner-bracket-2020",
-                4,
-                group_id="concept-frame-brackets",
-                role_note="90-deg corner brackets for 2020/2040 extrusion joints.",
-                currency=currency,
-                fx_rates=fx_rates,
-                live_rows=live_rows,
-                catalog_items=catalog_items,
-            )
-        )
-        lines.append(
-            _catalog_line(
-                "fastener-m5-tnut-kit",
-                16,
-                group_id="concept-frame-fasteners",
-                role_note="M5 T-nuts & cap screws for aluminum extrusion slots.",
-                currency=currency,
-                fx_rates=fx_rates,
-                live_rows=live_rows,
-                catalog_items=catalog_items,
-            )
-        )
+        key, name = part["key"], part["name"]
+        component = components.get(key)
+        if component and component.get("role"):
+            part = {"role": component["role"], **part}
+        primitives = (component or {}).get("primitives") or []
+        description = name.casefold()
+        if (component and not part.get("source_id")
+                and description.startswith(("printed ", "3d printed ", "3d-printed "))
+                and "circuit" not in description.split() and primitives
+                and all(p.get("finish") in {"polymer", "accent"} for p in primitives)):
+            x, y, z = component["size_mm"]
+            lines.append(_printed_line(
+                key, name, [x, z, y], group_id=f"concept-{key}",
+                quantity=part.get("quantity", 1), material="PETG", lab_profile=lab_profile,
+                currency=currency, fx_rates=fx_rates, role_note=part.get("role") or "",
+            ))
+            continue
+        lines.append(_requirement_line(
+            part, requirement_id=f"concept:{key}", group_id=f"concept-{key}",
+            component_ids=[key] if component else list(part.get("component_keys") or []),
+            currency=currency, fx_rates=fx_rates, live_rows=live_rows, catalog_items=catalog_items,
+            stock_item=_extrusion_stock(component, catalog_items) if component else None,
+        ))
     return lines
 
 
@@ -755,7 +621,7 @@ def _workstation_bom_lines(
     catalog_items: dict[str, dict[str, Any]],
     lab_profile: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
-    """Expand workstation/Jubilee/OT-2 into complete itemized lines (zero unpriced groups)."""
+    """Expand the selected liquid-handling design into its supported purchase groups."""
     design = project.get("design") or {}
     selections = project.get("selections") or {}
     summary = project.get("summary") or {}
@@ -779,6 +645,7 @@ def _workstation_bom_lines(
                 "label": "Opentrons OT-2 Liquid Handling Robot + 1 Single-Channel Pipette",
                 "category": "commercial_robot",
                 "kind": "commercial_part",
+                "resolution_status": "catalog_identified",
                 "component_ids": ["base"],
                 "supplier": "Opentrons",
                 "sku": "OT-2",
@@ -1224,6 +1091,16 @@ def _workstation_bom_lines(
     return lines
 
 
+def purchasing_route(project: dict[str, Any]) -> str:
+    for key in ("standalone_fixture", "upstream_project", "concept_design", "bench_station"):
+        if project.get(key):
+            return key
+    design = project.get("design") or {}
+    if project.get("engineering_design") or design.get("foundation") or design.get("platform"):
+        return "workstation"
+    return "unselected"
+
+
 def build_complete_bom(
     project: dict[str, Any],
     *,
@@ -1233,61 +1110,25 @@ def build_complete_bom(
     fx_rates: dict[str, Any] | None = None,
     live_quotes: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Build a complete, itemized purchasable BOM with zero unpriced placeholders."""
-    curr, eff_fx = _resolve_currency_and_fx(currency, fx_rates)
+    """Build the BOM for the current design, retaining unresolved requirements."""
+    route_kind = purchasing_route(project)
+    curr, eff_fx = _resolve_currency_and_fx(
+        currency, fx_rates, requires_rates=route_kind != "unselected"
+    )
     catalog_data = load_purchasable_catalog()
     catalog_items = catalog_data["items"]
     live_rows = _collect_live_rows(procurement_report, live_quotes)
 
-    if project.get("standalone_fixture"):
-        route_kind = "standalone_fixture"
-        lines = _fixture_bom_lines(
-            project,
-            currency=curr,
-            fx_rates=eff_fx,
-            live_rows=live_rows,
-            catalog_items=catalog_items,
-            lab_profile=lab_profile,
-        )
-    elif project.get("upstream_project"):
-        route_kind = "upstream_project"
-        lines = _upstream_bom_lines(
-            project,
-            currency=curr,
-            fx_rates=eff_fx,
-            live_rows=live_rows,
-            catalog_items=catalog_items,
-            lab_profile=lab_profile,
-        )
-    elif project.get("concept_design"):
-        route_kind = "concept_design"
-        lines = _concept_bom_lines(
-            project,
-            currency=curr,
-            fx_rates=eff_fx,
-            live_rows=live_rows,
-            catalog_items=catalog_items,
-            lab_profile=lab_profile,
-        )
-    elif project.get("bench_station"):
-        route_kind = "bench_station"
-        lines = _bench_station_bom_lines(
-            project,
-            currency=curr,
-            fx_rates=eff_fx,
-            live_rows=live_rows,
-            catalog_items=catalog_items,
-            lab_profile=lab_profile,
-        )
-    else:
-        route_kind = "workstation"
-        lines = _workstation_bom_lines(
-            project,
-            currency=curr,
-            fx_rates=eff_fx,
-            live_rows=live_rows,
-            catalog_items=catalog_items,
-            lab_profile=lab_profile,
+    compilers = {
+        "standalone_fixture": _fixture_bom_lines, "upstream_project": _upstream_bom_lines,
+        "concept_design": _concept_bom_lines, "bench_station": _bench_station_bom_lines,
+        "workstation": _workstation_bom_lines,
+    }
+    lines = []
+    if route_kind != "unselected":
+        lines = compilers[route_kind](
+            project, currency=curr, fx_rates=eff_fx, live_rows=live_rows,
+            catalog_items=catalog_items, lab_profile=lab_profile,
         )
 
     live_sub = Decimal(0)
@@ -1318,12 +1159,20 @@ def build_complete_bom(
             max_lead_days = max(max_lead_days, int(line["lead_time_days"]))
 
     total_combined = live_sub + ref_sub + print_sub
+    unresolved = sum(line.get("resolution_status") == "selection_required" for line in lines)
+    if route_kind == "unselected":
+        status = "design_required"
+    elif unresolved or not lines:
+        status = "incomplete"
+    else:
+        status = "itemized"
     return {
         "schema_version": 1,
         "generated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "project_id": project["id"],
         "project_revision": project["revision"],
         "route_kind": route_kind,
+        "status": status,
         "currency": curr,
         "fx_rate_used": (eff_fx["rates"].get(curr) if eff_fx and eff_fx.get("rates") else None),
         "fx_source": eff_fx.get("source") if eff_fx else None,
@@ -1339,6 +1188,7 @@ def build_complete_bom(
                 1 for r in lines if r["price_source"] == "curated_reference"
             ),
             "unpriced_placeholder_count": unpriced_placeholders,
+            "unresolved_count": unresolved,
             "live_api_subtotal": _money_float(live_sub),
             "reference_catalog_subtotal": _money_float(ref_sub),
             "printed_material_subtotal": _money_float(print_sub),
@@ -1376,6 +1226,13 @@ def bom_to_csv(bom: dict[str, Any]) -> bytes:
         "label",
         "category",
         "kind",
+        "resolution_status",
+        "requirement_name",
+        "requirement_sku",
+        "requirement_mpn",
+        "requirement_part_number",
+        "requirement_supplier",
+        "requirement_source_file",
         "supplier",
         "sku",
         "mpn",
@@ -1400,6 +1257,8 @@ def bom_to_csv(bom: dict[str, Any]) -> bytes:
     writer.writeheader()
     for line in bom.get("lines") or []:
         rec = dict(line)
+        for key, value in (line.get("requirement") or {}).items():
+            rec[f"requirement_{key}"] = value
         pest = line.get("print_estimate") or {}
         rec["filament_mass_g"] = pest.get("filament_mass_g")
         rec["print_time_minutes"] = pest.get("print_time_minutes")

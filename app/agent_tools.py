@@ -528,7 +528,8 @@ _TOOL_SPECS: list[tuple[str, str, type[BaseModel]]] = [
     ),
     (
         "generate_purchasable_bom",
-        "Generate a complete itemized purchasable BOM in USD, CHF, or EUR with pack quantities, "
+        "List parts for the active design in USD, CHF, or EUR. Report unresolved requirements, "
+        "a missing design or a partial priced subtotal explicitly. Include pack quantities, "
         "supplier SKUs/MPNs, lead times, analytical FDM filament/print-time estimates, explicit "
         "shipping/tax exclusions, and hardware compatibility status.",
         GeneratePurchasableBomArgs,
@@ -2341,7 +2342,7 @@ async def _tool_generate_purchasable_bom(
 ) -> ToolResult:
     import asyncio
 
-    from app.bom_engine import build_complete_bom
+    from app.bom_engine import build_complete_bom, purchasing_route
     from app.hardware_compatibility import evaluate_hardware_compatibility
     from app.supplier_apis import (
         SupplierApiError,
@@ -2354,7 +2355,7 @@ async def _tool_generate_purchasable_bom(
 
     fx_rates = None
     warnings: list[str] = []
-    if args.currency != "USD":
+    if args.currency != "USD" and purchasing_route(ctx.project) != "unselected":
         fx_rates = cached_fx_rates("USD")
         if fx_rates is None:
             try:
@@ -2413,11 +2414,16 @@ async def _tool_generate_purchasable_bom(
     s = bom["summary"]
     msg = (
         f"Generated {s['line_count']}-item BOM in {bom['currency']} "
-        f"(total={s['total_estimated_cost']:.2f} {bom['currency']}, "
+        f"(estimated subtotal={s['total_estimated_cost']:.2f} {bom['currency']}, "
+        f"unresolved={s['unresolved_count']}, "
         f"live_api={s['live_api_subtotal']:.2f}, ref={s['reference_catalog_subtotal']:.2f}, "
         f"printed={s['printed_material_subtotal']:.2f}, {s['total_filament_mass_g']} g / "
         f"{s['total_print_time_minutes']} min, compatibility={compat['status']})."
     )
+    if bom["status"] == "design_required":
+        msg = "Select or develop a hardware design to generate its parts list."
+    elif s["line_count"] == s["unpriced_placeholder_count"]:
+        msg = f"No prices are available yet. {s['unresolved_count']} requirements await selection."
     run = {"kind": "generate_purchasable_bom", "status": "accepted", "message": msg}
     ctx.action_runs.append(run)
     return ToolResult(
@@ -2427,6 +2433,7 @@ async def _tool_generate_purchasable_bom(
         mutated=False,
         summary=msg,
         data={
+            "status": bom["status"],
             "currency": bom["currency"],
             "fx_rate_used": bom.get("fx_rate_used"),
             "fx_source": bom.get("fx_source"),
@@ -2442,10 +2449,15 @@ async def _tool_generate_purchasable_bom(
             },
             "lines": [
                 {
+                    "line_id": ln["line_id"],
                     "label": ln["label"],
+                    "resolution_status": ln["resolution_status"],
                     "supplier": ln["supplier"],
                     "mpn": ln["mpn"],
                     "qty": ln["quantity"],
+                    "unit": ln["unit"],
+                    "sku": ln["sku"],
+                    "requirement": ln.get("requirement"),
                     "packs_to_order": ln["packs_to_order"],
                     "line_total": ln["line_total"],
                     "price_source": ln["price_source"],

@@ -217,6 +217,11 @@
   color: #334155;
 }
 
+.bom-badge-unpriced {
+  background: #fff3d1;
+  color: #70480a;
+}
+
 .bom-line-meta {
   display: block;
   font-size: 0.76rem;

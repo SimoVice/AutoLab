@@ -74,7 +74,9 @@ def report_for_project(project: dict, report: dict | None, *, now: datetime | No
     report_id identifies the fetched facts; freshness is evaluated at read time.
     Expired observations remain explicitly last-known, never a fresh subtotal.
     """
-    if not report or (report["project_id"], report["project_revision"]) != (
+    if not report or not report.get("expires_at") or not isinstance(report.get("rows"), list):
+        return None
+    if (report.get("project_id"), report.get("project_revision")) != (
         project["id"],
         project["revision"],
     ):
@@ -159,6 +161,11 @@ def procurement_groups(project: dict) -> list[dict]:
             groups.append({"id": group_id, "quantity": 1, "component_ids": [operation],
                            "selected_id": option["id"], "is_candidate": True, "options": [option]})
         return groups
+    design = project.get("design") or {}
+    if ((project.get("workflow") or {}).get("kind") == "general"
+            and not (project.get("engineering_design") or design.get("foundation")
+                     or design.get("platform"))):
+        return []
     groups = deepcopy(project.get("sourcing", {}).get("groups", []))
     if any(
         group["id"] == "upstream-platform" and group["selected_id"] == "source-cad"

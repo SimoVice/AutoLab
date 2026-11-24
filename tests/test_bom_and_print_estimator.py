@@ -8,6 +8,8 @@ import io
 import json
 
 import pytest
+from test_design_spec import project as workstation_brief
+from test_design_spec import proposal as workstation_layout
 
 from app.bench_station import StationProposal, compile_station
 from app.bom_engine import (
@@ -17,7 +19,8 @@ from app.bom_engine import (
     load_purchasable_catalog,
 )
 from app.concept_design import compile_concept
-from app.domain import apply_update, new_project
+from app.design_spec import apply_candidate
+from app.domain import new_project
 from app.fixture_adapter import compile_standalone_fixture
 from app.foundation_design import adopt_foundation, foundation_sourcing
 from app.print_estimator import MATERIAL_SPECS, estimate_fdm_part
@@ -75,7 +78,11 @@ def test_purchasable_catalog_integrity():
         assert isinstance(item["specs"], dict) and item["specs"].get("kind")
 
 
-def test_complete_bom_eliminates_all_unpriced_placeholders_across_all_5_routes():
+def designed_workstation(**changes):
+    return apply_candidate(workstation_brief(**changes), workstation_layout(), {"model": "test"})
+
+
+def test_identified_parts_across_supported_designs():
     fx = {
         "base": "USD",
         "rates": {"USD": 1.0, "CHF": 0.9, "EUR": 0.95},
@@ -101,10 +108,7 @@ def test_complete_bom_eliminates_all_unpriced_placeholders_across_all_5_routes()
     assert bom_fx["currency"] == "CHF"
 
     # 2. Custom workstation (formerly 5 unpriced placeholders!)
-    ws = apply_update(
-        new_project(),
-        {"workflow_kind": "liquid_preparation", "cooling_enabled": True},
-    )
+    ws = designed_workstation(cooling_enabled=True)
     bom_ws = build_complete_bom(ws, currency="EUR", fx_rates=fx)
     assert bom_ws["summary"]["unpriced_placeholder_count"] == 0
     groups_ws = {line["group_id"] for line in bom_ws["lines"]}
@@ -193,7 +197,7 @@ def test_complete_bom_eliminates_all_unpriced_placeholders_across_all_5_routes()
 
 
 def test_bom_keeps_live_api_separate_from_curated_reference_and_exports_safe_csv():
-    proj = apply_update(new_project(), {"workflow_kind": "liquid_preparation"})
+    proj = designed_workstation()
     live_quotes = {
         "pico": {
             "currency": "USD",

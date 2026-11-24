@@ -23,12 +23,13 @@ def test_generic_quantities_unit_allocation_and_sum_are_canonical():
     boards = next(r for r in result["rows"] if r["group_id"] == "concept-controller_board")
     assert boards["quantity"] == 3 and boards["unit"] == "board"
     assert boards["line_total_low_usd"] == 3 * boards["unit_price_low_usd"]
-    assert boards["evidence"]["url"] is None
-    assert boards["price_kind"] == "planning_allowance"
+    assert boards["evidence"]["url"].startswith("https://www.adafruit.com/")
+    assert boards["price_kind"] == "curated_reference"
     assert boards["source_url"].startswith("https://www.adafruit.com/")
     assert result["summary"]["total_low_usd"] == sum(
-        r["line_total_low_usd"] for r in result["rows"]
+        r["line_total_low_usd"] for r in result["rows"] if r["line_total_low_usd"] is not None
     )
+    assert result["summary"]["unpriced_count"] == 2
     assert all(r["assembly_steps"] for r in result["rows"])
     assert "Level the rail base" in result["rows"][0]["assembly_steps"][0]["instruction"]
 
@@ -43,10 +44,7 @@ def test_model_group_totals_are_not_multiplied_by_quantity_again():
     assert project_with_report(project, None, cost)["parts_proposal"] == result
     revised = deepcopy(project)
     revised["revision"] += 1
-    assert all(
-        r["price_kind"] == "planning_allowance"
-        for r in build_parts_proposal(revised, estimate=cost)["rows"]
-    )
+    assert build_parts_proposal(revised, estimate=cost) == build_parts_proposal(revised)
 
 
 def test_bench_and_source_cad_use_their_own_groups():
@@ -109,7 +107,10 @@ def test_all_routes_have_actionable_sources_and_honest_unit_basis():
             assert row["selected_product_label"]
             assert row["source_kind"]
             assert "not a quoted unit price" in row["unit_price_basis"]
-            assert row["line_total_high_usd"] >= row["line_total_low_usd"]
+            if row["price_kind"] == "unpriced":
+                assert row["line_total_high_usd"] is row["line_total_low_usd"] is None
+            else:
+                assert row["line_total_high_usd"] >= row["line_total_low_usd"]
 
 
 def test_real_rack_and_holder_standalone_downloads_are_revision_bound(client):
@@ -145,10 +146,7 @@ def test_incomplete_legacy_report_is_not_promoted_to_supplier_price():
         "report_id": "legacy-document-only",
         "rows": [],
     }
-    assert all(
-        r["price_kind"] == "planning_allowance"
-        for r in build_parts_proposal(project, report)["rows"]
-    )
+    assert build_parts_proposal(project, report) == build_parts_proposal(project)
 
 
 def test_tip_profiles_keep_supplier_price_scope_and_only_printed_model_download(client):

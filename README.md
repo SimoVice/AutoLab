@@ -46,6 +46,12 @@ engineering design. Supported adapters connect a selected machine foundation,
 components and task to the appropriate geometry, calculations, guides and exports.
 Accepted revisions keep those outputs tied to the same project.
 
+The purchasing list starts once a hardware design exists. For custom assemblies
+and imported part lists, an unidentified component keeps its required quantity
+and unit while its supplier, ordering code and price remain open. The parts
+workspace and the downloadable purchasing list show these requirements alongside
+identified catalog items and modeled filament costs.
+
 For a new piece of equipment, the **custom-equipment path** can propose an original
 assembly with named parts, attached subassemblies, dimensions and an ordered
 operating sequence. Its 3D view, component models, parts list, assembly guide and

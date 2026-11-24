@@ -167,12 +167,16 @@ def complete_component_changes(current, updated, reply):
         low, high = row["line_total_low_usd"], row["line_total_high_usd"]
         url = row["source_url"]
         # Preserve model/source-specific explanations already complete in chat.
-        if url in reply and (f"{low:,.0f}" in reply or str(low) in reply):
+        if url and url in reply and low is not None and f"{low:,.0f}" in reply:
             continue
-        price = f"${low:,.0f}" if low == high else f"${low:,.0f}–${high:,.0f}"
+        if low is None or high is None:
+            price = "price pending part selection"
+        else:
+            price = f"${low:,.0f}" if low == high else f"${low:,.0f}–${high:,.0f}"
         kind = row["price_kind"].replace("_", " ")
         label = row.get("selected_product_label") or row["label"]
-        lines.append(f"- [{label}]({url}): {price} for this purchase scope ({kind}).")
+        part = f"[{label}]({url})" if url else label
+        lines.append(f"- {part}: {price} for this purchase scope ({kind}).")
         if len(lines) == 3:
             break
     if lines:

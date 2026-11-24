@@ -422,7 +422,7 @@
       "reference_unit_price_usd": 8.5,
       "typical_lead_time_days": 6,
       "source_url": "https://us.misumi-ec.com/vona2/detail/110302683830/",
-      "specs": {"kind": "extrusion", "profile": "2020", "slot_width_mm": 6.0, "fastener": "M5"}
+      "specs": {"kind": "extrusion", "profile": "2020", "stock_length_mm": 500, "slot_width_mm": 6.0, "fastener": "M5"}
     },
     "extrusion-2040-500": {
       "id": "extrusion-2040-500",
@@ -436,7 +436,7 @@
       "reference_unit_price_usd": 14.2,
       "typical_lead_time_days": 6,
       "source_url": "https://us.misumi-ec.com/vona2/detail/110302683860/",
-      "specs": {"kind": "extrusion", "profile": "2040", "slot_width_mm": 6.0, "fastener": "M5"}
+      "specs": {"kind": "extrusion", "profile": "2040", "stock_length_mm": 500, "slot_width_mm": 6.0, "fastener": "M5"}
     },
     "corner-bracket-2020": {
       "id": "corner-bracket-2020",

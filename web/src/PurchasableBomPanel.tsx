@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type {
   BomCurrency,
   HardwareCompatibilityReport,
@@ -46,6 +46,7 @@ export default function PurchasableBomPanel({ project, busy = false, onSelectPar
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
+  const refreshRequest = useRef<AbortController | null>(null);
 
   const base = `/api/projects/${encodeURIComponent(project.id)}`;
   const revision = project.revision;
@@ -53,6 +54,9 @@ export default function PurchasableBomPanel({ project, busy = false, onSelectPar
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
+    setBom(null);
+    setCompat(null);
+    setRefreshing(false);
     setError('');
     setWarnings([]);
     fetch(`${base}/bom?revision=${revision}&currency=USD`, { signal: controller.signal })
@@ -81,15 +85,22 @@ export default function PurchasableBomPanel({ project, busy = false, onSelectPar
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
       });
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      refreshRequest.current?.abort();
+    };
   }, [base, revision]);
 
   async function refreshBom(targetCurrency: BomCurrency) {
+    refreshRequest.current?.abort();
+    const controller = new AbortController();
+    refreshRequest.current = controller;
     setRefreshing(true);
     setError('');
     try {
       const res = await fetch(`${base}/bom/refresh`, {
         method: 'POST',
+        signal: controller.signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           project_revision: revision,
@@ -98,6 +109,7 @@ export default function PurchasableBomPanel({ project, busy = false, onSelectPar
         }),
       });
       const data = await res.json();
+      if (controller.signal.aborted) return;
       if (!res.ok) throw new Error(data.detail ?? 'Failed to refresh supplier prices/FX.');
       setCurrency(targetCurrency);
       setBom(data.bom);
@@ -105,21 +117,18 @@ export default function PurchasableBomPanel({ project, busy = false, onSelectPar
       setApiCaps(data.supplier_api_status);
       setWarnings(Array.isArray(data.live_quote_warnings) ? data.live_quote_warnings : []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'BOM refresh failed.');
+      if (!controller.signal.aborted) setError(err instanceof Error ? err.message : 'BOM refresh failed.');
     } finally {
-      setRefreshing(false);
+      if (!controller.signal.aborted) setRefreshing(false);
     }
   }
 
   return (
-    <section className="purchasable-bom-section" aria-label="Complete purchasable BOM and compatibility">
+    <section className="purchasable-bom-section" aria-label="Purchasing list and hardware compatibility">
       <div className="bom-header">
         <div>
-          <h3>Purchasable BOM &amp; Hardware Compatibility</h3>
-          <p>
-            Itemized commercial MPNs, pack rounding, analytical 3D print estimates, and
-            deterministic electrical/mechanical checks (rev {revision}).
-          </p>
+          <h3>Purchasing list &amp; hardware compatibility</h3>
+          <p>Catalog parts, fabrication estimates and open requirements for revision {revision}.</p>
         </div>
         <div className="bom-toolbar">
           <label>
@@ -127,7 +136,7 @@ export default function PurchasableBomPanel({ project, busy = false, onSelectPar
             <select
               aria-label="BOM currency"
               value={currency}
-              disabled={busy || loading || refreshing}
+              disabled={busy || loading || refreshing || bom?.status === 'design_required'}
               onChange={(event) => void refreshBom(event.target.value as BomCurrency)}
             >
               <option value="USD">USD ($)</option>
@@ -138,7 +147,7 @@ export default function PurchasableBomPanel({ project, busy = false, onSelectPar
           <button
             type="button"
             className="bom-refresh-btn"
-            disabled={busy || loading || refreshing}
+            disabled={busy || loading || refreshing || bom?.status === 'design_required'}
             onClick={() => void refreshBom(currency)}
           >
             {refreshing ? 'Refreshing APIs & FX…' : 'Refresh live API prices'}
@@ -165,7 +174,7 @@ export default function PurchasableBomPanel({ project, busy = false, onSelectPar
       )}
       {loading && <p role="status">Computing itemized BOM and compatibility checks…</p>}
 
-      {compat && (
+      {compat && compat.status !== 'not_evaluated' && (
         <div className={`compat-banner compat-${compat.status}`} role="region" aria-label="Hardware compatibility">
           <div className="compat-banner-top">
             <strong>{compat.summary}</strong>
@@ -191,39 +200,43 @@ export default function PurchasableBomPanel({ project, busy = false, onSelectPar
         </div>
       )}
 
-      {bom && (
+      {bom?.status === 'design_required' && (
+        <p role="status">Choose or develop a hardware design in chat to see its parts and costs.</p>
+      )}
+      {bom && bom.status !== 'design_required' && (
         <>
           <div className="bom-kpis">
             <div className="bom-kpi-card">
-              <span>Estimated Total ({bom.currency})</span>
-              <strong>{fmtMoney(bom.summary.total_estimated_cost, bom.currency)}</strong>
+              <span>Estimated subtotal ({bom.currency})</span>
+              <strong>{bom.summary.line_count > bom.summary.unpriced_placeholder_count
+                ? fmtMoney(bom.summary.total_estimated_cost, bom.currency) : 'Price needed'}</strong>
               <small>
-                {bom.summary.line_count} lines ({bom.summary.unpriced_placeholder_count} placeholders)
+                {bom.summary.line_count} lines · {bom.summary.unresolved_count} awaiting selection
               </small>
             </div>
             <div className="bom-kpi-card">
-              <span>Live API Verified</span>
-              <strong>{fmtMoney(bom.summary.live_api_subtotal, bom.currency)}</strong>
+              <span>Current supplier prices</span>
+              <strong>{fmtMoney(bom.summary.live_api_priced_count ? bom.summary.live_api_subtotal : null, bom.currency)}</strong>
               <small>{bom.summary.live_api_priced_count} live API line(s)</small>
             </div>
             <div className="bom-kpi-card">
-              <span>Curated Catalog Ref.</span>
-              <strong>{fmtMoney(bom.summary.reference_catalog_subtotal, bom.currency)}</strong>
+              <span>Catalog references</span>
+              <strong>{fmtMoney(bom.summary.reference_priced_count ? bom.summary.reference_catalog_subtotal : null, bom.currency)}</strong>
               <small>
                 Checked {bom.catalog_checked_on}
                 {bom.fx_rate_used ? ` · FX ${bom.fx_rate_used}` : ''}
               </small>
             </div>
             <div className="bom-kpi-card">
-              <span>3D Printed Parts</span>
-              <strong>{fmtMoney(bom.summary.printed_material_subtotal, bom.currency)}</strong>
+              <span>Filament estimate</span>
+              <strong>{fmtMoney(bom.summary.printed_line_count ? bom.summary.printed_material_subtotal : null, bom.currency)}</strong>
               <small>
                 {bom.summary.total_filament_mass_g.toFixed(0)} g ·{' '}
                 {fmtDuration(bom.summary.total_print_time_minutes)}
               </small>
             </div>
             <div className="bom-kpi-card">
-              <span>Max Lead Time</span>
+              <span>Longest known lead time</span>
               <strong>
                 {bom.summary.max_lead_time_days > 0 ? `${bom.summary.max_lead_time_days} d` : '—'}
               </strong>
@@ -247,10 +260,17 @@ export default function PurchasableBomPanel({ project, busy = false, onSelectPar
                   <tr key={line.line_id}>
                     <td>
                       <strong>{line.label}</strong>
+                      {line.resolution_status === 'selection_required' && line.requirement?.source_file && (
+                        <span className="bom-line-meta">
+                          Source list · {[line.requirement.source_file, line.requirement.supplier,
+                            line.requirement.mpn ?? line.requirement.sku ?? line.requirement.part_number]
+                            .filter(Boolean).join(' · ')}
+                        </span>
+                      )}
                       <span className="bom-line-meta">
-                        {line.supplier ?? 'In-house'}
-                        {line.mpn ? ` · MPN ${line.mpn}` : ''}
-                        {line.notes ? ` · ${line.notes}` : ''}
+                        {line.supplier}
+                        {line.mpn && line.kind === 'commercial_part' ? ` · MPN ${line.mpn}` : ''}
+                        {line.notes && `${line.supplier || line.mpn ? ' · ' : ''}${line.notes}`}
                       </span>
                       {line.print_estimate && (
                         <span className="bom-line-meta">
@@ -271,7 +291,7 @@ export default function PurchasableBomPanel({ project, busy = false, onSelectPar
                     </td>
                     <td>
                       <span className={`bom-badge bom-badge-${line.price_source}`}>
-                        {line.price_source === 'live_api'
+                        {line.price_source === 'unpriced' ? 'Selection required' : line.price_source === 'live_api'
                           ? 'Live API'
                           : line.price_source === 'slicer_material_estimate' ||
                               line.kind === '3d_printed'
@@ -291,7 +311,7 @@ export default function PurchasableBomPanel({ project, busy = false, onSelectPar
                     </td>
                     <td>
                       {line.quantity} {line.unit}
-                      {line.pack_size > 1 && (
+                      {line.pack_size != null && line.pack_size > 1 && (
                         <span className="bom-line-meta">
                           {line.packs_to_order} pack(s) × {line.pack_size}
                         </span>
@@ -299,15 +319,16 @@ export default function PurchasableBomPanel({ project, busy = false, onSelectPar
                     </td>
                     <td>
                       <strong>{fmtMoney(line.line_total, bom.currency)}</strong>
-                      <span className="bom-line-meta">
+                      {line.unit_price != null && <span className="bom-line-meta">
                         {fmtMoney(line.unit_price, bom.currency)} / {line.unit}
-                      </span>
+                      </span>}
                     </td>
                     <td>
                       <span>
                         {line.stock_quantity != null
                           ? `${line.stock_quantity} in stock`
-                          : line.availability.replaceAll('_', ' ')}
+                          : line.resolution_status === 'selection_required' ? '—'
+                            : line.availability.replaceAll('_', ' ')}
                       </span>
                       {line.lead_time_days != null && (
                         <span className="bom-line-meta">~{line.lead_time_days} d lead</span>

@@ -454,8 +454,11 @@ async def get_concept_kinematics(project_id: str, revision: int) -> dict:
 async def download_custom_asset(project_id: str, asset: str, revision: int) -> Response:
     from starlette.concurrency import run_in_threadpool
 
+    from app.bom_engine import build_complete_bom
     from app.concept_cad import ConceptCADUnavailable
     from app.concept_files import price_record_for_project, render_asset
+    from app.procurement import report_for_project
+    from app.routers.procurement import _active_lab_profile
 
     session = api_hook("session_for", session_for)(project_id)
     async with session.model_lock():
@@ -470,9 +473,16 @@ async def download_custom_asset(project_id: str, asset: str, revision: int) -> R
             if asset in ("package.zip", "parts.csv")
             else None
         )
+        purchasing_bom = None
+        if asset == "package.zip":
+            purchasing_bom = build_complete_bom(
+                session.project, lab_profile=_active_lab_profile(),
+                procurement_report=report_for_project(session.project, session.procurement_report),
+            )
     try:
         data, mime = await run_in_threadpool(
-            render_asset, design, project_id, revision, asset, price_record=price_record
+            render_asset, design, project_id, revision, asset,
+            price_record=price_record, purchasing_bom=purchasing_bom,
         )
     except KeyError:
         raise HTTPException(404, "This file is unavailable for the current assembly.") from None

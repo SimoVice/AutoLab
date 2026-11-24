@@ -29,6 +29,12 @@ const sourceLabels: Record<string, string> = {
   fabrication_service: 'Fabrication service',
 };
 
+const priceLabels: Record<string, string> = {
+  verified_supplier: 'Supplier price', live_api: 'Supplier price', curated_reference: 'Catalog reference',
+  slicer_material_estimate: 'Filament estimate', unpriced: 'Selection required',
+  model_estimate: 'Model estimate', included_in_base: 'Included in base',
+};
+
 function sourceLabel(value: string) {
   if (/github\.com/.test(value)) return 'Source project & files';
   if (/\.stl|printables|thingiverse/i.test(value)) return '3D print files';
@@ -129,9 +135,7 @@ export default function PartsProposal({ project, refreshKey, onSelect, selectedI
         const linkLabel = sourceLabels[row.source_kind ?? ''] ?? sourceLabel(row.source_url ?? '');
         const visibleComponents = row.component_ids
           .filter(id => components.some(part => part.id === id));
-        const priceLabel = row.price_kind === 'verified_supplier'
-          ? 'Supplier price'
-          : row.price_kind === 'model_estimate' ? 'Model estimate' : row.price_kind === 'included_in_base' ? 'Included in base' : 'Estimate';
+        const priceLabel = priceLabels[row.price_kind] ?? 'Estimate';
 
         return (
           <tr key={row.group_id}>

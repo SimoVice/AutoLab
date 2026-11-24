@@ -1415,6 +1415,9 @@ def procurement_html(guide: dict) -> str:
 
 
 def _budget_range(low, high):
+    if low is None or high is None:
+        return "Price needed"
+
     def usd(number):
         return f"${number:,.2f}".removesuffix(".00")
 
@@ -1425,7 +1428,9 @@ def _parts_budget(proposal):
     summary = proposal["summary"]
     total = _budget_range(summary["total_low_usd"], summary["total_high_usd"])
     labels = {"verified_supplier": "Supplier price", "included_in_base": "Included in base",
-              "model_estimate": "Model estimate", "planning_allowance": "Planning estimate"}
+              "model_estimate": "Model estimate", "planning_allowance": "Planning estimate",
+              "curated_reference": "Catalog reference", "slicer_material_estimate": "Filament cost",
+              "live_api": "Supplier price", "unpriced": "Selection required"}
     records = []
     for row in proposal["rows"]:
         records.append((
@@ -1449,7 +1454,7 @@ def parts_budget_html(proposal):
         rows.append(f'<tr><th scope="row">{part}</th><td>{qty}</td><td>{unit}</td>'
                     f"<td>{amount}</td><td>{basis}</td></tr>")
     return ('<section class="card"><h2>Parts &amp; prices</h2>'
-            f"<p><strong>{total}</strong> for the listed parts, in USD. "
+            f"<p>Subtotal for priced items (USD) <strong>{total}</strong>. "
             "Excludes shipping, tax and labor.</p>"
             '<div class="table-scroll"><table><thead><tr><th>Part or purchase group</th>'
             '<th>Qty</th><th>Per unit or set</th><th>Line total</th><th>Price basis</th>'
@@ -1472,7 +1477,7 @@ def _parts_budget_markdown(proposal, plain):
     if not proposal["rows"]:
         return []
     total, records = _parts_budget(proposal)
-    lines = ["## Parts & prices", "", f"**{total}** for the listed parts, in USD. "
+    lines = ["## Parts & prices", "", f"Subtotal for priced items (USD) **{total}**. "
              "Excludes shipping, tax and labor.", "",
              "| Part or purchase group | Qty | Per unit or set | Line total | Price basis |",
              "| --- | ---: | ---: | ---: | --- |"]

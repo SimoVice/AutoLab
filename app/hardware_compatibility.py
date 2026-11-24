@@ -577,14 +577,25 @@ def evaluate_hardware_compatibility(
                 )
             )
 
+    missing = [row for row in lines if row.get("resolution_status") == "selection_required"]
+    if missing:
+        checks.append(_entry(
+            "unresolved-parts", "component_identity", "warning", "Component selection required",
+            f"Identify parts for {len(missing)} requirement(s) to check compatibility.",
+            affected_ids=[row["line_id"] for row in missing],
+        ))
     err_n = sum(1 for c in checks if c["severity"] == "error")
     warn_n = sum(1 for c in checks if c["severity"] == "warning")
     pass_n = sum(1 for c in checks if c["severity"] == "pass")
     status = "incompatible" if err_n > 0 else ("warnings" if warn_n > 0 else "compatible")
+    if not checks:
+        status = "not_evaluated"
     summary = (
         f"Hardware compatibility: {status} ({pass_n} passed, {warn_n} warning(s), "
         f"{err_n} error(s))."
     )
+    if status == "not_evaluated":
+        summary = "No applicable component checks are available for this design."
     return {
         "schema_version": 1,
         "project_id": project["id"],

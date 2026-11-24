@@ -11,16 +11,24 @@ from pathlib import Path
 
 import httpx
 import pytest
+from evolution_fixtures import layout_project
 from fastapi.testclient import TestClient
+from test_bom_and_print_estimator import designed_workstation
+from test_concept_design import proposal as concept_proposal
 
 from app import api
+from app.agent_tools import ToolContext, execute_tool
 from app.assembly import build_document_files
 from app.bom_engine import build_complete_bom
+from app.commercial_design import adopt_commercial
+from app.concept_agent import attach_concept
+from app.concept_design import compile_concept
 from app.domain import apply_update, new_project
 from app.fixture_adapter import compile_standalone_fixture
 from app.fixture_drawings import build_fixture_package_zip
 from app.hardware_compatibility import evaluate_hardware_compatibility
 from app.supplier_apis import clear_supplier_api_caches
+from app.upstream_docs import parse_upstream_bom
 
 
 @pytest.fixture(autouse=True)
@@ -35,10 +43,7 @@ def reset_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
 
 
 def test_compatible_workstation_passes_all_deterministic_checks():
-    proj = apply_update(
-        new_project(),
-        {"workflow_kind": "liquid_preparation", "cooling_enabled": True},
-    )
+    proj = designed_workstation(cooling_enabled=True)
     report = evaluate_hardware_compatibility(proj)
     assert report["status"] == "compatible"
     assert report["error_count"] == 0
@@ -46,8 +51,121 @@ def test_compatible_workstation_passes_all_deterministic_checks():
     assert report["pass_count"] >= 5
 
 
+@pytest.mark.parametrize("brief", [
+    {},
+    {"workflow_kind": "general", "brief_objective": "Measure reflected light from a tile."},
+    {"workflow_kind": "liquid_preparation"},
+])
+def test_general_brief_needs_a_design_in_agent_and_api(brief):
+    project = apply_update(new_project(), brief)
+    api._sessions[project["id"]] = api.ProjectSession(project=project)
+    response = TestClient(api.app).get(
+        f"/api/projects/{project['id']}/bom", params={"revision": project["revision"]}
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["bom"]["lines"] == []
+    assert payload["bom"]["status"] == "design_required"
+    assert payload["compatibility"]["status"] == "not_evaluated"
+    parts = TestClient(api.app).get(
+        f"/api/projects/{project['id']}/parts", params={"revision": project["revision"]}
+    ).json()
+    assert parts["rows"] == [] and parts["summary"]["total_low_usd"] is None
+    result = asyncio.run(execute_tool(
+        "generate_purchasable_bom", {"currency": "CHF"},
+        ToolContext(project=project, user_message="List parts.")
+    ))
+    assert result.ok and result.data["status"] == "design_required"
+    assert result.data["lines"] == []
+
+
+def test_general_supplies_keep_their_requirements_without_inventing_offers():
+    project = apply_update(new_project(), {"workflow_kind": "general"})
+    proposal = concept_proposal()
+    proposal["supplies"] = [
+        {"key": key, "name": name, "quantity": 3, "unit": "each", "source_id": None,
+         "role": "Acquire an optical signal.", "component_keys": ["optic_head"]}
+        for key, name in (
+            ("detector", "Silicon photodiode"), ("isolator", "Camera trigger isolator")
+        )
+    ]
+    project = attach_concept(project, project.copy(), compile_concept(proposal))
+    api._sessions[project["id"]] = api.ProjectSession(project=project)
+    response = TestClient(api.app).get(
+        f"/api/projects/{project['id']}/bom", params={"revision": project["revision"]}
+    )
+    assert response.status_code == 200
+    bom = response.json()["bom"]
+    assert bom["status"] == "incomplete"
+    result = asyncio.run(execute_tool(
+        "generate_purchasable_bom", {}, ToolContext(project=project, user_message="List parts.")
+    ))
+    assert result.data["status"] == "incomplete"
+    client = TestClient(api.app)
+    base = f"/api/projects/{project['id']}"
+    params = {"revision": project["revision"]}
+    proposal_rows = client.get(base + "/parts", params=params).json()["rows"]
+    package = client.get(base + "/concept/package.zip", params=params)
+    assert package.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(package.content)) as archive:
+        stored_json = json.loads(archive.read("bom/purchasable-bom.json"))
+        stored_csv = list(csv.DictReader(io.StringIO(archive.read("bom/purchasable-bom.csv")
+                                                      .decode("utf-8"))))
+    assert stored_json["lines"] == bom["lines"]
+    for supply in proposal["supplies"]:
+        line = next(r for r in bom["lines"] if r["label"] == supply["name"])
+        assert line["quantity"] == 3 and line["unit"] == "each"
+        assert line["resolution_status"] == "selection_required"
+        assert all(line[k] is None for k in ("catalog_id", "supplier", "sku", "mpn", "line_total"))
+        agent_line = next(r for r in result.data["lines"] if r["label"] == supply["name"])
+        assert agent_line["qty"] == 3 and agent_line["unit"] == "each"
+        assert agent_line["line_total"] is None and agent_line["sku"] is None
+        group = "concept-" + supply["key"]
+        proposal_line = next(r for r in proposal_rows if r["group_id"] == group)
+        assert proposal_line["line_total_low_usd"] is None
+        export_line = next(r for r in stored_csv if r["line_id"] == line["line_id"])
+        assert export_line["line_total"] == export_line["sku"] == ""
+
+
+def test_imported_requirements_preserve_source_identity_without_flat_rate_pricing():
+    project = apply_update(new_project(), {"workflow_kind": "general"})
+    project["upstream_project"] = {"bom": parse_upstream_bom({"bom.csv": (
+        "name,sku,mpn,supplier,qty,unit\n"
+        "Reference lamp,LAB-X17,,Example Instruments,2,each\n"
+        "MGN12 rail for a 650 mm axis,,,,as needed,rail\n"
+        "Cable,,,,1.5,m\n"
+        "Different device,SC0917,,Example Instruments,1,each\n"
+        "Identified controller,,SC0917,,1,each\n"
+    )})}
+    bom = build_complete_bom(project)
+    assert [row["quantity"] for row in bom["lines"]] == [2, "as needed", "1.5", 1, 1]
+    assert bom["summary"]["unresolved_count"] == 4
+    lamp = bom["lines"][0]
+    assert lamp["label"] == "Reference lamp" and lamp["requirement"]["sku"] == "LAB-X17"
+    assert lamp["requirement"]["source_file"] == "bom.csv"
+    assert all(row["line_total"] is None and row["supplier"] is None for row in bom["lines"][:4])
+    assert bom["lines"][2]["unit"] == "m"
+    assert bom["lines"][4]["catalog_id"] == "pico-h"
+
+
+def test_selected_ot2_keeps_its_own_consumables_in_api_and_agent():
+    project = adopt_commercial(layout_project())
+    api._sessions[project["id"]] = api.ProjectSession(project=project)
+    payload = TestClient(api.app).get(
+        f"/api/projects/{project['id']}/bom", params={"revision": project["revision"]}
+    ).json()["bom"]
+    assert {row["catalog_id"] for row in payload["lines"]} == {
+        "opentrons-ot2", "opentrons-300ul-tips-pack", "corning-3596-case",
+    }
+    result = asyncio.run(execute_tool(
+        "generate_purchasable_bom", {}, ToolContext(project=project, user_message="List parts.")
+    ))
+    assert result.ok and result.data["status"] == "itemized"
+    assert [row["mpn"] for row in result.data["lines"]] == [r["mpn"] for r in payload["lines"]]
+
+
 def test_voltage_power_driver_csi_and_mechanical_mismatches_caught():
-    proj = apply_update(new_project(), {"workflow_kind": "liquid_preparation"})
+    proj = designed_workstation()
     bom = build_complete_bom(proj)
 
     # Inject 12V Peltier without 12V PSU, NEMA17+A4988, and CSI camera on Pico
@@ -243,7 +361,7 @@ def test_phase5_http_routes_fx_download_and_zip_exports(monkeypatch: pytest.Monk
             "bom/hardware-compatibility.json",
         } <= names
 
-    ws = apply_update(new_project(), {"workflow_kind": "liquid_preparation"})
+    ws = designed_workstation()
     ws_files = build_document_files(ws)
     assert "bom/purchasable-bom.csv" in ws_files
     assert "bom/hardware-compatibility.json" in ws_files
@@ -253,7 +371,7 @@ def test_autonomous_agent_calls_bom_and_compatibility_tools(monkeypatch: pytest.
     from app.agent_loop import run_agent_turn
     from app.model_client import ModelSettings
 
-    proj = apply_update(new_project(), {"workflow_kind": "liquid_preparation"})
+    proj = designed_workstation()
     calls = 0
 
     class MockOA(httpx.AsyncBaseTransport):

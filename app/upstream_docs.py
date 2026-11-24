@@ -103,12 +103,19 @@ def _pick_bom_name(rec: dict[str, str]) -> str | None:
     return None
 
 
-def _parse_qty(raw_val: str | None) -> int | str:
-    raw = (raw_val or "1").strip()
-    try:
-        return max(1, int(float(raw)))
-    except ValueError:
-        return raw
+def _purchase_fields(record: dict[str, Any]) -> dict[str, Any]:
+    value = next((record[k] for k in ("qty", "quantity", "count")
+                  if record.get(k) not in (None, "")), 1)
+    raw = str(value).strip()
+    # Keep fractional lengths and free-text quantities as written in the source.
+    quantity = int(raw.split(".")[0]) if re.fullmatch(r"[0-9]{1,12}(?:\.0+)?", raw) else raw
+    return {
+        "quantity": quantity,
+        "unit": record.get("unit") or record.get("uom") or None,
+        "sku": record.get("sku") or None,
+        "mpn": record.get("mpn") or record.get("manufacturer_part_number") or None,
+        "part_number": record.get("part_number") or None,
+    }
 
 
 def _extract_csv_bom(path: str, text: str) -> list[dict[str, Any]]:
@@ -120,13 +127,11 @@ def _extract_csv_bom(path: str, text: str) -> list[dict[str, Any]]:
         name = _pick_bom_name(norm)
         if not name:
             continue
-        qty = _parse_qty(norm.get("qty") or norm.get("quantity") or norm.get("count"))
         items.append(
             {
                 "id": f"upstream-bom-{idx}",
                 "name": name,
-                "quantity": qty,
-                "sku": norm.get("sku") or norm.get("mpn") or norm.get("part_number") or None,
+                **_purchase_fields(norm),
                 "supplier": (
                     norm.get("supplier") or norm.get("vendor") or norm.get("source") or None
                 ),
@@ -169,13 +174,11 @@ def _extract_yaml_subset_bom(path: str, text: str) -> list[dict[str, Any]]:
         name = _pick_bom_name(rec)
         if not name:
             continue
-        qty = _parse_qty(rec.get("qty") or rec.get("quantity") or rec.get("count"))
         items.append(
             {
                 "id": f"upstream-yaml-{idx}",
                 "name": name,
-                "quantity": qty,
-                "sku": rec.get("sku") or rec.get("mpn") or None,
+                **_purchase_fields(rec),
                 "supplier": rec.get("supplier") or rec.get("vendor") or None,
                 "source_url": rec.get("url") or rec.get("link") or None,
                 "notes": rec.get("notes") or rec.get("spec") or None,
@@ -207,13 +210,11 @@ def _extract_markdown_bom(path: str, text: str) -> list[dict[str, Any]]:
                 }
                 name = _pick_bom_name(rec)
                 if name:
-                    qty = _parse_qty(rec.get("qty") or rec.get("quantity") or rec.get("count"))
                     items.append(
                         {
                             "id": f"upstream-md-{len(items) + 1}",
                             "name": name,
-                            "quantity": qty,
-                            "sku": rec.get("sku") or rec.get("mpn") or None,
+                            **_purchase_fields(rec),
                             "supplier": rec.get("supplier") or rec.get("vendor") or None,
                             "source_url": rec.get("url") or None,
                             "notes": rec.get("notes") or rec.get("spec") or None,
@@ -291,8 +292,7 @@ def parse_upstream_bom(
                         {
                             "id": f"upstream-json-{idx}",
                             "name": str(r.get("name") or r.get("part"))[:200],
-                            "quantity": r.get("qty") or r.get("quantity") or 1,
-                            "sku": r.get("sku") or r.get("mpn"),
+                            **_purchase_fields(r),
                             "supplier": r.get("supplier") or r.get("vendor"),
                             "source_url": r.get("url"),
                             "notes": r.get("notes"),

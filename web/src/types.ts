@@ -792,23 +792,28 @@ export type PrintEstimate = {
 export type PurchasableBomLine = {
   line_id: string;
   group_id: string;
-  catalog_id: string;
+  catalog_id: string | null;
   label: string;
   category: string;
-  kind: 'commercial_part' | '3d_printed';
+  kind: 'commercial_part' | '3d_printed' | 'requirement';
+  resolution_status: 'catalog_identified' | 'fabricate' | 'selection_required';
+  requirement?: {
+    name: string; quantity: string | number; unit: string;
+    sku?: string; mpn?: string; part_number?: string; supplier?: string; source_file?: string;
+  };
   component_ids: string[];
   supplier: string | null;
   sku: string | null;
   mpn: string | null;
-  quantity: number;
+  quantity: number | string;
   unit: string;
-  pack_size: number;
-  packs_to_order: number;
+  pack_size: number | null;
+  packs_to_order: number | null;
   currency: BomCurrency;
   unit_price: number | null;
   pack_price: number | null;
   line_total: number | null;
-  price_source: 'live_api' | 'curated_reference' | 'slicer_material_estimate';
+  price_source: 'live_api' | 'curated_reference' | 'slicer_material_estimate' | 'unpriced';
   availability: string;
   stock_quantity?: number | null;
   lead_time_days?: number | null;
@@ -825,6 +830,7 @@ export type PurchasableBom = {
   project_id: string;
   project_revision: number;
   route_kind: string;
+  status: 'design_required' | 'incomplete' | 'itemized';
   currency: BomCurrency;
   fx_rate_used?: number | null;
   fx_source?: string | null;
@@ -838,6 +844,7 @@ export type PurchasableBom = {
     live_api_priced_count: number;
     reference_priced_count: number;
     unpriced_placeholder_count: number;
+    unresolved_count: number;
     live_api_subtotal: number;
     reference_catalog_subtotal: number;
     printed_material_subtotal: number;
@@ -865,7 +872,7 @@ export type HardwareCompatibilityReport = {
   schema_version: number;
   project_id: string;
   project_revision: number;
-  status: 'compatible' | 'warnings' | 'incompatible';
+  status: 'compatible' | 'warnings' | 'incompatible' | 'not_evaluated';
   error_count: number;
   warning_count: number;
   pass_count: number;

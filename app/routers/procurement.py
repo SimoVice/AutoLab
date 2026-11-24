@@ -9,7 +9,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.bom_engine import bom_to_csv, bom_to_json, build_complete_bom
+from app.bom_engine import bom_to_csv, bom_to_json, build_complete_bom, purchasing_route
 from app.hardware_compatibility import evaluate_hardware_compatibility
 from app.lab_profile import has_lab_profile_data, load_lab_profile
 from app.model_client import using_model
@@ -300,7 +300,7 @@ async def refresh_purchasable_bom(
                 lab_profile = _active_lab_profile()
             fx_rates = None
             warnings: list[str] = []
-            if payload.currency != "USD":
+            if payload.currency != "USD" and purchasing_route(project) != "unselected":
                 try:
                     fx_rates = await fetch_fx_rates("USD")
                 except SupplierApiError as exc:

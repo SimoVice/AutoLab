@@ -151,10 +151,26 @@ def _money(value):
     return float(Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
-def _allowance(row):
+def _allowance(row, project):
     """Explicit engineering budget scenarios; none of these are supplier facts."""
     gid = row["group_id"]
     text = (gid + " " + row["label"]).lower()
+    if gid == "tip-rack-options":
+        tips = project.get("tip_rack") or {}
+        if tips.get("kind") == "rim_supported_tip_rack":
+            return 30, 200, (
+                "Proposed $10–150 holder fabrication plus $20–50 for a separate pack "
+                "of purchased tips. Exact tip SKU, pack size and fit need review."
+            )
+        if tips.get("profile_id") == "tipone_96_tiprack_200ul":
+            return 30, 120, (
+                "Planning allowance for one supplier pack of TipOne 200 µL stack racks "
+                "(1111-0200). Confirm the pack size and price with the supplier."
+            )
+        return 40, 160, (
+            "Planning allowance for one supplier pack of Opentrons OT-2 300 µL tips/racks. "
+            "Select rack/refill packaging and obtain its current price."
+        )
     if gid == "cold-transfer-fridge":
         return 900, 2200, "One compact laboratory refrigerator; custom door actuation excluded."
     if gid == "cold-transfer-motion":
@@ -276,6 +292,7 @@ def build_parts_proposal(
     project: dict, report: dict | None = None, estimate: dict | None = None
 ) -> dict:
     """Pure revision-bound view; never fetch sources, mutate state or call a model."""
+    from app.bom_engine import build_complete_bom, purchasing_route
     from app.price_estimation import estimate_for_project
     from app.procurement import initial_procurement_rows, procurement_groups, report_for_project
 
@@ -293,48 +310,34 @@ def build_parts_proposal(
     cost = estimate_for_project(project, estimate, current)
     priced = {r["group_id"]: r for r in (cost or {}).get("rows", [])}
     observed = {r["group_id"]: r for r in (current or {}).get("rows", [])}
-    groups = {g["id"]: g for g in procurement_groups(project)}
+    # Older standalone sourcing scenarios supply explicit groups and have no workflow.
+    scopes_available = "workflow" not in project or purchasing_route(project) != "unselected"
+    groups = {g["id"]: g for g in procurement_groups(project)} if scopes_available else {}
     concepts = {
         "concept-" + p["key"]: p for p in (project.get("concept_design") or {}).get("parts", [])
     }
+    concept_lines = {}
+    if concepts:
+        bom = build_complete_bom(project, procurement_report=current)
+        concept_lines = {line["group_id"]: line for line in bom["lines"]}
     rows = []
-    for purchase in initial_procurement_rows(project):
+    for purchase in initial_procurement_rows(project) if groups else []:
         gid, quantity = purchase["group_id"], purchase["quantity"]
-        low, high, note = _allowance(purchase)
-        if gid == "tip-rack-options":
-            tips = project.get("tip_rack") or {}
-            if tips.get("kind") == "rim_supported_tip_rack":
-                low, high, note = (
-                    30,
-                    200,
-                    (
-                        "Proposed $10–150 holder fabrication plus $20–50 for a separate pack "
-                        "of purchased tips. Exact tip SKU, pack size and fit need review; "
-                        "the printed part is only a reusable holder, never disposable tips."
-                    ),
-                )
-            elif tips.get("profile_id") == "tipone_96_tiprack_200ul":
-                low, high, note = (
-                    30,
-                    120,
-                    (
-                        "Planning allowance for one supplier pack of TipOne 200 µL stack racks "
-                        "(1111-0200); current pack size and price require a supplier quote. "
-                        "No printed holder is charged."
-                    ),
-                )
-            else:
-                low, high, note = (
-                    40,
-                    160,
-                    (
-                        "Planning allowance for one supplier pack of Opentrons OT-2 300 µL "
-                        "tips/racks; select rack/refill packaging and obtain its current price. "
-                        "No printed holder is charged."
-                    ),
-                )
-        low, high = low * quantity, high * quantity
-        kind, date, price_url = "planning_allowance", REVIEWED_ON, None
+        if line := concept_lines.get(gid):
+            low = high = line["line_total"]
+            kind = line["price_source"]
+            date = bom["catalog_checked_on"] if kind == "curated_reference" else line["fetched_at"]
+            price_url = line["source_url"]
+            note = {
+                "unpriced": "Identify the part and its purchasing unit to obtain a price.",
+                "curated_reference": "Dated catalog price for the required number of packs.",
+                "slicer_material_estimate": "Estimated filament cost for this modeled part.",
+                "live_api": "Observed supplier price for the required number of packs.",
+            }[kind]
+        else:
+            low, high, note = _allowance(purchase, project)
+            low, high = low * quantity, high * quantity
+            kind, date, price_url = "planning_allowance", REVIEWED_ON, None
         item = priced.get(gid, {})
         observation = observed.get(gid, {})
         if item.get("low_usd") is not None and item.get("high_usd") is not None:
@@ -353,6 +356,10 @@ def build_parts_proposal(
         if not source or gid in ("labware-plate", "tip-rack-options"):
             prior = source
             source, source_label, source_kind = _source_candidate(purchase, project)
+            if (concepts.get(gid, {}).get("basis") == "selection_required"
+                    and source_kind == "fabrication_service"):
+                source = concepts[gid].get("catalog_search_url")
+                source_label, source_kind = purchase["label"], "supplier_search"
             if gid in concepts and concepts[gid].get("basis") == "custom_concept":
                 source, source_label, source_kind = (
                     FABRICATION_URL,
@@ -418,10 +425,10 @@ def build_parts_proposal(
             "quantity": quantity,
             "unit": part.get("unit") or "item/set",
             "component_ids": purchase["component_ids"],
-            "unit_price_low_usd": _money(low / quantity),
-            "unit_price_high_usd": _money(high / quantity),
-            "line_total_low_usd": _money(low),
-            "line_total_high_usd": _money(high),
+            "unit_price_low_usd": _money(low / quantity) if low is not None else None,
+            "unit_price_high_usd": _money(high / quantity) if high is not None else None,
+            "line_total_low_usd": _money(low) if low is not None else None,
+            "line_total_high_usd": _money(high) if high is not None else None,
             "price_kind": kind,
             "price_note": note,
             "source_url": source,
@@ -494,6 +501,7 @@ def build_parts_proposal(
                 "included_in_total": False,
             }
         rows.append(row)
+    priced_rows = [row for row in rows if row["line_total_low_usd"] is not None]
     return {
         "schema_version": 1,
         "project_id": project["id"],
@@ -501,10 +509,12 @@ def build_parts_proposal(
         "currency": "USD",
         "rows": rows,
         "summary": {
-            "total_low_usd": _money(sum(r["line_total_low_usd"] for r in rows)),
-            "total_high_usd": _money(sum(r["line_total_high_usd"] for r in rows)),
-            "priced_count": len(rows),
-            "unpriced_count": 0,
+            "total_low_usd": _money(sum(r["line_total_low_usd"] for r in priced_rows))
+            if priced_rows else None,
+            "total_high_usd": _money(sum(r["line_total_high_usd"] for r in priced_rows))
+            if priced_rows else None,
+            "priced_count": len(priced_rows),
+            "unpriced_count": len(rows) - len(priced_rows),
             "row_count": len(rows),
             "supplier_priced_count": sum(r["price_kind"] == "verified_supplier" for r in rows),
             "exclusions": [
