@@ -2413,7 +2413,7 @@ async def _tool_generate_purchasable_bom(
                     "price_source": ln["price_source"],
                     "lead_time_days": ln["lead_time_days"],
                 }
-                for ln in bom["lines"][:18]
+                for ln in bom["lines"][:40]
             ],
         },
         action_run=run,
