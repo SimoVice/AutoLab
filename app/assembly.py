@@ -62,29 +62,6 @@ def _footprint(project: dict) -> dict:
     }
 
 
-def _sourcing_groups(project: dict) -> list[dict]:
-    sourcing = project.get("sourcing") or {}
-    groups = sourcing.get("groups") or []
-    return [g for g in groups if isinstance(g, dict)]
-
-
-def _selected_option(group: dict) -> dict | None:
-    selected_id = group.get("selected_id")
-    for opt in group.get("options") or []:
-        if opt.get("id") == selected_id:
-            return opt
-    return None
-
-
-def _money(value) -> str:
-    if value is None:
-        return ""
-    try:
-        return f"{float(value):.2f}"
-    except (TypeError, ValueError):
-        return ""
-
-
 def _display_mm(value) -> str:
     """Round document dimensions only; canonical geometry retains full precision."""
     if value is None:
@@ -115,60 +92,13 @@ def _csv_cell(value: str) -> str:
     return value
 
 
-def _bom_rows(project: dict) -> list[list[str]]:
-    currency = str((project.get("sourcing") or {}).get("currency", "USD"))
-    rows: list[list[str]] = []
-    for group in _sourcing_groups(project):
-        opt = _selected_option(group)
-        if opt is None:
-            continue
-        qty = group.get("quantity", 1)
-        unit = opt.get("unit_price")
-        try:
-            line = float(unit) * int(qty) if unit is not None else None
-        except (TypeError, ValueError):
-            line = None
-        rows.append(
-            [
-                str(group.get("id", "")),
-                str(group.get("label", "")),
-                str(opt.get("label", "")),
-                str(opt.get("supplier", "")),
-                str(qty),
-                _money(unit),
-                _money(line),
-                currency,
-                str(opt.get("price_kind", "")),
-                str(opt.get("source_url") or ""),
-                str(opt.get("checked_on") or ""),
-                str(opt.get("compatibility_note") or ""),
-            ]
-        )
-    return rows
+def build_bom_csv(project: dict, *, bom: dict | None = None) -> bytes:
+    """Export the same purchasing lines and cost classifications as the parts workspace."""
+    from app.bom_engine import bom_to_csv, build_complete_bom
 
-
-def build_bom_csv(project: dict) -> bytes:
-    buf = io.StringIO()
-    writer = csv.writer(buf, quoting=csv.QUOTE_MINIMAL, lineterminator="\n")
-    writer.writerow(
-        [
-            "group",
-            "group_label",
-            "option",
-            "supplier",
-            "quantity",
-            "unit_price",
-            "line_total",
-            "currency",
-            "price_kind",
-            "source",
-            "checked_on",
-            "compatibility",
-        ]
-    )
-    for row in _bom_rows(project):
-        writer.writerow([_csv_cell(c) for c in row])
-    return buf.getvalue().encode("utf-8")
+    if bom is None:
+        bom = build_complete_bom(project, procurement_report=project.get("procurement_report"))
+    return bom_to_csv(bom)
 
 
 def build_preparation_csv(project: dict) -> bytes:
@@ -644,7 +574,7 @@ def build_readme(project: dict) -> bytes:
             "STL and editable script represent schematic reference geometry, not vendor CAD. "
             "Do not fabricate the purchased frame or deck from these proxies.\n\n"
             "Open assembly-guide.html, purchase-and-assembly.md and engineering-guidance.json. "
-            "bill-of-materials.csv is an unpriced quotation checklist, not a custom motor BOM. "
+            "bill-of-materials.csv lists consumables and the robot budget pending a quote. "
             "Verify compatible pipettes, labware and tips, installation space, actual quote, "
             "stock/delivery and manufacturer calibration.\n\n"
             "simulation/result.json records not_run: no OT-2 control/dynamics adapter "
@@ -659,8 +589,8 @@ def build_readme(project: dict) -> bytes:
         f"Project {_project_id(project)} revision {_revision(project)} — concept only.\n\n"
         "## How to open\n\n"
         "- Open assembly-guide.html in a browser and print it to PDF if needed.\n"
-        "- assembly.json lists the assembly steps; bill-of-materials.csv holds selected options\n"
-        "  (blank prices are unknown, never zero); preparation.csv holds per-target volumes.\n"
+        "- Read assembly.json for assembly steps and preparation.csv for per-target volumes.\n"
+        "- Open bill-of-materials.csv for purchasing lines, documented prices and budgets.\n"
         "- extensions.md and extension-plan.json describe this revision's extension status.\n\n"
         "- Open cad/workstation.step in a STEP-compatible CAD viewer (millimetres, Z up).\n"
         "  cad/deck.step and cad/deck.stl contain a solid blank, without mounts or holes.\n"
@@ -970,27 +900,28 @@ def build_extensions_md(project: dict) -> bytes:
 
 def build_document_files(project: dict, procurement: dict | None = None) -> dict[str, bytes]:
     """Build all standalone document bytes for the snapshot."""
-    from app.bom_engine import bom_to_csv, bom_to_json, build_complete_bom
+    from app.bom_engine import bom_to_json, build_complete_bom
     from app.hardware_compatibility import evaluate_hardware_compatibility
     from app.instructions import build_instruction_files
     from app.lab_profile import load_lab_profile
     from app.price_estimation import cost_report_from_bom, estimate_csv
     from app.procurement import report_for_project
 
-    report = procurement if procurement is not None else project.get("procurement_report")
+    report = report_for_project(
+        project, procurement if procurement is not None else project.get("procurement_report")
+    )
     active_prof = load_lab_profile()
     complete_bom = build_complete_bom(project, procurement_report=report, lab_profile=active_prof)
 
     files: dict[str, bytes] = {
-        **build_instruction_files(project, procurement, bom=complete_bom),
-        "bill-of-materials.csv": build_bom_csv(project),
+        **build_instruction_files(project, report, bom=complete_bom),
         "preparation.csv": build_preparation_csv(project),
         "automation/preview.py": build_preview_source(project),
         "README.md": build_readme(project),
         "extension-plan.json": build_extension_plan(project),
         "extensions.md": build_extensions_md(project),
     }
-    cost = cost_report_from_bom(complete_bom, report_for_project(project, report))
+    cost = cost_report_from_bom(complete_bom, report)
     files["cost-estimate.json"] = json.dumps(cost, indent=2, allow_nan=False).encode("utf-8")
     files["cost-estimate.csv"] = estimate_csv(cost)
     files["README.md"] += (
@@ -1002,16 +933,12 @@ def build_document_files(project: dict, procurement: dict | None = None) -> dict
     if report:
         from app.procurement import report_csv, report_json
 
-        files["bill-of-materials.csv"] = report_csv(report)
+        files["procurement-report.csv"] = report_csv(report)
         files["procurement-report.json"] = report_json(report)
-        files["README.md"] = files["README.md"].replace(
-            b"bill-of-materials.csv is an unpriced quotation checklist, not a custom motor BOM.",
-            b"bill-of-materials.csv is the bound US procurement snapshot, not a custom motor BOM.",
-        )
         files["README.md"] += (
             "\n## Bound procurement report\n\n"
             f"Report {report['report_id']} belongs to this project revision. "
-            "bill-of-materials.csv and procurement-report.json preserve its current prices, "
+            "procurement-report.csv and procurement-report.json preserve its current prices, "
             "quantities, source URLs, dates, gaps and stale/unavailable statuses. "
             "The known subtotal is partial, excludes unresolved items, and is not a "
             "complete machine quotation. Commercial offers do not replace accepted geometry.\n"
@@ -1081,7 +1008,8 @@ def build_document_files(project: dict, procurement: dict | None = None) -> dict
         )
     compat = evaluate_hardware_compatibility(project, complete_bom, lab_profile=active_prof)
     files["bom/purchasable-bom.json"] = bom_to_json(complete_bom)
-    files["bom/purchasable-bom.csv"] = bom_to_csv(complete_bom)
+    files["bill-of-materials.csv"] = build_bom_csv(project, bom=complete_bom)
+    files["bom/purchasable-bom.csv"] = files["bill-of-materials.csv"]
     files["bom/hardware-compatibility.json"] = json.dumps(
         compat, indent=2, ensure_ascii=False, allow_nan=False
     ).encode("utf-8")

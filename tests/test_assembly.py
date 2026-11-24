@@ -85,15 +85,36 @@ def test_conditional_cold_step():
 
 
 def test_revision_and_unknown_prices():
-    project = _confirmed()
+    from test_commercial_design import layout_project
+
+    from app.commercial_design import adopt_commercial
+
+    project = adopt_commercial(layout_project())
     files = build_document_files(project)
     payload = json.loads(files["assembly.json"].decode())
     assert payload["project_id"] == project["id"] and payload["revision"] == project["revision"]
     rows = list(csv.DictReader(io.StringIO(files["bill-of-materials.csv"].decode())))
-    assert rows, "BOM must list selected options"
-    custom = [r for r in rows if r["price_kind"] == "unpriced"]
-    assert custom and all(r["unit_price"] == "" and r["line_total"] == "" for r in custom)
-    assert "0" not in [r["unit_price"] for r in custom]
+    assert files["bill-of-materials.csv"] == files["bom/purchasable-bom.csv"]
+    robot = next(r for r in rows if r["line_id"] == "platform:opentrons-ot2")
+    assert robot["unit_price"] == robot["documented_line_total"] == robot["planning_high"] == ""
+    assert Decimal(robot["planning_low"]) == 15950
+    assert sum(Decimal(r["documented_line_total"] or "0") for r in rows) == Decimal("352.99")
+
+
+def test_supplier_report_is_exported_alongside_the_classified_purchasing_list():
+    from test_price_estimation import project_fixture, supplier_report
+
+    project = project_fixture()
+    report = supplier_report(project)
+    files = build_document_files(project, report)
+    assert files["bill-of-materials.csv"] == files["bom/purchasable-bom.csv"]
+    purchase = list(csv.DictReader(io.StringIO(files["bill-of-materials.csv"].decode())))
+    controller = next(row for row in purchase if row["group_id"] == "controller")
+    assert Decimal(controller["documented_line_total"]) == 12 and controller["planning_low"] == ""
+    observations = csv.DictReader(io.StringIO(files["procurement-report.csv"].decode()))
+    observation = next(row for row in observations if row["group_id"] == "controller")
+    assert observation["report_id"] == report["report_id"]
+    assert Decimal(observation["line_total"]) == 12
 
 
 def test_guide_rounds_display_dimensions_without_mutating_canonical_geometry():
@@ -185,5 +206,7 @@ def test_expected_file_set_and_extension_plan():
     assert b"<svg" in files["assembly-guide.html"]
     assert all(isinstance(v, bytes) and v for v in files.values())
     assert "revision" in files["extension-plan.json"].decode()
-    rows = list(csv.DictReader(io.StringIO(files["bill-of-materials.csv"].decode())))
-    assert sum(Decimal(row["line_total"]) for row in rows if row["line_total"]) == Decimal("208.28")
+    bom = json.loads(files["bom/purchasable-bom.json"])
+    assert bom["status"] == "design_required" and bom["lines"] == []
+    assert not list(csv.DictReader(io.StringIO(files["bill-of-materials.csv"].decode())))
+    assert files["bill-of-materials.csv"] == files["bom/purchasable-bom.csv"]

@@ -43,6 +43,10 @@ the evidence behind each range. The purchasing CSV puts documented amounts and
 filament in distinct columns. The first item also carries the revision subtotals
 and missing-price count.
 
+The workstation ZIP includes this same CSV as `bill-of-materials.csv` at its root
+and as `bom/purchasable-bom.csv`. When a supplier report is attached,
+`procurement-report.csv` preserves its individual supplier observations.
+
 The US market setting specifies source listings and currency. It does not determine
 shipping eligibility, destination-specific sales tax, duties or lead time. Those
 costs, custom fabrication, assembly, validation and unspecified hardware are excluded.
