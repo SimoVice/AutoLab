@@ -1,8 +1,9 @@
 """Revision-checked cost reads and refreshes use the same local purchasing evidence."""
 
-from concurrent.futures import ThreadPoolExecutor
+import asyncio
 from copy import deepcopy
 
+import httpx
 import pytest
 from test_custom_project_routes import client as client
 from test_custom_project_routes import install, project_fixture
@@ -18,8 +19,14 @@ def test_get_and_concurrent_refresh_agree_without_mutating_project(client):
     before = deepcopy(project)
     payload = {"project_revision": project["revision"], "force": True}
     read = client.get(route, params={"revision": project["revision"]}).json()["estimate"]
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        replies = list(pool.map(lambda _: client.post(route, json=payload), range(6)))
+
+    async def concurrent_refreshes():
+        # A server handles requests for a session on the same event loop as its project lock.
+        transport = httpx.ASGITransport(app=api.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as server:
+            return await asyncio.gather(*(server.post(route, json=payload) for _ in range(6)))
+
+    replies = asyncio.run(concurrent_refreshes())
     for reply in replies:
         assert reply.status_code == 200
         data = reply.json()["estimate"]
