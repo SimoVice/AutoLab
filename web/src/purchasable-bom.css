@@ -217,7 +217,9 @@
   color: #334155;
 }
 
-.bom-badge-unpriced {
+.bom-badge-unpriced,
+.bom-badge-unavailable,
+.bom-badge-stale_observation {
   background: #fff3d1;
   color: #70480a;
 }

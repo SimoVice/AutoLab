@@ -20,6 +20,7 @@ from uuid import uuid4
 import httpx
 
 from app.supplier_apis import (
+    UNAVAILABLE_STATES,
     SupplierApiError,
     convert_currency,
     fetch_fx_rates,
@@ -331,10 +332,10 @@ def _row(group: dict) -> dict:
 def _apply_observation(row: dict, observation: dict, *, stale: bool, issue: str | None) -> None:
     packs = row["pack_count"]
     eligible = [tier for tier in observation["price_breaks"] if tier["minimum_packs"] <= packs]
-    pack_price = Decimal(eligible[-1]["pack_price"])
-    unit_price = pack_price / row["pack_size"]
-    unavailable = observation["availability"] in {"OutOfStock", "SoldOut", "Discontinued"}
-    line_total = None if unavailable else _amount(pack_price * packs)
+    pack_price = Decimal(eligible[-1]["pack_price"]) if eligible else None
+    unit_price = _amount(pack_price / row["pack_size"]) if pack_price is not None else None
+    unavailable = observation["availability"] in UNAVAILABLE_STATES
+    line_total = _amount(pack_price * packs) if pack_price is not None and not unavailable else None
     row.update(
         currency=observation.get("currency", row.get("currency", "USD")),
         product_name=observation["product_name"],
@@ -345,10 +346,10 @@ def _apply_observation(row: dict, observation: dict, *, stale: bool, issue: str 
         evidence_sha256=observation["evidence_sha256"],
         parser=observation["parser"],
         price_breaks=deepcopy(observation["price_breaks"]),
-        status="unavailable" if unavailable else "priced",
+        status="unavailable" if unavailable else ("priced" if eligible else "missing"),
         freshness="stale" if stale else "fresh",
         issue=issue,
-        pack_price=_amount(pack_price),
+        pack_price=_amount(pack_price) if pack_price is not None else None,
     )
     for opt_key in ("mpn", "stock_quantity", "lead_time_days", "datasheet_url", "adapter"):
         if observation.get(opt_key) is not None:
@@ -357,13 +358,13 @@ def _apply_observation(row: dict, observation: dict, *, stale: bool, issue: str 
         row["issue"] = "Supplier lists this item as unavailable; its listed price is excluded."
     if stale:
         row.update(
-            last_known_price=_amount(unit_price),
+            last_known_price=unit_price,
             last_known_fetched_at=observation["fetched_at"],
             last_known_line_total=line_total,
         )
         row["pack_price"] = None
     else:
-        row.update(unit_price=_amount(unit_price), line_total=line_total)
+        row.update(unit_price=unit_price, line_total=line_total)
     if observation.get("variant_id"):
         row["variant_id"] = observation["variant_id"]
         row["variant_title"] = observation["variant_title"]

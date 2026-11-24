@@ -1430,7 +1430,8 @@ def _parts_budget(proposal):
     labels = {"verified_supplier": "Supplier price", "included_in_base": "Included in base",
               "model_estimate": "Model estimate", "planning_allowance": "Planning estimate",
               "curated_reference": "Catalog reference", "slicer_material_estimate": "Filament cost",
-              "live_api": "Supplier price", "unpriced": "Selection required"}
+              "live_api": "Supplier price", "unpriced": "Selection required",
+              "unavailable": "Supplier unavailable", "stale_observation": "Recheck supplier"}
     records = []
     for row in proposal["rows"]:
         records.append((

@@ -2423,7 +2423,10 @@ async def _tool_generate_purchasable_bom(
     if bom["status"] == "design_required":
         msg = "Select or develop a hardware design to generate its parts list."
     elif s["line_count"] == s["unpriced_placeholder_count"]:
-        msg = f"No prices are available yet. {s['unresolved_count']} requirements await selection."
+        msg = "No current price is available for the listed requirements."
+    if s["unavailable_count"] or s["stale_offer_count"]:
+        msg += (f" Supplier offers unavailable: {s['unavailable_count']}. "
+                f"Observations awaiting a new check: {s['stale_offer_count']}.")
     run = {"kind": "generate_purchasable_bom", "status": "accepted", "message": msg}
     ctx.action_runs.append(run)
     return ToolResult(
@@ -2461,6 +2464,9 @@ async def _tool_generate_purchasable_bom(
                     "packs_to_order": ln["packs_to_order"],
                     "line_total": ln["line_total"],
                     "price_source": ln["price_source"],
+                    "availability": ln["availability"],
+                    "fetched_at": ln["fetched_at"],
+                    "source_url": ln["source_url"],
                     "lead_time_days": ln["lead_time_days"],
                 }
                 for ln in bom["lines"][:40]

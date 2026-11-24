@@ -224,6 +224,21 @@ def test_bom_keeps_live_api_separate_from_curated_reference_and_exports_safe_csv
     assert csv_rows[0]["notes"] == "'=SUM(A1:A2)"
 
 
+def test_supplier_price_tier_applies_to_the_orderable_pack_quantity():
+    from app.bom_engine import _catalog_line, _collect_live_rows
+
+    observations = _collect_live_rows(None, {"pico-h": {
+        "pack_size": 2, "min_order_qty": 3, "price_breaks": [
+            {"minimum_packs": 1, "pack_price": "8.00"},
+            {"minimum_packs": 5, "pack_price": "6.00"},
+        ],
+    }})
+    low = _catalog_line("pico-h", 1, group_id="boards", live_rows=observations)
+    high = _catalog_line("pico-h", 9, group_id="boards", live_rows=observations)
+    assert (low["packs_to_order"], low["line_total"]) == (3, 24.0)
+    assert (high["packs_to_order"], high["unit_price"], high["line_total"]) == (5, 3.0, 30.0)
+
+
 def test_search_official_suppliers_searches_local_catalog_and_reports_missing_keys():
     res = asyncio.run(search_official_suppliers("Mean Well 24V power supply"))
     assert res["api_capabilities"]["digikey_v4"]["configured"] is False

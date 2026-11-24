@@ -4,6 +4,7 @@ import type {
   HardwareCompatibilityReport,
   Project,
   PurchasableBom,
+  PurchasableBomLine,
 } from './types';
 import './purchasable-bom.css';
 
@@ -18,6 +19,11 @@ type Props = {
   project: Project;
   busy?: boolean;
   onSelectPart?: (componentId: string) => void;
+};
+
+const priceLabels: Record<PurchasableBomLine['price_source'], string> = {
+  unpriced: 'Selection required', unavailable: 'Supplier unavailable', stale_observation: 'Recheck supplier',
+  live_api: 'Live API', slicer_material_estimate: '3D printed', curated_reference: 'Reference',
 };
 
 function fmtMoney(amount: number | null | undefined, currency: BomCurrency): string {
@@ -212,6 +218,8 @@ export default function PurchasableBomPanel({ project, busy = false, onSelectPar
                 ? fmtMoney(bom.summary.total_estimated_cost, bom.currency) : 'Price needed'}</strong>
               <small>
                 {bom.summary.line_count} lines · {bom.summary.unresolved_count} awaiting selection
+                {bom.summary.unavailable_count > 0 && ` · ${bom.summary.unavailable_count} unavailable`}
+                {bom.summary.stale_offer_count > 0 && ` · ${bom.summary.stale_offer_count} awaiting a new price`}
               </small>
             </div>
             <div className="bom-kpi-card">
@@ -291,13 +299,11 @@ export default function PurchasableBomPanel({ project, busy = false, onSelectPar
                     </td>
                     <td>
                       <span className={`bom-badge bom-badge-${line.price_source}`}>
-                        {line.price_source === 'unpriced' ? 'Selection required' : line.price_source === 'live_api'
-                          ? 'Live API'
-                          : line.price_source === 'slicer_material_estimate' ||
-                              line.kind === '3d_printed'
-                            ? '3D Printed'
-                            : 'Reference'}
+                        {priceLabels[line.price_source]}
                       </span>
+                      {line.fetched_at && <time className="bom-line-meta" dateTime={line.fetched_at}>
+                        Checked {new Date(line.fetched_at).toLocaleDateString('en-US', { timeZone: 'UTC' })}
+                      </time>}
                       {line.source_url && (
                         <a
                           href={line.source_url}
@@ -311,7 +317,7 @@ export default function PurchasableBomPanel({ project, busy = false, onSelectPar
                     </td>
                     <td>
                       {line.quantity} {line.unit}
-                      {line.pack_size != null && line.pack_size > 1 && (
+                      {line.packs_to_order != null && line.pack_size != null && line.pack_size > 1 && (
                         <span className="bom-line-meta">
                           {line.packs_to_order} pack(s) × {line.pack_size}
                         </span>

@@ -32,6 +32,7 @@ const sourceLabels: Record<string, string> = {
 const priceLabels: Record<string, string> = {
   verified_supplier: 'Supplier price', live_api: 'Supplier price', curated_reference: 'Catalog reference',
   slicer_material_estimate: 'Filament estimate', unpriced: 'Selection required',
+  unavailable: 'Supplier unavailable', stale_observation: 'Recheck supplier',
   model_estimate: 'Model estimate', included_in_base: 'Included in base',
 };
 
@@ -166,7 +167,8 @@ export default function PartsProposal({ project, refreshKey, onSelect, selectedI
                 <p>{row.price_kind.replaceAll('_', ' ')}: {row.price_note}</p>
                 <p>{row.unit_price_basis}</p>
                 {row.evidence.observed_at && <p>
-                  {row.price_kind === 'verified_supplier' ? 'Supplier price checked' : row.price_kind === 'model_estimate' ? 'Estimate generated' : 'Budget reference dated'}
+                  {['verified_supplier', 'live_api', 'unavailable', 'stale_observation'].includes(row.price_kind)
+                    ? 'Supplier checked' : row.price_kind === 'model_estimate' ? 'Estimate generated' : 'Reference dated'}
                   {' '}{new Date(row.evidence.observed_at).toLocaleDateString('en-US', { timeZone: 'UTC' })}
                 </p>}
                 {safeUrl(row.evidence.url) && row.evidence.url !== row.source_url && (

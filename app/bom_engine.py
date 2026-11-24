@@ -14,7 +14,13 @@ from pathlib import Path
 from typing import Any
 
 from app.print_estimator import estimate_fdm_part
-from app.supplier_apis import SupplierApiError, cached_fx_rates, convert_currency
+from app.supplier_apis import (
+    UNAVAILABLE_STATES,
+    SupplierApiError,
+    cached_fx_rates,
+    cached_official_quotes,
+    convert_currency,
+)
 
 CATALOG_PATH = Path(__file__).resolve().parent / "data" / "purchasable_catalog.json"
 
@@ -77,26 +83,37 @@ def _catalog_line(
         raise ValueError(f"Unknown purchasable catalog item {item_id!r}.")
     pack_size = max(1, int(entry.get("pack_size") or 1))
 
-    live = None
-    if live_rows:
-        live = live_rows.get(item_id)
-        if live and not (
-            live.get("status") == "priced"
-            and live.get("freshness") == "fresh"
-            and live.get("line_total") is not None
-        ):
-            live = None
-
-    if live is not None:
+    live = (live_rows or {}).get(item_id) or {}
+    supplier, sku = entry.get("supplier"), entry.get("sku")
+    if live.get("freshness") == "stale" or live.get("status") == "unavailable":
+        stale = live.get("freshness") == "stale"
+        price_source = "stale_observation" if stale else "unavailable"
         pack_size = max(1, int(live.get("pack_size") or pack_size))
-        packs_needed = math.ceil(quantity / pack_size)
+        packs_needed = unit_price = pack_price = line_total = None
+        availability = "recheck_required" if stale else live.get("availability") or "unavailable"
+        stock_qty = None if stale else live.get("stock_quantity")
+        lead_days = None
+        source_url = live.get("availability_source_url") or live.get("price_source_url")
+        fetched_at = live.get("last_known_fetched_at") or live.get("fetched_at")
+        adapter = live.get("adapter") or live.get("parser")
+        supplier = live.get("supplier") or supplier
+        sku = live.get("sku") or sku
+    elif (live.get("freshness") == "fresh" and live.get("status") == "priced"
+          and live.get("line_total") is not None):
+        pack_size = max(1, int(live.get("pack_size") or pack_size))
+        packs_needed = max(math.ceil(quantity / pack_size), int(live.get("min_order_qty") or 1))
+        tiers = sorted(live.get("price_breaks") or [], key=lambda t: t["minimum_packs"])
         live_curr = str(live.get("currency") or "USD").upper()
         raw_pack_price = live.get("pack_price")
+        if tiers:
+            packs_needed = max(packs_needed, tiers[0]["minimum_packs"])
+            raw_pack_price = next(t["pack_price"] for t in reversed(tiers)
+                                  if t["minimum_packs"] <= packs_needed)
         if raw_pack_price is None:
             raw_pack_price = Decimal(str(live.get("unit_price") or 0)) * pack_size
         unit_price = (
             convert_currency(live["unit_price"], live_curr, currency, fx_rates)
-            if live.get("unit_price") is not None
+            if not tiers and live.get("unit_price") is not None
             else convert_currency(
                 Decimal(str(raw_pack_price)) / pack_size, live_curr, currency, fx_rates
             )
@@ -110,6 +127,8 @@ def _catalog_line(
         source_url = live.get("price_source_url") or entry.get("source_url")
         fetched_at = live.get("fetched_at")
         adapter = live.get("adapter") or live.get("parser")
+        supplier = live.get("supplier") or supplier
+        sku = live.get("sku") or sku
     else:
         packs_needed = math.ceil(quantity / pack_size)
         ref_usd = float(entry["reference_unit_price_usd"])
@@ -137,8 +156,8 @@ def _catalog_line(
         "kind": "commercial_part",
         "resolution_status": "catalog_identified",
         "component_ids": list(component_ids or []),
-        "supplier": entry.get("supplier"),
-        "sku": entry.get("sku"),
+        "supplier": supplier,
+        "sku": sku,
         "mpn": entry.get("mpn"),
         "digikey_pn": entry.get("digikey_pn"),
         "mouser_pn": entry.get("mouser_pn"),
@@ -251,26 +270,35 @@ def _collect_live_rows(
         for row in procurement_report.get("rows") or []:
             if not isinstance(row, dict):
                 continue
-            if selected_id := row.get("selected_id"):
+            if (selected_id := row.get("selected_id")) and row.get("status") in {
+                "priced", "unavailable"
+            }:
                 by_id[str(selected_id)] = row
     if isinstance(live_quotes, dict):
         for key, quote in live_quotes.items():
             if not isinstance(quote, dict):
                 continue
             price_breaks = quote.get("price_breaks") or []
-            if not price_breaks:
+            unavail = quote.get("availability") in UNAVAILABLE_STATES
+            freshness = quote.get("freshness", "fresh")
+            raw_price = price_breaks[0]["pack_price"] if price_breaks else quote.get("pack_price")
+            if raw_price is None and not unavail and freshness != "stale":
                 continue
-            pack_price = Decimal(str(price_breaks[0]["pack_price"]))
+            pack_price = Decimal(str(raw_price)) if raw_price is not None else None
             pack_size = max(1, int(quote.get("pack_size") or 1))
-            unavail = quote.get("availability") in {"OutOfStock", "SoldOut", "Discontinued"}
             normalized = {
+                "supplier": quote.get("supplier"),
+                "sku": quote.get("sku"),
                 "currency": quote.get("currency", "USD"),
                 "status": "unavailable" if unavail else "priced",
-                "freshness": "fresh",
+                "freshness": freshness,
                 "pack_size": pack_size,
-                "pack_price": _money_float(pack_price),
-                "unit_price": _money_float(pack_price / pack_size),
-                "line_total": None if unavail else _money_float(pack_price),
+                "price_breaks": price_breaks,
+                "min_order_qty": quote.get("min_order_qty"),
+                "pack_price": pack_price,
+                "unit_price": _money_float(pack_price / pack_size)
+                if pack_price is not None else None,
+                "line_total": None if unavail or freshness == "stale" else pack_price,
                 "availability": quote.get("availability", "unknown"),
                 "stock_quantity": quote.get("stock_quantity"),
                 "lead_time_days": quote.get("lead_time_days"),
@@ -278,6 +306,12 @@ def _collect_live_rows(
                 "fetched_at": quote.get("fetched_at"),
                 "adapter": quote.get("adapter") or quote.get("parser"),
             }
+            previous = by_id.get(str(key)) or {}
+            previous_date = previous.get("fetched_at")
+            quote_date = normalized["fetched_at"]
+            if previous_date and (not quote_date or
+                    datetime.fromisoformat(previous_date) > datetime.fromisoformat(quote_date)):
+                continue
             by_id[str(key)] = normalized
     return by_id
 
@@ -1117,7 +1151,8 @@ def build_complete_bom(
     )
     catalog_data = load_purchasable_catalog()
     catalog_items = catalog_data["items"]
-    live_rows = _collect_live_rows(procurement_report, live_quotes)
+    cached_quotes = cached_official_quotes(curr, eff_fx or cached_fx_rates("USD"))
+    live_rows = _collect_live_rows(procurement_report, {**cached_quotes, **(live_quotes or {})})
 
     compilers = {
         "standalone_fixture": _fixture_bom_lines, "upstream_project": _upstream_bom_lines,
@@ -1162,7 +1197,7 @@ def build_complete_bom(
     unresolved = sum(line.get("resolution_status") == "selection_required" for line in lines)
     if route_kind == "unselected":
         status = "design_required"
-    elif unresolved or not lines:
+    elif unpriced_placeholders or not lines:
         status = "incomplete"
     else:
         status = "itemized"
@@ -1189,6 +1224,8 @@ def build_complete_bom(
             ),
             "unpriced_placeholder_count": unpriced_placeholders,
             "unresolved_count": unresolved,
+            "unavailable_count": sum(r["price_source"] == "unavailable" for r in lines),
+            "stale_offer_count": sum(r["price_source"] == "stale_observation" for r in lines),
             "live_api_subtotal": _money_float(live_sub),
             "reference_catalog_subtotal": _money_float(ref_sub),
             "printed_material_subtotal": _money_float(print_sub),
@@ -1247,6 +1284,7 @@ def bom_to_csv(bom: dict[str, Any]) -> bytes:
         "price_source",
         "availability",
         "stock_quantity",
+        "fetched_at",
         "lead_time_days",
         "filament_mass_g",
         "print_time_minutes",

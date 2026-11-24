@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parent.parent
 FETCH_TIMEOUT_SECONDS = 12.0
 MAX_API_BYTES = 2 * 1024 * 1024
 QUOTE_CACHE_TTL_SECONDS = 900
+UNAVAILABLE_STATES = frozenset({"OutOfStock", "SoldOut", "Discontinued"})
 FX_CACHE_TTL_SECONDS = 6 * 3600
 
 SUPPORTED_CURRENCIES = ("USD", "CHF", "EUR")
@@ -56,6 +57,28 @@ def clear_supplier_api_caches() -> None:
     _token_cache.clear()
     _fx_cache.clear()
     _quote_cache.clear()
+
+
+def cached_official_quotes(currency: str, fx_rates: dict | None = None) -> dict[str, dict]:
+    """Read the latest observation per catalog item without renewing it or contacting suppliers."""
+    target = _validate_currency(currency)
+    latest = {}
+    for (item_id, observed_currency, _), (observation, expires) in list(_quote_cache.items()):
+        # Prefer the latest check, then the requested currency for simultaneous observations.
+        rank = (expires, observed_currency == target)
+        if item_id not in latest or rank > latest[item_id][0]:
+            latest[item_id] = (rank, observation)
+    results = {}
+    now = _now()
+    for item_id, ((expires, _), observation) in latest.items():
+        fresh = now < expires
+        if fresh and observation.get("availability") not in UNAVAILABLE_STATES:
+            try:
+                observation = _convert_quote_currency(observation, target, fx_rates)
+            except SupplierApiError:
+                continue
+        results[item_id] = {**deepcopy(observation), "freshness": "fresh" if fresh else "stale"}
+    return results
 
 
 def _now() -> datetime:
@@ -430,11 +453,20 @@ class DigiKeyClient:
         }
 
     def _parse_product(
-        self, product: dict[str, Any], *, currency: str, sha: str
+        self, product: dict[str, Any], *, currency: str, sha: str, part_number: str | None = None
     ) -> dict[str, Any] | None:
         if not isinstance(product, dict):
             return None
         variations = product.get("ProductVariations") or []
+        if part_number:
+            number = part_number.strip().casefold()
+            matching = [v for v in variations
+                        if str(v.get("DigiKeyProductNumber") or "").strip().casefold() == number]
+            if len(matching) == 1:
+                variations = matching
+            elif (len(variations) > 1
+                  or str(product.get("ManufacturerProductNumber") or "").casefold() != number):
+                return None
         chosen_var = variations[0] if isinstance(variations, list) and variations else {}
         pricing_list = chosen_var.get("StandardPricing") or product.get("StandardPricing") or []
         breaks: list[dict[str, Any]] = []
@@ -457,14 +489,15 @@ class DigiKeyClient:
                     "pack_price": _money_str(_money_decimal(product["UnitPrice"])),
                 }
             )
-        if not breaks:
-            return None
         breaks.sort(key=lambda item: item["minimum_packs"])
         stock_qty = _parse_stock_qty(product.get("QuantityAvailable"))
         lead_weeks = product.get("ManufacturerLeadWeeks")
         lead_days = _parse_lead_time_days(f"{lead_weeks} Weeks") if lead_weeks else None
         status_obj = product.get("ProductStatus")
         raw_status = status_obj.get("Status") if isinstance(status_obj, dict) else status_obj
+        availability = _normalize_availability(stock_qty, raw_status)
+        if not breaks and availability not in UNAVAILABLE_STATES:
+            return None
         mpn = str(product.get("ManufacturerProductNumber") or "").strip()
         dk_sku = str(chosen_var.get("DigiKeyProductNumber") or "").strip()
         desc = product.get("Description")
@@ -483,7 +516,7 @@ class DigiKeyClient:
             "pack_size": 1,
             "min_order_qty": int(chosen_var.get("MinimumOrderQuantity") or 1),
             "price_breaks": breaks,
-            "availability": _normalize_availability(stock_qty, raw_status),
+            "availability": availability,
             "stock_quantity": stock_qty,
             "lead_time_days": lead_days,
             "lead_time_text": f"{lead_weeks} weeks" if lead_weeks else None,
@@ -516,7 +549,8 @@ class DigiKeyClient:
                 raise SupplierApiError(
                     f"DigiKey part {part_number!r} lookup failed (HTTP {status})."
                 )
-            parsed = self._parse_product(data["Product"], currency=curr, sha=sha)
+            parsed = self._parse_product(data["Product"], currency=curr, sha=sha,
+                                         part_number=part_number)
             if parsed is None:
                 raise SupplierApiError(f"DigiKey returned no priced offer for {part_number!r}.")
             return parsed
@@ -600,10 +634,16 @@ class MouserClient:
                     )
                 except SupplierApiError:
                     continue
-        if not breaks:
-            return None
         breaks.sort(key=lambda item: item["minimum_packs"])
-        stock_qty = _parse_stock_qty(part.get("AvailabilityInStock") or part.get("Availability"))
+        stock_value = part.get("AvailabilityInStock")
+        stock_qty = _parse_stock_qty(
+            stock_value if stock_value is not None else part.get("Availability")
+        )
+        availability = _normalize_availability(
+            stock_qty, part.get("LifecycleStatus") or part.get("Availability")
+        )
+        if not breaks and availability not in UNAVAILABLE_STATES:
+            return None
         lead_text = str(part.get("LeadTime") or "").strip() or None
         lead_days = _parse_lead_time_days(lead_text)
         mpn = str(part.get("ManufacturerPartNumber") or "").strip()
@@ -618,9 +658,7 @@ class MouserClient:
             "pack_size": 1,
             "min_order_qty": _parse_stock_qty(part.get("Min")) or 1,
             "price_breaks": breaks,
-            "availability": _normalize_availability(
-                stock_qty, part.get("LifecycleStatus") or part.get("Availability")
-            ),
+            "availability": availability,
             "stock_quantity": stock_qty,
             "lead_time_days": lead_days,
             "lead_time_text": lead_text,
@@ -659,11 +697,15 @@ class MouserClient:
             if status != 200 or not isinstance(data, dict):
                 raise SupplierApiError(f"Mouser part search failed (HTTP {status}).")
             parts = ((data.get("SearchResults") or {}).get("Parts")) or []
-            for part in parts:
-                parsed = self._parse_part(part, sha=sha)
+            number = part_number.strip().casefold()
+            matches = [part for part in parts if isinstance(part, dict)
+                       and number in {str(part.get(k) or "").strip().casefold()
+                                      for k in ("ManufacturerPartNumber", "MouserPartNumber")}]
+            if len(matches) == 1:
+                parsed = self._parse_part(matches[0], sha=sha)
                 if parsed is not None:
                     return _convert_quote_currency(parsed, curr, fx_rates)
-            raise SupplierApiError(f"Mouser returned no priced match for {part_number!r}.")
+            raise SupplierApiError(f"Mouser returned no unique exact offer for {part_number!r}.")
 
         if client is not None:
             return await _run(client)

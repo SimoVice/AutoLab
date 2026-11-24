@@ -164,6 +164,72 @@ def test_selected_ot2_keeps_its_own_consumables_in_api_and_agent():
     assert [row["mpn"] for row in result.data["lines"]] == [r["mpn"] for r in payload["lines"]]
 
 
+def test_unavailable_and_expired_supplier_observations_survive_bom_download(monkeypatch):
+    from datetime import UTC, datetime, timedelta
+
+    from app import supplier_apis
+
+    project = apply_update(new_project(), {"workflow_kind": "general"})
+    raw = concept_proposal()
+    raw["supplies"] = [{
+        "key": "controller", "name": "Detector readout controller", "quantity": 1,
+        "unit": "board", "source_id": "pico-h", "role": "Read the detector.",
+        "component_keys": ["optic_head"],
+    }]
+    project = attach_concept(project, project.copy(), compile_concept(raw))
+    api._sessions[project["id"]] = api.ProjectSession(project=project)
+    clock = datetime(2026, 11, 24, 9, 0, tzinfo=UTC)
+    monkeypatch.setattr(supplier_apis, "_now", lambda: clock)
+    monkeypatch.setenv("MOUSER_API_KEY", "fixture")
+    response = {"ManufacturerPartNumber": "SC0917", "MouserPartNumber": "485-5525",
+                "AvailabilityInStock": "0", "LifecycleStatus": "Discontinued",
+                "ProductDetailUrl": "https://www.mouser.com/ProductDetail/485-5525",
+                "PriceBreaks": [{"Quantity": 1, "Price": "$5.00", "Currency": "USD"}]}
+    client_type = httpx.AsyncClient
+    online = True
+    def supply(_):
+        if online:
+            return httpx.Response(200, json={"SearchResults": {"Parts": [response]}})
+        return httpx.Response(503)
+    transport = httpx.MockTransport(supply)
+    monkeypatch.setattr(supplier_apis.httpx, "AsyncClient",
+                        lambda **kw: client_type(transport=transport))
+    client = TestClient(api.app)
+    base, rev = f"/api/projects/{project['id']}", project["revision"]
+    params = {"revision": rev}
+    def board(bom):
+        return next(line for line in bom["lines"] if line["catalog_id"] == "pico-h")
+
+    refreshed = client.post(base + "/bom/refresh", json={"project_revision": rev}).json()["bom"]
+    row = board(refreshed)
+    assert refreshed["status"] == "incomplete"
+    assert row["mpn"] == "SC0917" and row["resolution_status"] == "catalog_identified"
+    assert row["price_source"] == "unavailable" and row["availability"] == "Discontinued"
+    assert row["pack_price"] is row["line_total"] is row["packs_to_order"] is None
+    assert row["fetched_at"] and row["supplier"] == "Mouser"
+    assert refreshed["summary"]["unavailable_count"] == 1
+    download = client.get(base + "/bom/download", params={**params, "format": "json"})
+    assert board(download.json()) == row
+    proposal = client.get(base + "/parts", params=params).json()["rows"]
+    proposal_part = next(r for r in proposal if r["group_id"] == "concept-controller")
+    assert proposal_part["price_kind"] == "unavailable"
+    tool = asyncio.run(execute_tool(
+        "generate_purchasable_bom", {}, ToolContext(project=project, user_message="List parts.")
+    ))
+    agent_line = next(line for line in tool.data["lines"] if line["mpn"] == "SC0917")
+    assert agent_line["availability"] == row["availability"] and agent_line["line_total"] is None
+
+    clock += timedelta(seconds=supplier_apis.QUOTE_CACHE_TTL_SECONDS + 1)
+    online = False
+    failed_refresh = client.post(base + "/bom/refresh", json={"project_revision": rev})
+    assert failed_refresh.status_code == 200 and failed_refresh.json()["live_quote_warnings"]
+    stale = board(client.get(base + "/bom", params=params).json()["bom"])
+    assert board(failed_refresh.json()["bom"]) == stale
+    assert stale["price_source"] == "stale_observation" and stale["line_total"] is None
+    assert stale["fetched_at"] == row["fetched_at"]
+    assert stale["availability"] == "recheck_required"
+
+
 def test_voltage_power_driver_csi_and_mechanical_mismatches_caught():
     proj = designed_workstation()
     bom = build_complete_bom(proj)

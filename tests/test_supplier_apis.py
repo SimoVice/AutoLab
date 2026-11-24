@@ -35,6 +35,53 @@ def clean_caches(monkeypatch: pytest.MonkeyPatch):
     procurement._cache.clear()
 
 
+def test_part_number_search_distinguishes_related_ambiguous_and_unavailable_offers(monkeypatch):
+    monkeypatch.setenv("MOUSER_API_KEY", "fixture")
+    base = {"Description": "Optical detector", "AvailabilityInStock": 20,
+            "PriceBreaks": [{"Quantity": 1, "Price": "$2.00", "Currency": "USD"}]}
+    related = {**base, "ManufacturerPartNumber": "OPT-AA", "MouserPartNumber": "CODE-AA"}
+    correct = {**base, "ManufacturerPartNumber": "OPT-A", "MouserPartNumber": "CODE-A"}
+    second = {**correct, "MouserPartNumber": "CODE-A-REEL"}
+    rows = [related, correct]
+    transport = httpx.MockTransport(lambda _: httpx.Response(
+        200, json={"SearchResults": {"Parts": rows}}
+    ))
+    async def lookup(number):
+        async with httpx.AsyncClient(transport=transport) as client:
+            return await MouserClient().fetch_part_number(number, client=client)
+
+    assert asyncio.run(lookup("opt-a"))["sku"] == "CODE-A"
+    rows.append(second)
+    with pytest.raises(SupplierApiError, match="unique exact"):
+        asyncio.run(lookup("OPT-A"))
+    assert asyncio.run(lookup("CODE-A-REEL"))["sku"] == "CODE-A-REEL"
+    rows[:] = [related]
+    with pytest.raises(SupplierApiError, match="unique exact"):
+        asyncio.run(lookup("OPT-A"))
+    rows[:] = [{**correct, "AvailabilityInStock": 0, "PriceBreaks": []}]
+    observed = asyncio.run(lookup("CODE-A"))
+    assert observed["availability"] == "OutOfStock" and observed["price_breaks"] == []
+
+
+def test_digikey_matches_the_distributor_pack_in_a_multivariant_part():
+    product = {
+        "ManufacturerProductNumber": "OPT-A", "QuantityAvailable": 20,
+        "ProductVariations": [
+            {"DigiKeyProductNumber": sku,
+             "StandardPricing": [{"BreakQuantity": 1, "UnitPrice": price}]}
+            for sku, price in (("REEL-A", 50), ("SINGLE-A", 2))
+        ],
+    }
+
+    def lookup(number):
+        return DigiKeyClient()._parse_product(
+            product, currency="USD", sha="abc", part_number=number
+        )
+
+    assert lookup("SINGLE-A")["price_breaks"][0]["pack_price"] == "2.00"
+    assert lookup("OPT-A") is None and lookup("SINGLE-AB") is None
+
+
 def test_fx_rates_fetch_cache_and_conversion():
     calls: list[str] = []
 

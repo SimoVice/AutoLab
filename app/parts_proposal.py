@@ -333,6 +333,8 @@ def build_parts_proposal(
                 "curated_reference": "Dated catalog price for the required number of packs.",
                 "slicer_material_estimate": "Estimated filament cost for this modeled part.",
                 "live_api": "Observed supplier price for the required number of packs.",
+                "unavailable": "The supplier reported this part unavailable at the last check.",
+                "stale_observation": "The previous supplier observation has expired.",
             }[kind]
         else:
             low, high, note = _allowance(purchase, project)
@@ -340,13 +342,17 @@ def build_parts_proposal(
             kind, date, price_url = "planning_allowance", REVIEWED_ON, None
         item = priced.get(gid, {})
         observation = observed.get(gid, {})
-        if item.get("low_usd") is not None and item.get("high_usd") is not None:
+        offer_usable = kind not in ("unavailable", "stale_observation")
+        if offer_usable and (
+            item.get("low_usd") is not None and item.get("high_usd") is not None
+        ):
             low, high = item["low_usd"], item["high_usd"]
             kind = item["source_kind"]
             note = " ".join([item.get("rationale", ""), *item.get("assumptions", [])])
             date = item.get("fetched_at") or (cost or {}).get("generated_at")
             price_url = item.get("price_source_url")
-        elif observation.get("freshness") == "fresh" and observation.get("line_total") is not None:
+        elif (offer_usable and observation.get("freshness") == "fresh"
+              and observation.get("line_total") is not None):
             low = high = observation["line_total"]
             kind, date = "verified_supplier", observation["fetched_at"]
             price_url = observation.get("price_source_url")

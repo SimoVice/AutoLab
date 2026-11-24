@@ -813,7 +813,7 @@ export type PurchasableBomLine = {
   unit_price: number | null;
   pack_price: number | null;
   line_total: number | null;
-  price_source: 'live_api' | 'curated_reference' | 'slicer_material_estimate' | 'unpriced';
+  price_source: 'live_api' | 'curated_reference' | 'slicer_material_estimate' | 'unpriced' | 'unavailable' | 'stale_observation';
   availability: string;
   stock_quantity?: number | null;
   lead_time_days?: number | null;
@@ -845,6 +845,8 @@ export type PurchasableBom = {
     reference_priced_count: number;
     unpriced_placeholder_count: number;
     unresolved_count: number;
+    unavailable_count: number;
+    stale_offer_count: number;
     live_api_subtotal: number;
     reference_catalog_subtotal: number;
     printed_material_subtotal: number;
