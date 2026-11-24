@@ -45,6 +45,9 @@ _TOOL_STAGES = {
     "generate_purchasable_bom": "verifying",
     "check_hardware_compatibility": "verifying",
     "search_supplier_components": "researching",
+    "generate_robot_protocol": "verifying",
+    "simulate_robot_protocol": "verifying",
+    "build_hardware_commissioning_pack": "verifying",
 }
 
 AGENT_SYSTEM_PROMPT = """You are AutoLab's autonomous laboratory engineering assistant.
@@ -115,6 +118,11 @@ CORE PRINCIPLES
   compatibility, call generate_purchasable_bom and/or check_hardware_compatibility (or
   search_supplier_components to look up real MPNs), separate live API totals from curated reference
   and filament estimates, state shipping/VAT/duty exclusions, and justify choices with pros/cons.
+- Executable protocols & hardware commissioning: when generating or verifying robot protocols
+  (> 6 targets, serial dilutions, multi-dispense for OT-2 or Science Jubilee) or preparing
+  physical motion commissioning (GRBL/Klipper/Loopback gateway, limits, watchdog, E-stop), call
+  generate_robot_protocol / simulate_robot_protocol / build_hardware_commissioning_pack and state
+  whether opentrons_simulate vs AutoLab's simulator verified the script (never claim physical runs).
 - Language: reply clearly and concisely in the SAME language the user used (e.g. Italian or
   English), citing only facts observed from project state and tool results."""
 

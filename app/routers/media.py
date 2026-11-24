@@ -20,7 +20,7 @@ from app.model_catalog import IMAGE_MODEL, availability, discover_catalog
 from app.services.runtime import api_hook
 from app.services.session_store import session_for
 from app.transcription import MAX_AUDIO_BYTES, TranscriptionError, transcribe_audio
-from app.vision import Box
+from app.vision import Box, VisionError
 from app.vision_jobs import (
     InspectionError,
     inspection_archive,
@@ -355,3 +355,64 @@ async def download_inspection_archive(
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+class CameraCalibrationRequest(BaseModel):
+    """Fiducial planar homography calibration request."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    project_revision: Annotated[int, Field(strict=True, ge=0)]
+    image_data_url: Annotated[str, Field(min_length=1, max_length=5_592_472)]
+    board_width_mm: Annotated[float, Field(ge=40.0, le=1000.0)] = 160.0
+    board_height_mm: Annotated[float, Field(ge=40.0, le=1000.0)] = 110.0
+    marker_size_mm: Annotated[float, Field(ge=5.0, le=150.0)] = 20.0
+    manual_corners_px: list[list[float]] | None = None
+
+
+@router.get("/api/cameras")
+async def get_local_cameras() -> dict:
+    from app.camera_calibration import list_local_cameras
+
+    return list_local_cameras()
+
+
+@router.get("/api/cameras/calibration-board.svg")
+async def get_calibration_board_svg(
+    width_mm: float = 160.0,
+    height_mm: float = 110.0,
+    marker_size_mm: float = 20.0,
+) -> Response:
+    from app.camera_calibration import generate_calibration_board_svg
+
+    try:
+        svg = generate_calibration_board_svg(width_mm, height_mm, marker_size_mm)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    return Response(
+        content=svg,
+        media_type="image/svg+xml",
+        headers={"Content-Disposition": 'attachment; filename="calibration-board.svg"'},
+    )
+
+
+@router.post("/api/projects/{project_id}/inspections/calibrate")
+async def calibrate_inspection_camera(
+    project_id: str, request: CameraCalibrationRequest
+) -> dict:
+    from app.camera_calibration import calibrate_planar_fiducials
+
+    session = api_hook("session_for", session_for)(project_id)
+    async with session.model_lock():
+        if session.project.get("revision") != request.project_revision:
+            raise HTTPException(409, "Project revision mismatch; refresh before calibrating.")
+    try:
+        return calibrate_planar_fiducials(
+            request.image_data_url,
+            board_width_mm=request.board_width_mm,
+            board_height_mm=request.board_height_mm,
+            marker_size_mm=request.marker_size_mm,
+            manual_corners_px=request.manual_corners_px,
+        )
+    except (VisionError, ValueError) as exc:
+        raise HTTPException(422, str(exc)) from None
+

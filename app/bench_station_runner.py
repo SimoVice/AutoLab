@@ -68,14 +68,29 @@ def label_html(identifier):
             '</p></html>')
 
 
-def run_record(plan, ask=input, label_output=None, checkpoint=None):
-    """Gather explicit human observations without claiming instrument connectivity."""
+def run_record(
+    plan,
+    ask=input,
+    label_output=None,
+    checkpoint=None,
+    *,
+    balance_driver=None,
+    barcode_driver=None,
+    label_printer=None,
+    label_format="html",
+):
+    """Gather human or optional bench-instrument observations cleanly without auto-arming."""
     operations = validate_plan(plan)
     fingerprint = hashlib.sha256(json.dumps(
         plan, sort_keys=True, separators=(',', ':'), allow_nan=False
     ).encode()).hexdigest()
     record = {
-        'schema_version': '1', 'mode': 'operator_assisted_no_hardware_control',
+        'schema_version': '1',
+        'mode': (
+            'instrument_assisted'
+            if any(x is not None for x in (balance_driver, barcode_driver, label_printer))
+            else 'operator_assisted_no_hardware_control'
+        ),
         'plan_sha256': fingerprint, 'project_id': plan.get('project_id'),
         'revision': plan.get('revision'),
         'operator': nonempty('Operator identifier: ', ask),
@@ -92,13 +107,45 @@ def run_record(plan, ask=input, label_output=None, checkpoint=None):
             if ask('Confirm manual handoff with item identity preserved [yes]: ').strip() != 'yes':
                 raise ValueError('Manual handoff was not confirmed.')
         if operation == 'weigh':
-            mass = float(nonempty('Stable balance reading in grams (g): ', ask))
-            if not math.isfinite(mass) or mass < 0:
-                raise ValueError('Mass must be a finite nonnegative value in grams.')
-            event.update(mass=mass, unit='g', acquisition='manual transcription')
+            if balance_driver is not None:
+                reading = balance_driver.read_weight()
+                event.update(
+                    mass=reading.mass_g,
+                    unit='g',
+                    provenance=reading.provenance,
+                    protocol=reading.protocol,
+                    raw_frame=reading.raw_frame,
+                    acquisition='serial balance frame',
+                )
+            else:
+                mass = float(nonempty('Stable balance reading in grams (g): ', ask))
+                if not math.isfinite(mass) or mass < 0:
+                    raise ValueError('Mass must be a finite nonnegative value in grams.')
+                event.update(mass=mass, unit='g', acquisition='manual transcription')
         elif operation == 'print_label':
             event['label_text'] = record['sample_id']
-            if label_output is not None:
+            if label_printer is not None or label_format in ('zpl', 'escpos'):
+                from app.instrument_drivers import LabelPrinterDriver
+
+                printer = label_printer or LabelPrinterDriver()
+                spool_meta = printer.spool(
+                    record['sample_id'],
+                    fmt=label_format,
+                    output_path=label_output,
+                )
+                event['provenance'] = spool_meta['provenance']
+                event['label_artifact'] = {
+                    'path': spool_meta['target'],
+                    'format': spool_meta['format'],
+                    'sha256': spool_meta['sha256'],
+                    'bytes_written': spool_meta['bytes_written'],
+                    'contains_barcode': spool_meta['contains_barcode'],
+                    'printed_and_applied': False,
+                }
+                record['pending_event'] = event
+                if checkpoint:
+                    checkpoint(record)
+            elif label_output is not None:
                 content = label_html(record['sample_id'])
                 with Path(label_output).open('x', encoding='utf-8') as label:
                     label.write(content)
@@ -120,12 +167,27 @@ def run_record(plan, ask=input, label_output=None, checkpoint=None):
             if 'label_artifact' in event:
                 event['label_artifact']['printed_and_applied'] = True
             record.pop('pending_event', None)
-            event['acquisition'] = 'operator confirmation; printing performed separately'
+            event['acquisition'] = (
+                'instrument printer + operator confirmation'
+                if label_printer is not None or label_format in ('zpl', 'escpos')
+                else 'operator confirmation; printing performed separately'
+            )
         elif operation == 'read_barcode':
-            decoded = nonempty('Scan with keyboard/HID reader or enter decoded barcode: ', ask)
-            if decoded != record['sample_id']:
-                raise ValueError('Barcode does not match the item/sample identifier; stop.')
-            event.update(decoded_value=decoded, acquisition='keyboard/HID or manual input')
+            if barcode_driver is not None:
+                scan = barcode_driver.scan(expected=record['sample_id'])
+                if not scan.matched:
+                    raise ValueError('Barcode does not match the item/sample identifier; stop.')
+                event.update(
+                    decoded_value=scan.value,
+                    symbology_prefix=scan.symbology_prefix,
+                    provenance=scan.provenance,
+                    acquisition='instrument barcode scan',
+                )
+            else:
+                decoded = nonempty('Scan with keyboard/HID reader or enter decoded barcode: ', ask)
+                if decoded != record['sample_id']:
+                    raise ValueError('Barcode does not match the item/sample identifier; stop.')
+                event.update(decoded_value=decoded, acquisition='keyboard/HID or manual input')
         else:
             event['criteria'] = nonempty('Predefined visible inspection criteria: ', ask)
             outcome = nonempty('Human review outcome [pass/fail]: ', ask)
@@ -148,7 +210,11 @@ def main():
     parser.add_argument('--plan', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--label-output', type=Path,
-                        help='New printable plain-text HTML file; example 60 x 30 mm media.')
+                        help='New printable plain-text HTML/ZPL/ESC-POS label file.')
+    parser.add_argument('--label-format', choices=('html', 'zpl', 'escpos'), default='html')
+    parser.add_argument('--balance-port', default=None, help='Optional COM/tty serial balance')
+    parser.add_argument('--balance-baud', type=int, default=9600)
+    parser.add_argument('--barcode-port', default=None, help='Optional COM/tty serial scanner')
     parser.add_argument('--dry-run', action='store_true',
                         help='Validate plan and write pending human checkpoints; no observations.')
     args = parser.parse_args()
@@ -159,8 +225,11 @@ def main():
         plan = json.loads(args.plan.read_text(encoding='utf-8'))
         operations = validate_plan(plan)
         if args.label_output is not None:
-            if (args.dry_run or 'print_label' not in operations
-                    or args.label_output.suffix.lower() != '.html'):
+            valid_suffix = (
+                args.label_format != 'html'
+                or args.label_output.suffix.lower() == '.html'
+            )
+            if args.dry_run or 'print_label' not in operations or not valid_suffix:
                 raise ValueError('Label output requires print_label, .html and an interactive run.')
             if (args.label_output.exists() or args.label_output.resolve() in
                     (args.output.resolve(), args.plan.resolve())):
@@ -178,6 +247,19 @@ def main():
                 ],
             }
         else:
+            kwargs = {'label_output': args.label_output}
+            if args.label_format != 'html':
+                kwargs['label_format'] = args.label_format
+            if args.balance_port:
+                from app.instrument_drivers import SerialBalanceDriver
+
+                kwargs['balance_driver'] = SerialBalanceDriver(
+                    port=args.balance_port, baudrate=args.balance_baud
+                )
+            if args.barcode_port:
+                from app.instrument_drivers import BarcodeScannerDriver
+
+                kwargs['barcode_driver'] = BarcodeScannerDriver(port=args.barcode_port)
             # Reserve record first so a later abort cannot leave an untracked label artifact.
             with args.output.open('x+', encoding='utf-8') as output:
                 latest = {'status': 'started_no_observations', 'events': []}
@@ -193,8 +275,7 @@ def main():
 
                 try:
                     save_checkpoint(latest)
-                    record = run_record(plan, label_output=args.label_output,
-                                        checkpoint=save_checkpoint)
+                    record = run_record(plan, checkpoint=save_checkpoint, **kwargs)
                     save_checkpoint(record)
                 except (ValueError, OSError, EOFError, KeyboardInterrupt) as exc:
                     latest['status'] = 'aborted'

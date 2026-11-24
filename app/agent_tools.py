@@ -378,6 +378,24 @@ class SearchSupplierComponentsArgs(_StrictArgs):
     max_results: int = Field(default=6, strict=True, ge=1, le=12)
 
 
+class GenerateRobotProtocolArgs(_StrictArgs):
+    target_platform: Literal["auto", "opentrons-ot2", "jubilee"] = "auto"
+    stock_concentration: Annotated[str | None, Field(min_length=1, max_length=200)] = None
+    target_concentrations: Annotated[str | None, Field(min_length=1, max_length=4000)] = None
+    final_volume: Annotated[str | None, Field(min_length=1, max_length=120)] = None
+    allow_serial: bool = True
+    allow_multi_dispense: bool = True
+
+
+class SimulateRobotProtocolArgs(_StrictArgs):
+    target_platform: Literal["auto", "opentrons-ot2", "jubilee"] = "auto"
+
+
+class BuildHardwareCommissioningPackArgs(_StrictArgs):
+    driver_kind: Literal["loopback", "grbl", "klipper"] = "grbl"
+    watchdog_timeout_s: float = Field(default=30.0, gt=0.1, le=300.0)
+
+
 _TOOL_SPECS: list[tuple[str, str, type[BaseModel]]] = [
     (
         "inspect_project_state",
@@ -528,6 +546,26 @@ _TOOL_SPECS: list[tuple[str, str, type[BaseModel]]] = [
         "for purchasable electronics, motors, PSUs, and mechanical hardware with real MPNs and "
         "multi-currency pricing.",
         SearchSupplierComponentsArgs,
+    ),
+    (
+        "generate_robot_protocol",
+        "Compile and simulate an executable Opentrons API v2 (apiLevel 2.19) or Science Jubilee "
+        "Python liquid-handling protocol supporting up to 96 targets, automatic multi-step serial "
+        "dilutions, and clean diluent multi-dispense.",
+        GenerateRobotProtocolArgs,
+    ),
+    (
+        "simulate_robot_protocol",
+        "Run strict AST, tip/pipette-range, well-capacity, and simulator verification on the "
+        "project's generated Opentrons API v2 or Science Jubilee protocol.",
+        SimulateRobotProtocolArgs,
+    ),
+    (
+        "build_hardware_commissioning_pack",
+        "Generate a project-bound HTTP Hardware Gateway config template (GRBL/Klipper/Loopback "
+        "driver, software travel limits, watchdog) and mandatory physical E-stop commissioning "
+        "checklist.",
+        BuildHardwareCommissioningPackArgs,
     ),
 ]
 
@@ -2470,6 +2508,149 @@ async def _tool_search_supplier_components(
     )
 
 
+def _resolve_protocol_platform(project: dict, requested: str) -> str:
+    if requested != "auto":
+        return requested
+    if (project.get("design") or {}).get("foundation"):
+        return "jubilee"
+    return "opentrons-ot2"
+
+
+def _tool_generate_robot_protocol(args: GenerateRobotProtocolArgs, ctx: ToolContext) -> ToolResult:
+    from app.opentrons_verifier import verify_jubilee_protocol, verify_opentrons_protocol
+    from app.protocol_generators import (
+        extract_or_build_protocol_plan,
+        generate_jubilee_protocol,
+        generate_opentrons_protocol,
+    )
+
+    platform = _resolve_protocol_platform(ctx.project, args.target_platform)
+    try:
+        plan = extract_or_build_protocol_plan(
+            ctx.project,
+            stock_concentration=args.stock_concentration,
+            target_concentrations=args.target_concentrations,
+            final_volume=args.final_volume,
+            allow_serial=args.allow_serial,
+            allow_multi_dispense=args.allow_multi_dispense,
+        )
+        if platform == "jubilee":
+            generated = generate_jubilee_protocol(
+                ctx.project,
+                protocol_plan=plan,
+                multi_dispense=args.allow_multi_dispense,
+                allow_serial=args.allow_serial,
+            )
+            sim = verify_jubilee_protocol(generated["source_code"])
+        else:
+            generated = generate_opentrons_protocol(
+                ctx.project,
+                protocol_plan=plan,
+                multi_dispense=args.allow_multi_dispense,
+                allow_serial=args.allow_serial,
+            )
+            sim = verify_opentrons_protocol(generated["source_code"])
+    except ValueError as exc:
+        return _fail("generate_robot_protocol", "verifying", str(exc))
+
+    msg = (
+        f"Generated {generated['filename']} ({platform}, mode={plan['mode']}, "
+        f"{plan['target_count']} targets, {len(plan['intermediate_steps'])} serial intermediates, "
+        f"tips={sim.get('tips_used', 0)}, simulation={'PASS' if sim['ok'] else 'FAIL'})."
+    )
+    run = {"kind": "generate_robot_protocol", "status": "accepted", "message": msg}
+    ctx.action_runs.append(run)
+    return ToolResult(
+        tool="generate_robot_protocol",
+        ok=True,
+        stage="verifying",
+        mutated=False,
+        summary=msg,
+        action_run=run,
+        data={
+            "platform": platform,
+            "filename": generated["filename"],
+            "deck_slots": generated.get("deck_slots"),
+            "pipettes": generated.get("pipettes"),
+            "plan_summary": {
+                "mode": plan["mode"],
+                "target_count": plan["target_count"],
+                "intermediate_count": len(plan["intermediate_steps"]),
+                "intermediate_steps": plan["intermediate_steps"],
+                "totals": plan["totals"],
+                "target_steps_sample": plan["steps"][:16],
+            },
+            "simulation": {
+                "ok": sim["ok"],
+                "verifier": sim["verifier"],
+                "opentrons_cli_available": sim.get("opentrons_cli_available", False),
+                "steps_executed": sim.get("steps_executed", 0),
+                "tips_used": sim.get("tips_used", 0),
+                "errors": sim.get("errors", []),
+                "warnings": sim.get("warnings", []),
+            },
+            "source_preview_lines": generated["source_code"].splitlines()[:45],
+        },
+    )
+
+
+def _tool_simulate_robot_protocol(args: SimulateRobotProtocolArgs, ctx: ToolContext) -> ToolResult:
+    from app.opentrons_verifier import verify_jubilee_protocol, verify_opentrons_protocol
+    from app.protocol_generators import generate_jubilee_protocol, generate_opentrons_protocol
+
+    platform = _resolve_protocol_platform(ctx.project, args.target_platform)
+    try:
+        generated = (
+            generate_jubilee_protocol(ctx.project)
+            if platform == "jubilee"
+            else generate_opentrons_protocol(ctx.project)
+        )
+    except ValueError as exc:
+        return _fail("simulate_robot_protocol", "verifying", str(exc))
+
+    sim = (
+        verify_jubilee_protocol(generated["source_code"])
+        if platform == "jubilee"
+        else verify_opentrons_protocol(generated["source_code"])
+    )
+    return ToolResult(
+        tool="simulate_robot_protocol",
+        ok=sim["ok"],
+        stage="verifying",
+        mutated=False,
+        summary=(
+            f"Simulated {generated['filename']} with {sim['verifier']}: "
+            f"{'PASS' if sim['ok'] else 'FAIL'} ({sim.get('steps_executed', 0)} steps, "
+            f"{sim.get('tips_used', 0)} tips)."
+        ),
+        data={"platform": platform, "filename": generated["filename"], "simulation": sim},
+    )
+
+
+def _tool_build_hardware_commissioning_pack(
+    args: BuildHardwareCommissioningPackArgs, ctx: ToolContext
+) -> ToolResult:
+    from app.hardware_gateway import build_gateway_commissioning_checklist
+
+    pack = build_gateway_commissioning_checklist(
+        ctx.project,
+        driver_kind=args.driver_kind,
+        watchdog_timeout_s=float(args.watchdog_timeout_s),
+    )
+    return ToolResult(
+        tool="build_hardware_commissioning_pack",
+        ok=True,
+        stage="verifying",
+        mutated=False,
+        summary=(
+            f"Prepared hardware gateway config template (driver={args.driver_kind}, "
+            f"watchdog={args.watchdog_timeout_s:g}s, commissioning_reviewed=false) with "
+            f"{len(pack['checklist'])} mandatory pre-arm checks."
+        ),
+        data=pack,
+    )
+
+
 _DISPATCH: dict[str, tuple[type[BaseModel], Any, bool]] = {
     "inspect_project_state": (InspectProjectStateArgs, _tool_inspect_project_state, False),
     "check_spatial_fit": (CheckSpatialFitArgs, _tool_check_spatial_fit, False),
@@ -2529,6 +2710,21 @@ _DISPATCH: dict[str, tuple[type[BaseModel], Any, bool]] = {
         SearchSupplierComponentsArgs,
         _tool_search_supplier_components,
         True,
+    ),
+    "generate_robot_protocol": (
+        GenerateRobotProtocolArgs,
+        _tool_generate_robot_protocol,
+        False,
+    ),
+    "simulate_robot_protocol": (
+        SimulateRobotProtocolArgs,
+        _tool_simulate_robot_protocol,
+        False,
+    ),
+    "build_hardware_commissioning_pack": (
+        BuildHardwareCommissioningPackArgs,
+        _tool_build_hardware_commissioning_pack,
+        False,
     ),
 }
 

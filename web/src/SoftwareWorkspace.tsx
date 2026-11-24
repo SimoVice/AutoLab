@@ -17,6 +17,14 @@ type Props = {
 };
 const number = (value: number) => value.toLocaleString('en-US', { maximumFractionDigits: 3 });
 
+type ProtocolFormat = 'program' | 'opentrons' | 'jubilee';
+type ProtocolSimulation = {
+  platform: string;
+  filename: string;
+  plan?: { mode?: string; target_count?: number; intermediate_steps?: unknown[]; totals?: { tips_saved?: number; multi_dispense_tips?: number } };
+  simulation?: { ok: boolean; verifier: string; steps_executed?: number; tips_used?: number; errors?: string[]; warnings?: string[] };
+};
+
 export default function SoftwareWorkspace({ project, onProject, onConversation }: Props) {
   const [stock, setStock] = useState(project.summary.stock_concentration ?? '');
   const [targets, setTargets] = useState(project.summary.target_concentrations ?? '');
@@ -24,9 +32,13 @@ export default function SoftwareWorkspace({ project, onProject, onConversation }
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
+  const [codeFormat, setCodeFormat] = useState<ProtocolFormat>('program');
   const [code, setCode] = useState('');
   const [codeLoading, setCodeLoading] = useState(false);
   const [codeError, setCodeError] = useState('');
+  const [simBusy, setSimBusy] = useState(false);
+  const [simError, setSimError] = useState('');
+  const [simResult, setSimResult] = useState<ProtocolSimulation | null>(null);
   const [tab, setTab] = useState<'transfers' | 'code'>('code');
   const [workspacePanel, setWorkspacePanel] = useState<'recipe' | 'program' | 'preview'>('recipe');
   const [chat, setChat] = useState('');
@@ -69,6 +81,8 @@ export default function SoftwareWorkspace({ project, onProject, onConversation }
   }, [project.id]);
 
   useEffect(() => {
+    setSimError('');
+    setSimResult(null);
     if (!ready) {
       setCode('');
       return;
@@ -77,7 +91,7 @@ export default function SoftwareWorkspace({ project, onProject, onConversation }
     setCodeLoading(true);
     setCodeError('');
     setCode('');
-    fetch(`${download}&format=program`, { signal: controller.signal })
+    fetch(`${download}&format=${codeFormat}`, { signal: controller.signal })
       .then(async response => {
         if (!response.ok) {
           throw new Error(
@@ -96,7 +110,34 @@ export default function SoftwareWorkspace({ project, onProject, onConversation }
         if (!controller.signal.aborted) setCodeLoading(false);
       });
     return () => controller.abort();
-  }, [download, ready]);
+  }, [download, ready, codeFormat]);
+
+  async function runSimulateCheck() {
+    setSimBusy(true);
+    setSimError('');
+    try {
+      const targetPlatform = codeFormat === 'jubilee' ? 'jubilee' : 'opentrons-ot2';
+      const response = await fetch(`${base}/software/protocol`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_revision: project.revision,
+          target_platform: targetPlatform,
+          allow_serial: true,
+          allow_multi_dispense: true,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(typeof data.detail === 'string' ? data.detail : 'Protocol simulation failed.');
+      }
+      setSimResult(data as ProtocolSimulation);
+    } catch (reason) {
+      setSimError(reason instanceof Error ? reason.message : 'Simulation failed.');
+    } finally {
+      setSimBusy(false);
+    }
+  }
 
   useEffect(() => {
     if (!playing || plan.status !== 'ready') return;
@@ -399,6 +440,30 @@ export default function SoftwareWorkspace({ project, onProject, onConversation }
               </>
             ) : (
               <div className="software-code">
+                <div className="software-protocol-bar">
+                  <div role="group" aria-label="Protocol format" className="software-format-pills">
+                    <button type="button" aria-pressed={codeFormat === 'program'} onClick={() => setCodeFormat('program')}>Local preview</button>
+                    <button type="button" aria-pressed={codeFormat === 'opentrons'} onClick={() => setCodeFormat('opentrons')}>Opentrons API v2</button>
+                    <button type="button" aria-pressed={codeFormat === 'jubilee'} onClick={() => setCodeFormat('jubilee')}>Science Jubilee</button>
+                  </div>
+                  <button type="button" disabled={simBusy || codeLoading} onClick={() => void runSimulateCheck()}>
+                    {simBusy ? 'Simulating…' : 'Simulate & verify'}
+                  </button>
+                </div>
+                {simError && <p className="software-error" role="alert">{simError}</p>}
+                {simResult?.simulation && (
+                  <div className={`software-sim-badge ${simResult.simulation.ok ? 'is-ok' : 'is-fail'}`} role="status">
+                    <strong>{simResult.simulation.ok ? 'Simulation PASSED' : 'Simulation FAILED'}</strong>
+                    <span>
+                      {' '}· {simResult.simulation.verifier} · {simResult.simulation.steps_executed ?? 0} steps ·{' '}
+                      {simResult.simulation.tips_used ?? 0} tips
+                      {simResult.plan?.mode ? ` · ${simResult.plan.mode}` : ''}
+                    </span>
+                    {simResult.simulation.errors && simResult.simulation.errors.length > 0 && (
+                      <p>{simResult.simulation.errors.join(' ')}</p>
+                    )}
+                  </div>
+                )}
                 {codeLoading ? (
                   <p role="status">Loading current protocol…</p>
                 ) : codeError ? (
@@ -415,15 +480,23 @@ export default function SoftwareWorkspace({ project, onProject, onConversation }
               <div className="software-downloads">
                 <a
                   className="software-program-download"
-                  href={`${download}&format=program`}
-                  download="program.py"
+                  href={`${download}&format=${codeFormat}`}
+                  download={
+                    codeFormat === 'opentrons'
+                      ? 'opentrons_protocol.py'
+                      : codeFormat === 'jubilee'
+                        ? 'jubilee_protocol.py'
+                        : 'program.py'
+                  }
                 >
                   Download Python program
                 </a>
+                <a href={`${download}&format=opentrons`} download="opentrons_protocol.py">Opentrons API v2 (.py)</a>
+                <a href={`${download}&format=jubilee`} download="jubilee_protocol.py">Science Jubilee (.py)</a>
                 <a href={`${download}&format=protocol`} download>Protocol data (JSON)</a>
                 <p>
-                  Run locally: <code>python program.py</code>. Prints the calculated transfer
-                  sequence without connecting to hardware.
+                  Run locally: <code>python program.py</code> (or <code>opentrons_simulate opentrons_protocol.py</code> /{' '}
+                  <code>python jubilee_protocol.py --simulate</code>). No hardware commands are sent from browser preview.
                 </p>
               </div>
             )}

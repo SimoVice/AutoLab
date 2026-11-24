@@ -26,7 +26,7 @@ def _walk_schemas(node):
             yield from _walk_schemas(item)
 
 
-def test_all_23_openai_tool_schemas_are_strict_and_complete():
+def test_all_26_openai_tool_schemas_are_strict_and_complete():
     from app.agent_tools import openai_tool_schemas
 
     schemas = openai_tool_schemas(new_project())
@@ -55,6 +55,9 @@ def test_all_23_openai_tool_schemas_are_strict_and_complete():
         "generate_purchasable_bom",
         "check_hardware_compatibility",
         "search_supplier_components",
+        "generate_robot_protocol",
+        "simulate_robot_protocol",
+        "build_hardware_commissioning_pack",
     ]
     for entry in schemas:
         assert entry["type"] == "function"
@@ -406,4 +409,40 @@ def test_standalone_fixture_tools_bed_overflow_and_build_feedback():
     assert revised.ok is True
     assert set(revised.data["parts_to_reprint"]) == {"locating-base", "tolerance-coupon"}
     assert set(revised.data["parts_unchanged"]) == {"camera-mast", "camera-arm"}
+
+
+def test_phase6_protocol_and_commissioning_agent_tools():
+    from app.agent_tools import ToolContext, execute_tool
+
+    proj = apply_update(
+        new_project(),
+        {
+            "stock_concentration": "10 mM",
+            "target_concentrations": "1 mM, 100 uM, 10 uM, 1 uM, 100 nM, 10 nM, 1 nM",
+            "final_volume": "200 uL",
+        },
+    )
+    ctx = ToolContext(project=proj, user_message="Generate OT-2 serial dilution protocol.")
+    gen = asyncio.run(
+        execute_tool("generate_robot_protocol", {"target_platform": "opentrons-ot2"}, ctx)
+    )
+    assert gen.ok is True
+    assert gen.data["plan_summary"]["mode"] == "serial"
+    assert gen.data["plan_summary"]["target_count"] == 7
+    assert gen.data["simulation"]["ok"] is True
+
+    sim = asyncio.run(execute_tool("simulate_robot_protocol", {}, ctx))
+    assert sim.ok is True and sim.data["simulation"]["ok"] is True
+
+    pack = asyncio.run(
+        execute_tool(
+            "build_hardware_commissioning_pack",
+            {"driver_kind": "grbl", "watchdog_timeout_s": 20.0},
+            ctx,
+        )
+    )
+    assert pack.ok is True
+    assert pack.data["commissioning_reviewed"] is False
+    assert pack.data["config_template"]["driver_kind"] == "grbl"
+
 

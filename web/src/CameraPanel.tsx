@@ -145,6 +145,38 @@ function draftToBox(d: DraftEdit): VisionBox | null {
   return box;
 }
 
+type MetricCalibration = {
+  calibrated: boolean;
+  backend: string;
+  image_size_px: [number, number];
+  rmse_mm: number;
+  px_per_mm_x: number;
+  px_per_mm_y: number;
+  px_per_mm_mean: number;
+  homography_px_to_mm: number[][];
+};
+
+function projectBoxMm(cal: MetricCalibration, box: VisionBox): { w: number; h: number } | null {
+  const [wPx, hPx] = cal.image_size_px;
+  const h = cal.homography_px_to_mm;
+  if (!h || h.length !== 3) return null;
+  const proj = (nx: number, ny: number): [number, number] | null => {
+    const x = (nx * wPx) / 1000;
+    const y = (ny * hPx) / 1000;
+    const w = h[2][0] * x + h[2][1] * y + h[2][2];
+    if (Math.abs(w) < 1e-9) return null;
+    return [(h[0][0] * x + h[0][1] * y + h[0][2]) / w, (h[1][0] * x + h[1][1] * y + h[1][2]) / w];
+  };
+  const tl = proj(box.x_min, box.y_min);
+  const tr = proj(box.x_max, box.y_min);
+  const bl = proj(box.x_min, box.y_max);
+  if (!tl || !tr || !bl) return null;
+  return {
+    w: Math.round(Math.hypot(tr[0] - tl[0], tr[1] - tl[1]) * 10) / 10,
+    h: Math.round(Math.hypot(bl[0] - tl[0], bl[1] - tl[1]) * 10) / 10,
+  };
+}
+
 export default function CameraPanel({ project, onSelect }: Props) {
   const [photo, setPhoto] = useState<string | null>(null);
   const [cameraOn, setCameraOn] = useState(false);
@@ -152,6 +184,9 @@ export default function CameraPanel({ project, onSelect }: Props) {
   const [startingCamera, setStartingCamera] = useState(false);
   const [job, setJob] = useState<VisionJob | null>(null);
   const [busy, setBusy] = useState(false);
+  const [calibrating, setCalibrating] = useState(false);
+  const [calibration, setCalibration] = useState<MetricCalibration | null>(null);
+  const [calibrationError, setCalibrationError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, DraftEdit>>({});
@@ -206,6 +241,9 @@ export default function CameraPanel({ project, onSelect }: Props) {
     setStartingCamera(false);
     setJob(null);
     setBusy(false);
+    setCalibrating(false);
+    setCalibration(null);
+    setCalibrationError(null);
     setError(null);
     setSelectedId(null);
     setDrafts({});
@@ -468,6 +506,35 @@ export default function CameraPanel({ project, onSelect }: Props) {
     }
   }
 
+  async function calibratePhoto(): Promise<void> {
+    if (!photo || calibrating) return;
+    setCalibrating(true);
+    setCalibrationError(null);
+    try {
+      const response = await fetch(
+        `/api/projects/${encodeURIComponent(project.id)}/inspections/calibrate`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            project_revision: project.revision,
+            image_data_url: photo,
+            board_width_mm: 160,
+            board_height_mm: 110,
+            marker_size_mm: 20,
+          }),
+        },
+      );
+      if (!response.ok) throw new Error(await readError(response));
+      setCalibration((await response.json()) as MetricCalibration);
+    } catch (e) {
+      setCalibration(null);
+      setCalibrationError(e instanceof Error ? e.message : 'Fiducial calibration failed.');
+    } finally {
+      setCalibrating(false);
+    }
+  }
+
   function retryPoll(): void {
     if (!job || job.status === 'ready' || job.status === 'failed') {
       if (photo && !busy) void analyze();
@@ -718,6 +785,27 @@ export default function CameraPanel({ project, onSelect }: Props) {
             JPEG or PNG up to 16 MiB; resized to longest edge 1600 and JPEG before analysis. Example:{' '}
             <a href={COMMONS_URL} target="_blank" rel="noreferrer">Laboratory microcentrifuge tubes and pipette tips 01.jpg, CC BY-SA 4.0, Gannu03</a>.
           </p>
+          <div className="camera-cal-box">
+            <div className="camera-row">
+              <button
+                type="button"
+                className="camera-button"
+                disabled={!photo || cameraOn || calibrating}
+                onClick={() => void calibratePhoto()}
+              >
+                {calibrating ? 'Calibrating…' : 'Calibrate photo scale'}
+              </button>
+              <a className="camera-button camera-link" href="/api/cameras/calibration-board.svg" download="calibration-board.svg">
+                Fiducial mat (SVG)
+              </a>
+            </div>
+            {calibration && (
+              <p className="camera-hint" role="status">
+                Calibrated ({calibration.backend}): {calibration.px_per_mm_mean} px/mm · RMSE {calibration.rmse_mm} mm
+              </p>
+            )}
+            {calibrationError && <p className="camera-error-text" role="alert">{calibrationError}</p>}
+          </div>
 
           {error && (
             <div className="camera-error" role="alert">
@@ -757,7 +845,13 @@ export default function CameraPanel({ project, onSelect }: Props) {
                     <span>{confidenceText(d.confidence)} · {stateLabel(d.state)}{d.uncertain ? ' · uncertain' : ''}</span>
                   </button>
                   <div id={`det-${d.id}`} className="camera-det-body">
-                    <p>{d.label} — {d.reason}</p>
+                    <p>
+                      {d.label} — {d.reason}
+                      {calibration ? (() => {
+                        const mm = projectBoxMm(calibration, d.box);
+                        return mm ? ` (calibrated ~${mm.w} × ${mm.h} mm)` : '';
+                      })() : ''}
+                    </p>
                     <div className="camera-field-row">
                       <label>Category
                         <select value={draft.kind} onChange={(e) => updateDraft(d.id, { kind: e.target.value as VisionKind })}>

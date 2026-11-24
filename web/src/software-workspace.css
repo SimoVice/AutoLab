@@ -67,3 +67,10 @@
 .software-hardware-guide { margin-top: .5rem; }
 .software-hardware-guide summary { cursor: pointer; color: #285f5c; }
 .software-hardware-guide p { max-width: 62ch; margin: .65rem 0; }
+.software-protocol-bar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; }
+.software-format-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.software-format-pills button { padding: 6px 10px; font-size: 12px; }
+.software-format-pills button[aria-pressed=true] { background: #e6f2ee; border-color: #176d5a; color: #155b4c; font-weight: 600; }
+.software-sim-badge { padding: 9px 12px; border-radius: 8px; font-size: 12px; margin-bottom: 10px; border: 1px solid #c9e0da; background: #eff8f5; color: #165748; }
+.software-sim-badge.is-fail { background: #fdf1f1; border-color: #e6b8b8; color: #8c232b; }
+.software-sim-badge p { margin: 6px 0 0; }
