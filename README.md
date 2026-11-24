@@ -52,6 +52,13 @@ and unit while its supplier, ordering code and price remain open. The parts
 workspace and the downloadable purchasing list show these requirements alongside
 identified catalog items and modeled filament costs.
 
+Use chat to compare exact part numbers, select a component, replace it, or allocate
+units already in the lab to a custom or imported requirement. Each choice keeps
+its source, the original requirement and any declared interface constraints.
+The parts list shows the quantity still to buy and rounds that quantity to whole
+packs when an offer specifies a pack size. A user-supplied part can remain
+unpriced. Saving and reopening the project preserves its selections and inventory.
+
 Supplier lookups check exact part numbers and package variants. An unavailable
 offer keeps its supplier and observation date while contributing no amount to
 the subtotal. An expired observation stays dated and prompts a new check.

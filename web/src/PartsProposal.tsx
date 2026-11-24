@@ -9,7 +9,7 @@ type Proposal = {
     unit_price_low_usd: number | null; unit_price_high_usd: number | null;
     line_total_low_usd: number | null; line_total_high_usd: number | null;
     price_kind: string; price_note: string; source_url: string | null; fabrication_url?: string;
-    fabrication_stl_url?: string;
+    fabrication_stl_url?: string; owned_quantity?: number; purchase_quantity?: number;
     reference_observation?: { unit_price_usd: number; observed_on: string; url: string; scope: string };
     evidence: { kind: string; observed_at: string | null; url: string | null };
     alternatives: { label: string; url: string; note: string }[];
@@ -27,12 +27,14 @@ const sourceLabels: Record<string, string> = {
   supplier_search: 'Supplier search',
   supplier_category: 'Supplier category',
   fabrication_service: 'Fabrication service',
+  catalog: 'Reviewed catalog', user_record: 'Recorded source',
 };
 
 const priceLabels: Record<string, string> = {
   verified_supplier: 'Supplier price', live_api: 'Supplier price', curated_reference: 'Catalog reference',
   slicer_material_estimate: 'Filament estimate', unpriced: 'Selection required',
   unavailable: 'Supplier unavailable', stale_observation: 'Recheck supplier',
+  quote_required: 'Quote required', lab_inventory: 'Lab inventory', quantity_required: 'Quantity required',
   model_estimate: 'Model estimate', included_in_base: 'Included in base',
 };
 
@@ -146,6 +148,9 @@ export default function PartsProposal({ project, refreshKey, onSelect, selectedI
                 <span>{row.selected_product_label}</span>
               )}
               <small>{priceLabel}</small>
+              {row.purchase_quantity != null && <small>
+                {row.owned_quantity} on hand · {row.purchase_quantity} to purchase
+              </small>}
               <div className="parts-links">
                 {source && (
                   <a href={source} target="_blank" rel="noopener noreferrer">{linkLabel}</a>

@@ -20,10 +20,13 @@ from app.catalog import build_sourcing
 from app.concept_interfaces import WorkInterface, interface_binding_issues, work_interface_issues
 from app.design_sources import reference_library
 from app.jubilee_procurement import upstream_candidate_groups
+from app.part_choices import Criterion
 from app.supplier_catalogs import PRODUCTS
 
 Vector = Annotated[list[float], Field(min_length=3, max_length=3)]
 Text = Annotated[str, Field(min_length=1, max_length=2000)]
+# Omit absent purchasing constraints from historical geometry and approval signatures.
+CriticalSpecs = Annotated[list[Criterion], Field(max_length=24, exclude_if=lambda specs: not specs)]
 GAP_MM = 20.0
 EPSILON = 1e-7
 
@@ -315,6 +318,7 @@ class ConceptComponent(_Model):
     source_id: str | None
     assembly: Text
     check: Text
+    critical_specs: CriticalSpecs = Field(default_factory=list)
     parent_key: str | None = None
     placement_mm: Vector | None = None
 
@@ -419,6 +423,7 @@ class ConceptSupply(_Model):
     quantity: int = Field(strict=True, ge=1, le=100000)
     unit: Annotated[str, Field(min_length=1, max_length=40)]
     role: Text
+    critical_specs: CriticalSpecs = Field(default_factory=list)
     source_id: str | None
     component_keys: list[str] = Field(min_length=1, max_length=40)
     additional_to_modeled_parts: bool = False
@@ -789,6 +794,8 @@ def compile_concept(proposal: ConceptProposal | dict, workspace_width_mm=None,
                       'source_url': source['url'] if source else None, 'price_usd': None,
                       'basis': 'sourcing_candidate_only' if source else 'custom_concept',
                       'geometry_basis': 'custom_concept', 'assembly': readable(c.assembly)})
+        if c.critical_specs:
+            parts[-1]['critical_specs'] = component['critical_specs']
     # A procurement line for a device already mounted in the model must not
     # charge for that same unit twice. Explicit spares are additional purchases.
     matched_units = set()

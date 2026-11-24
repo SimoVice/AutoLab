@@ -577,6 +577,35 @@ def evaluate_hardware_compatibility(
                 )
             )
 
+    for row in lines:
+        part = (row.get("part_choice") or {}).get("accepted") or row.get("reference_candidate")
+        if not part:
+            continue
+        for index, check in enumerate(part["checks"]):
+            actual = check["actual"] if check["actual"] is not None else "unspecified"
+            checks.append(
+                _entry(
+                    f"requirement-{row['line_id']}-{index}",
+                    "part_requirement",
+                    {"match": "pass", "unknown": "warning", "mismatch": "error"}[check["status"]],
+                    f"{part['label']} · {check['key'].replace('_', ' ')}",
+                    f"Required {check['comparison'].replace('_', ' ')} "
+                    f"{check['required']} {check['unit']}. "
+                    f"Recorded value: {actual}. Evidence: {part['basis'].replace('_', ' ')}.",
+                    affected_ids=[row["line_id"]],
+                )
+            )
+        if len(part["checks"]) == 1:
+            checks.append(
+                _entry(
+                    f"interfaces-{row['line_id']}",
+                    "part_requirement",
+                    "warning",
+                    "Component interfaces need review",
+                    f"No critical interface specifications are recorded for {part['label']}.",
+                    affected_ids=[row["line_id"]],
+                )
+            )
     missing = [row for row in lines if row.get("resolution_status") == "selection_required"]
     if missing:
         checks.append(_entry(

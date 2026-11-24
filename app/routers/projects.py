@@ -474,7 +474,7 @@ async def download_custom_asset(project_id: str, asset: str, revision: int) -> R
             else None
         )
         purchasing_bom = None
-        if asset == "package.zip":
+        if asset in ("package.zip", "parts.csv"):
             purchasing_bom = build_complete_bom(
                 session.project, lab_profile=_active_lab_profile(),
                 procurement_report=report_for_project(session.project, session.procurement_report),

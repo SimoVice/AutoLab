@@ -114,6 +114,9 @@ def accept_project(
             ) from None
         updated.clear()
         updated.update(candidate)
+    from app.bom_engine import reconcile_part_choices
+
+    reconcile_part_choices(updated)
     report = rebind_report(before, updated, session.procurement_report)
     estimate = rebind_estimate(
         before,

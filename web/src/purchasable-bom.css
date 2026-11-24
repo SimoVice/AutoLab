@@ -196,13 +196,15 @@
 
 .bom-badge {
   display: inline-block;
+  white-space: nowrap;
   font-size: 0.72rem;
   padding: 2px 6px;
   border-radius: 999px;
   font-weight: 600;
 }
 
-.bom-badge-live_api {
+.bom-badge-live_api,
+.bom-badge-lab_inventory {
   background: #dcfce7;
   color: #166534;
 }
@@ -218,6 +220,8 @@
 }
 
 .bom-badge-unpriced,
+.bom-badge-quote_required,
+.bom-badge-quantity_required,
 .bom-badge-unavailable,
 .bom-badge-stale_observation {
   background: #fff3d1;
@@ -229,6 +233,24 @@
   font-size: 0.76rem;
   color: #546e6a;
   margin-top: 2px;
+}
+
+.bom-choice {
+  margin-top: 4px;
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.bom-choice summary {
+  cursor: pointer;
+}
+
+.bom-choice strong, .bom-choice a {
+  display: block;
+}
+
+.bom-choice p, .bom-choice ul {
+  margin-block: 4px;
 }
 
 .bom-select-3d {

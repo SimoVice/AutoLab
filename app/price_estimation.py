@@ -167,7 +167,7 @@ def price_context(project: dict, procurement: dict | None = None) -> dict:
     """Return canonical purchase scopes without any supplier or model request."""
     from app.procurement import initial_procurement_rows, purchase_scope, report_for_project
 
-    rows = initial_procurement_rows(project)
+    rows = [r for r in initial_procurement_rows(project) if r["quantity"] > 0]
     if len(rows) > MAX_GROUPS:
         raise ValueError("This estimate supports at most 64 purchase groups.")
     current = report_for_project(project, procurement) if procurement else None

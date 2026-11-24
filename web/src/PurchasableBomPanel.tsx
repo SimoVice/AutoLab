@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type {
   BomCurrency,
   HardwareCompatibilityReport,
+  PartCandidate,
   Project,
   PurchasableBom,
   PurchasableBomLine,
@@ -24,7 +25,27 @@ type Props = {
 const priceLabels: Record<PurchasableBomLine['price_source'], string> = {
   unpriced: 'Selection required', unavailable: 'Supplier unavailable', stale_observation: 'Recheck supplier',
   live_api: 'Live API', slicer_material_estimate: '3D printed', curated_reference: 'Reference',
+  quote_required: 'Quote required', lab_inventory: 'Lab inventory', quantity_required: 'Quantity required',
 };
+
+const evidenceLabels = { catalog: 'Reviewed catalog', supplier_search: 'Supplier search', user_record: 'User declaration' };
+const reviewLabels = { matched: 'Recorded requirements match', unverified: 'Interfaces to verify', mismatch: 'Conflicts with requirement' };
+
+function CandidateEvidence({ part }: { part: PartCandidate }) {
+  return <div className="bom-line-meta">
+    <strong>{part.issuer} · {part.part_number}</strong>
+    <span>{evidenceLabels[part.basis]} · {reviewLabels[part.interface_status]}</span>
+    {part.source_observed_at && <time className="bom-line-meta" dateTime={part.source_observed_at}>
+      Identified {new Date(part.source_observed_at).toLocaleDateString('en-US', { timeZone: 'UTC' })}
+    </time>}
+    {part.source_url && <a href={part.source_url} target="_blank" rel="noopener noreferrer">Identity source</a>}
+    <p>{part.evidence}</p>
+    <ul>{part.checks.map((check, index) => <li key={index}>
+      {check.key.replaceAll('_', ' ')} · {check.comparison.replaceAll('_', ' ')} {check.required} {check.unit}
+      {' · '}{check.actual ?? 'Unspecified'} ({check.status})
+    </li>)}</ul>
+  </div>;
+}
 
 function fmtMoney(amount: number | null | undefined, currency: BomCurrency): string {
   if (amount == null || Number.isNaN(amount)) return '—';
@@ -219,6 +240,7 @@ export default function PurchasableBomPanel({ project, busy = false, onSelectPar
               <small>
                 {bom.summary.line_count} lines · {bom.summary.unresolved_count} awaiting selection
                 {bom.summary.unavailable_count > 0 && ` · ${bom.summary.unavailable_count} unavailable`}
+                {bom.summary.quote_required_count > 0 && ` · ${bom.summary.quote_required_count} awaiting a quote`}
                 {bom.summary.stale_offer_count > 0 && ` · ${bom.summary.stale_offer_count} awaiting a new price`}
               </small>
             </div>
@@ -268,7 +290,25 @@ export default function PurchasableBomPanel({ project, busy = false, onSelectPar
                   <tr key={line.line_id}>
                     <td>
                       <strong>{line.label}</strong>
-                      {line.resolution_status === 'selection_required' && line.requirement?.source_file && (
+                      {line.part_choice?.accepted && <span className="bom-line-meta">
+                        {line.requirement?.name} · {reviewLabels[line.part_choice.accepted.interface_status]}
+                      </span>}
+                      {!line.part_choice?.accepted && !!line.requirement?.critical_specs?.length && (
+                        <details className="bom-choice">
+                          <summary>Required specifications</summary>
+                          <ul>{line.requirement.critical_specs.map((spec, index) => <li key={index}>
+                            {spec.key.replaceAll('_', ' ')} · {spec.comparison.replaceAll('_', ' ')} {spec.value} {spec.unit}
+                            {spec.evidence && <span className="bom-line-meta">{spec.evidence}</span>}
+                          </li>)}</ul>
+                        </details>
+                      )}
+                      {line.part_choice && line.part_choice.candidates.length > 0 && <details className="bom-choice">
+                        <summary>Part evidence ({line.part_choice.candidates.length})</summary>
+                        {line.part_choice.decision && <p>Selection · {line.part_choice.decision}</p>}
+                        {line.part_choice.candidates.map(part => <CandidateEvidence
+                          key={JSON.stringify([part.issuer, part.part_number, part.label])} part={part} />)}
+                      </details>}
+                      {line.requirement?.source_file && (
                         <span className="bom-line-meta">
                           Source list · {[line.requirement.source_file, line.requirement.supplier,
                             line.requirement.mpn ?? line.requirement.sku ?? line.requirement.part_number]
@@ -311,12 +351,15 @@ export default function PurchasableBomPanel({ project, busy = false, onSelectPar
                           rel="noopener noreferrer"
                           className="bom-line-meta"
                         >
-                          Supplier link
+                          {line.part_choice?.accepted?.basis === 'user_record' ? 'Recorded source' : 'Supplier link'}
                         </a>
                       )}
                     </td>
                     <td>
                       {line.quantity} {line.unit}
+                      {line.purchase_quantity != null && <span className="bom-line-meta">
+                        {line.owned_quantity} on hand · {line.purchase_quantity} to purchase
+                      </span>}
                       {line.packs_to_order != null && line.pack_size != null && line.pack_size > 1 && (
                         <span className="bom-line-meta">
                           {line.packs_to_order} pack(s) × {line.pack_size}

@@ -13,6 +13,14 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from app.part_choices import (
+    Candidate,
+    add_declared_specs,
+    candidate_view,
+    catalog_candidate,
+    required_amount,
+    requirement_signature,
+)
 from app.print_estimator import estimate_fdm_part
 from app.supplier_apis import (
     UNAVAILABLE_STATES,
@@ -129,7 +137,7 @@ def _catalog_line(
         adapter = live.get("adapter") or live.get("parser")
         supplier = live.get("supplier") or supplier
         sku = live.get("sku") or sku
-    else:
+    elif entry.get("reference_unit_price_usd") is not None:
         packs_needed = math.ceil(quantity / pack_size)
         ref_usd = float(entry["reference_unit_price_usd"])
         pack_price = (
@@ -146,6 +154,11 @@ def _catalog_line(
         source_url = entry.get("source_url")
         fetched_at = None
         adapter = "curated_reference_catalog"
+    else:
+        packs_needed = unit_price = pack_price = line_total = None
+        price_source, availability = "quote_required", "unknown"
+        stock_qty = lead_days = fetched_at = adapter = None
+        source_url = entry.get("source_url")
 
     return {
         "line_id": f"{group_id}:{item_id}",
@@ -457,6 +470,8 @@ def _requirement_line(
     quantity = part.get("quantity", 1)
     unit = part.get("unit") or "unit"
     requirement = {"name": name, "quantity": quantity, "unit": unit}
+    if part.get("critical_specs"):
+        requirement["critical_specs"] = deepcopy(part["critical_specs"])
     for field in ("source_id", "source_url", "source_file", "sku", "mpn", "part_number",
                   "supplier", "role", "notes"):
         if part.get(field) is not None:
@@ -482,27 +497,38 @@ def _requirement_line(
         catalog_unit = str(catalog_items[stock_item].get("unit") or "unit").casefold()
         count_units = {catalog_unit, "unit", "item", "each", "pc", "pcs", "ea"}
         unit_known = str(unit).casefold() in count_units
-    if stock_item and unit_known and type(quantity) is int and quantity > 0:
+    reference = None
+    if stock_item and requirement.get("critical_specs"):
+        reference = candidate_view(catalog_candidate(stock_item, catalog_items),
+                                   requirement, catalog_items)
+    if (stock_item and unit_known and type(quantity) is int and quantity > 0
+            and (not reference or reference["interface_status"] != "mismatch")):
         line = _catalog_line(
             stock_item, quantity, group_id=group_id, component_ids=component_ids,
             role_note=part.get("role") or part.get("notes") or "",
             currency=currency, fx_rates=fx_rates, live_rows=live_rows, catalog_items=catalog_items,
         )
     else:
-        line = {
-            "group_id": group_id, "component_ids": component_ids, "catalog_id": None,
-            "label": name, "category": "requirement", "kind": "requirement",
-            "resolution_status": "selection_required", "quantity": quantity, "unit": unit,
-            "supplier": None, "sku": None, "mpn": None, "digikey_pn": None, "mouser_pn": None,
-            "pack_size": None, "packs_to_order": None, "currency": currency,
-            "unit_price": None, "pack_price": None, "line_total": None,
-            "price_source": "unpriced", "availability": "selection_required",
-            "stock_quantity": None, "lead_time_days": None, "source_url": None,
-            "fetched_at": None, "adapter": None, "specs": {}, "print_estimate": None,
-            "notes": part.get("notes") or part.get("role") or "",
-        }
+        line = _open_requirement(requirement, currency, group_id, component_ids)
+    if reference:
+        line["reference_candidate"] = reference
     line.update(line_id=requirement_id, requirement=requirement)
     return line
+
+
+def _open_requirement(requirement, currency, group_id, component_ids):
+    return {
+        "group_id": group_id, "component_ids": component_ids, "catalog_id": None,
+        "label": requirement["name"], "category": "requirement", "kind": "requirement",
+        "resolution_status": "selection_required", "quantity": requirement["quantity"],
+        "unit": requirement["unit"], "supplier": None, "sku": None, "mpn": None,
+        "digikey_pn": None, "mouser_pn": None, "pack_size": None, "packs_to_order": None,
+        "currency": currency, "unit_price": None, "pack_price": None, "line_total": None,
+        "price_source": "unpriced", "availability": "selection_required", "stock_quantity": None,
+        "lead_time_days": None, "source_url": None, "fetched_at": None, "adapter": None,
+        "specs": {}, "print_estimate": None, "notes": requirement.get("notes") or
+        requirement.get("role") or "",
+    }
 
 
 def _upstream_bom_lines(
@@ -534,11 +560,16 @@ def _upstream_bom_lines(
         }:
             continue
         part_id = part.get("id") or str(idx + 1)
-        lines.append(_requirement_line(
+        line = _requirement_line(
             part, requirement_id=f"upstream:{part.get('source_file') or ''}:{part_id}",
             group_id="upstream-bom-items", component_ids=[], currency=currency,
             fx_rates=fx_rates, live_rows=live_rows, catalog_items=catalog_items,
-        ))
+        )
+        provenance = up.get("provenance") or {}
+        line["design_binding"] = [
+            provenance.get(k) for k in ("source_host", "repo_full_name", "commit_sha")
+        ]
+        lines.append(line)
     return lines
 
 
@@ -586,13 +617,156 @@ def _concept_bom_lines(
                 currency=currency, fx_rates=fx_rates, role_note=part.get("role") or "",
             ))
             continue
-        lines.append(_requirement_line(
+        line = _requirement_line(
             part, requirement_id=f"concept:{key}", group_id=f"concept-{key}",
             component_ids=[key] if component else list(part.get("component_keys") or []),
             currency=currency, fx_rates=fx_rates, live_rows=live_rows, catalog_items=catalog_items,
             stock_item=_extrusion_stock(component, catalog_items) if component else None,
-        ))
+        )
+        line["design_binding"] = [
+            {
+                key: components[cid].get(key)
+                for key in ("key", "primitives", "parent_key", "placement_mm")
+            }
+            for cid in line["component_ids"]
+            if cid in components
+        ]
+        lines.append(line)
     return lines
+
+
+def _apply_choice(line, record, catalog, live_rows, fx_rates):
+    requirement = add_declared_specs(line["requirement"], record.get("required_specs", []))
+    line["requirement"] = requirement
+    candidates = [candidate_view(Candidate.model_validate(item), requirement, catalog)
+                  for item in record["candidates"]]
+    line["part_choice"] = {
+        "candidates": candidates,
+        "accepted": None,
+        "decision": record["decision"],
+        "inventory_evidence": record.get("inventory_evidence"),
+    }
+    if not record["accepted"]:
+        if record.get("selection_cleared"):
+            line.update(_open_requirement(requirement, line["currency"], line["group_id"],
+                                          line["component_ids"]))
+            return
+        if line["catalog_id"] and record.get("required_specs"):
+            reference = candidate_view(
+                catalog_candidate(line["catalog_id"], catalog), requirement, catalog
+            )
+            line["reference_candidate"] = reference
+            if reference["interface_status"] == "mismatch":
+                line.update(_open_requirement(requirement, line["currency"], line["group_id"],
+                                              line["component_ids"]))
+        return
+    selected = candidate_view(Candidate.model_validate(record["accepted"]), requirement, catalog)
+    quantity = line["quantity"]
+    if selected["interface_status"] == "mismatch":
+        return
+    cid = selected["catalog_id"]
+    demand = required_amount(quantity)
+    owned = record["owned_quantity"]
+    outstanding = None
+    if demand is not None:
+        allocated = min(Decimal(str(owned)), demand)
+        remaining = demand - allocated
+        outstanding = int(remaining) if remaining == int(remaining) else float(remaining)
+        owned = int(allocated) if allocated == int(allocated) else float(allocated)
+    entries = catalog
+    offer_id = cid
+    if not cid:
+        supplier_part = selected["basis"] == "supplier_search"
+        offer_id = "external:" + json.dumps(
+            [selected["basis"], selected["issuer"], selected["part_number"]]
+        )
+        entry = {
+            "label": selected["label"], "category": "selected_part", "unit": selected["unit"],
+            "supplier": selected["issuer"] if supplier_part else None,
+            "sku": selected["part_number"] if supplier_part else None,
+            "mpn": selected["mpn"], "source_url": selected["source_url"],
+        }
+        if supplier_part:
+            entry[{"DigiKey": "digikey_pn", "Mouser": "mouser_pn"}[selected["issuer"]]] = entry[
+                "sku"
+            ]
+        entries = {offer_id: entry}
+        if selected["checks"][0]["status"] != "match":
+            live_rows = {}
+    priced = _catalog_line(offer_id, outstanding or 0, group_id=line["group_id"],
+                           component_ids=line["component_ids"], currency=line["currency"],
+                           fx_rates=fx_rates, live_rows=live_rows, catalog_items=entries,
+                           role_note=line["notes"])
+    priced.update(line_id=line["line_id"], quantity=quantity, unit=requirement["unit"],
+                  catalog_id=cid, offer_id=offer_id, owned_quantity=owned,
+                  purchase_quantity=outstanding, resolution_status="user_selected")
+    if outstanding is None:
+        priced.update(
+            price_source="quantity_required",
+            availability="unknown",
+            packs_to_order=None,
+            line_total=None,
+            unit_price=None,
+            pack_price=None,
+            stock_quantity=None,
+            lead_time_days=None,
+            fetched_at=None,
+            adapter=None,
+            source_url=selected["source_url"],
+        )
+    elif outstanding == 0:
+        priced.update(
+            price_source="lab_inventory",
+            availability="on_hand",
+            packs_to_order=0,
+            line_total=0.0,
+            unit_price=None,
+            pack_price=None,
+            stock_quantity=None,
+            lead_time_days=None,
+            fetched_at=None,
+            adapter=None,
+            source_url=selected["source_url"],
+        )
+    line.update(priced)
+    line["part_choice"]["accepted"] = selected
+
+
+def reconcile_part_choices(project, *, restoring=False):
+    records = project.get("part_choices")
+    if not records:
+        return
+    bare = {**project, "part_choices": {}}
+    lines = {row["line_id"]: row for row in build_complete_bom(bare)["lines"]
+             if row.get("requirement")}
+    catalog = _raw_catalog()["items"]
+    valid = {}
+    for key, record in records.items():
+        line = lines.get(key)
+        if not line or record["requirement_signature"] != line["requirement_signature"]:
+            if restoring:
+                raise ValueError("A saved part choice does not match its design requirement.")
+            continue
+        if restoring:
+            requirement = add_declared_specs(line["requirement"], record.get("required_specs", []))
+            for item in [
+                *record["candidates"],
+                *([record["accepted"]] if record["accepted"] else []),
+            ]:
+                candidate = Candidate.model_validate(item)
+                view = candidate_view(candidate, requirement, catalog)
+                if candidate.catalog_id and (view["issuer"], view["part_number"]) != (
+                        candidate.issuer, candidate.part_number):
+                    raise ValueError("Saved catalog identity differs from its reviewed entry.")
+                if candidate.basis == "supplier_search" and candidate.issuer not in {
+                    "DigiKey",
+                    "Mouser",
+                }:
+                    raise ValueError("Unknown distributor for the saved search result.")
+                if item is record["accepted"] and view["interface_status"] == "mismatch":
+                    raise ValueError("The saved selection conflicts with its requirement.")
+        valid[key] = record
+    project["part_choices"] = valid
 
 
 def _bench_station_bom_lines(
@@ -1175,6 +1349,13 @@ def build_complete_bom(
     unpriced_placeholders = 0
 
     for line in lines:
+        if line.get("requirement"):
+            signature = requirement_signature(line)
+            line.pop("design_binding", None)
+            line["requirement_signature"] = signature
+            record = (project.get("part_choices") or {}).get(line["line_id"])
+            if record and signature == record["requirement_signature"]:
+                _apply_choice(line, record, catalog_items, live_rows, eff_fx)
         lt = line.get("line_total")
         if lt is None:
             unpriced_placeholders += 1
@@ -1185,7 +1366,7 @@ def build_complete_bom(
             live_sub += dec
         elif src == "slicer_material_estimate":
             print_sub += dec
-        else:
+        elif src == "curated_reference":
             ref_sub += dec
         if pest := line.get("print_estimate"):
             total_mass_g += float(pest["filament_mass_g"])
@@ -1224,6 +1405,8 @@ def build_complete_bom(
             ),
             "unpriced_placeholder_count": unpriced_placeholders,
             "unresolved_count": unresolved,
+            "owned_line_count": sum(bool(r.get("owned_quantity")) for r in lines),
+            "quote_required_count": sum(r["price_source"] == "quote_required" for r in lines),
             "unavailable_count": sum(r["price_source"] == "unavailable" for r in lines),
             "stale_offer_count": sum(r["price_source"] == "stale_observation" for r in lines),
             "live_api_subtotal": _money_float(live_sub),
@@ -1270,6 +1453,20 @@ def bom_to_csv(bom: dict[str, Any]) -> bytes:
         "requirement_part_number",
         "requirement_supplier",
         "requirement_source_file",
+        "requirement_role",
+        "required_specs",
+        "selected_issuer",
+        "selected_part_number",
+        "selection_basis",
+        "selection_source",
+        "selection_evidence",
+        "selection_decision",
+        "inventory_evidence",
+        "interface_status",
+        "interface_checks",
+        "candidates",
+        "owned_quantity",
+        "purchase_quantity",
         "supplier",
         "sku",
         "mpn",
@@ -1297,6 +1494,22 @@ def bom_to_csv(bom: dict[str, Any]) -> bytes:
         rec = dict(line)
         for key, value in (line.get("requirement") or {}).items():
             rec[f"requirement_{key}"] = value
+        if specs := (line.get("requirement") or {}).get("critical_specs"):
+            rec["required_specs"] = json.dumps(specs, ensure_ascii=False)
+        if choice := line.get("part_choice"):
+            selected = choice["accepted"] or {}
+            rec.update(
+                selected_issuer=selected.get("issuer"),
+                selected_part_number=selected.get("part_number"),
+                selection_basis=selected.get("basis"),
+                selection_source=selected.get("source_url"),
+                selection_evidence=selected.get("evidence"),
+                selection_decision=choice["decision"],
+                inventory_evidence=choice.get("inventory_evidence"),
+                interface_status=selected.get("interface_status"),
+                interface_checks=json.dumps(selected.get("checks", []), ensure_ascii=False),
+                candidates=json.dumps(choice["candidates"], ensure_ascii=False),
+            )
         pest = line.get("print_estimate") or {}
         rec["filament_mass_g"] = pest.get("filament_mass_g")
         rec["print_time_minutes"] = pest.get("print_time_minutes")

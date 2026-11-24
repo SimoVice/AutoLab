@@ -126,6 +126,22 @@ def procurement_groups(project: dict) -> list[dict]:
         from app.concept_design import concept_sources
 
         groups = []
+        chosen = {}
+        blocked = set()
+        if project.get("part_choices") or any(
+            p.get("critical_specs") for p in concept.get("parts", [])
+        ):
+            from app.bom_engine import build_complete_bom
+
+            lines = build_complete_bom(project)["lines"]
+            chosen = {r["group_id"]: r for r in lines
+                      if (r.get("part_choice") or {}).get("accepted")}
+            blocked = {
+                r["group_id"]
+                for r in lines
+                if r["resolution_status"] == "selection_required"
+                and (r.get("part_choice") or r.get("reference_candidate"))
+            }
         by_url = {p.url: p for p in PRODUCTS.values()}
         registry = concept_sources()
         for part in concept.get("parts", []):
@@ -140,8 +156,30 @@ def procurement_groups(project: dict) -> list[dict]:
                 option.update(id=product.option_id, supplier=product.supplier, sku=product.sku)
             elif source:
                 option["price_kind"] = "configuration_needed"
-            groups.append({"id": key, "quantity": part["quantity"], "component_ids": [part["key"]],
-                           "selected_id": option["id"], "is_candidate": True, "options": [option]})
+            quantity = part["quantity"]
+            if key in blocked:
+                option = {"id": key, "label": part["name"], "source_url": None,
+                          "compatibility_note": "Choose a part that meets the current requirement."}
+            if selection := chosen.get(key):
+                identity = selection["part_choice"]["accepted"]
+                option = {
+                    "id": selection["offer_id"],
+                    "label": identity["label"],
+                    "source_url": identity["source_url"],
+                    "price_kind": "configuration_needed",
+                    "supplier": selection.get("supplier"),
+                    "sku": selection.get("sku"),
+                    "compatibility_note": selection["notes"],
+                }
+                if product := PRODUCTS.get(selection.get("catalog_id")):
+                    option.update(
+                        supplier=product.supplier, sku=product.sku, source_url=product.url
+                    )
+                    option.pop("price_kind")
+                quantity = selection["purchase_quantity"]
+            groups.append({"id": key, "quantity": quantity, "component_ids": [part["key"]],
+                           "selected_id": option["id"], "is_candidate": key not in chosen,
+                           "lab_inventory": key in chosen and quantity == 0, "options": [option]})
         return groups
     station = project.get("bench_station")
     if station:
@@ -255,7 +293,8 @@ def rebind_report(before: dict, after: dict, report: dict | None) -> dict | None
 def _row(group: dict) -> dict:
     selected = next(o for o in group["options"] if o["id"] == group["selected_id"])
     quantity = group["quantity"]
-    if isinstance(quantity, bool) or not isinstance(quantity, int) or not 1 <= quantity <= 100_000:
+    minimum = 0 if group.get("lab_inventory") else 1
+    if type(quantity) is not int or not minimum <= quantity <= 100_000:
         raise ValueError("Procurement requires a positive bounded integer quantity.")
     product = PRODUCTS.get(selected["id"])
     # A matching option id alone does not authorize a URL or different SKU/supplier.
@@ -267,7 +306,9 @@ def _row(group: dict) -> dict:
     )
     status = "missing"
     issue = "Specify the exact hardware, fabrication/materials and supplier before pricing."
-    if selected["id"] == "quote-required" or selected.get("price_kind") in {
+    if group.get("lab_inventory"):
+        status, issue, supported = "on_hand", "All required units come from lab inventory.", False
+    elif selected["id"] == "quote-required" or selected.get("price_kind") in {
         "starting_at",
         "configuration_needed",
     }:

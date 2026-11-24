@@ -25,6 +25,7 @@ from app.lab_profile import (
 )
 from app.microplates import PROFILE_ID as CORNING_96_ID
 from app.microplates import LabwareSelection, reapply_plate, select_plate
+from app.part_choices import ChoosePartArgs, update_choice
 from app.platform_profiles import platform_profiles
 from app.services.runtime import api_hook
 from app.spatial_fit import (
@@ -93,6 +94,7 @@ class ToolContext:
     lab_profile: dict | None = None
     procurement_report: dict | None = None
     cost_estimate: dict | None = None
+    supplier_hits: list[dict] = field(default_factory=list)
     recommendations: list[dict] = field(default_factory=list)
     action_runs: list[dict] = field(default_factory=list)
     mutated: bool = False
@@ -533,6 +535,16 @@ _TOOL_SPECS: list[tuple[str, str, type[BaseModel]]] = [
         "supplier SKUs/MPNs, lead times, analytical FDM filament/print-time estimates, explicit "
         "shipping/tax exclusions, and hardware compatibility status.",
         GeneratePurchasableBomArgs,
+    ),
+    (
+        "choose_requirement_part",
+        "Propose, select, replace or clear one custom or imported BOM requirement by its line_id. "
+        "Use an exact catalog_id, a supplier hit by issuer and SKU, or a manufacturer's "
+        "or supplier's identifier stated by the user. Only select on the user's instruction. "
+        "For user-supplied evidence quote their words verbatim, including the source URL, unit and "
+        "any stated part values. For lab stock allocate owned_quantity in required units. "
+        "Compare candidates by proposing each. Selection and inventory do not place an order.",
+        ChoosePartArgs,
     ),
     (
         "check_hardware_compatibility",
@@ -2337,6 +2349,55 @@ def _tool_inspect_upstream_project(
     )
 
 
+def _tool_choose_requirement_part(args: ChoosePartArgs, ctx: ToolContext) -> ToolResult:
+    from app.bom_engine import build_complete_bom, load_purchasable_catalog
+    from app.design_workflow import machine_signature, refresh_workflow
+
+    def current_line(project):
+        bom = build_complete_bom(project, procurement_report=ctx.procurement_report)
+        return next(
+            (r for r in bom["lines"] if r["line_id"] == args.line_id and r.get("requirement")), None
+        )
+
+    name = "choose_requirement_part"
+    line = current_line(ctx.project)
+    if not line:
+        return _fail(
+            name, "designing", "Use a current requirement line_id from the purchasing list."
+        )
+    previous = ctx.project.get("part_choices", {}).get(args.line_id)
+    try:
+        record = update_choice(args, line, previous, load_purchasable_catalog()["items"],
+                               ctx.supplier_hits, ctx.user_message).model_dump()
+    except ValueError as exc:
+        return _fail(name, "designing", str(exc))
+    changed = record != previous and bool(previous or record["candidates"] or
+                                          record["required_specs"] or line.get("catalog_id"))
+    if changed:
+        updated = deepcopy(ctx.project)
+        updated.setdefault("part_choices", {})[args.line_id] = record
+        updated["revision"] += 1
+        if updated.get("machine_approval") and machine_signature(ctx.project) != machine_signature(
+            updated
+        ):
+            updated.pop("machine_approval", None)
+            updated["status"] = "draft"
+        from app.project_storage import make_snapshot
+
+        make_snapshot(updated, [])
+        ctx.project = refresh_workflow(updated)
+        ctx.mutated = True
+        line = current_line(updated)
+    msg = {
+        "specify": "Recorded required interface values and rechecked existing choices.",
+        "select": "Recorded the selected part and purchase quantity.",
+        "clear": "Cleared the part selection.",
+        "propose": "Recorded candidate and interface checks.",
+    }
+    return ToolResult(tool=name, ok=True, stage="designing", mutated=changed,
+                      summary=msg[args.action], data={"line": line})
+
+
 async def _tool_generate_purchasable_bom(
     args: GeneratePurchasableBomArgs, ctx: ToolContext
 ) -> ToolResult:
@@ -2376,8 +2437,12 @@ async def _tool_generate_purchasable_bom(
         sem = asyncio.Semaphore(4)
 
         async def _pull(line: dict[str, Any]) -> None:
-            cid = line.get("catalog_id")
-            if not cid or line.get("kind") != "commercial_part":
+            cid = line.get("offer_id") or line.get("catalog_id")
+            if (
+                not cid
+                or line.get("kind") != "commercial_part"
+                or line.get("purchase_quantity") == 0
+            ):
                 return
             is_shopify = cid in PRODUCTS and PRODUCTS[cid].adapter == "shopify"
             has_pn = bool(line.get("digikey_pn") or line.get("mouser_pn"))
@@ -2389,7 +2454,7 @@ async def _tool_generate_purchasable_bom(
                         {
                             "catalog_id": cid,
                             "option_id": cid,
-                            "mpn": line.get("mpn"),
+                            "mpn": line.get("mpn") if line.get("catalog_id") else None,
                             "digikey_pn": line.get("digikey_pn"),
                             "mouser_pn": line.get("mouser_pn"),
                             "sku": line.get("sku"),
@@ -2461,6 +2526,10 @@ async def _tool_generate_purchasable_bom(
                     "unit": ln["unit"],
                     "sku": ln["sku"],
                     "requirement": ln.get("requirement"),
+                    "part_choice": ln.get("part_choice"),
+                    "reference_candidate": ln.get("reference_candidate"),
+                    "owned_quantity": ln.get("owned_quantity"),
+                    "purchase_quantity": ln.get("purchase_quantity"),
                     "packs_to_order": ln["packs_to_order"],
                     "line_total": ln["line_total"],
                     "price_source": ln["price_source"],
@@ -2471,6 +2540,8 @@ async def _tool_generate_purchasable_bom(
                 }
                 for ln in bom["lines"][:40]
             ],
+            "additional_requirements": [{"line_id": ln["line_id"], "label": ln["label"]}
+                                        for ln in bom["lines"][40:] if ln.get("requirement")],
         },
         action_run=run,
     )
@@ -2509,10 +2580,10 @@ async def _tool_search_supplier_components(
 ) -> ToolResult:
     from app.supplier_apis import search_official_suppliers
 
-    _ = ctx
     res = await search_official_suppliers(
         args.query, currency=args.currency, max_results=args.max_results
     )
+    ctx.supplier_hits.extend(res["live_api_results"])
     return ToolResult(
         tool="search_supplier_components",
         ok=True,
@@ -2719,6 +2790,7 @@ _DISPATCH: dict[str, tuple[type[BaseModel], Any, bool]] = {
         _tool_generate_purchasable_bom,
         True,
     ),
+    "choose_requirement_part": (ChoosePartArgs, _tool_choose_requirement_part, False),
     "check_hardware_compatibility": (
         CheckHardwareCompatibilityArgs,
         _tool_check_hardware_compatibility,

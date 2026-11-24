@@ -22,6 +22,7 @@ from app.labware import (
     restore_labware,
 )
 from app.microplates import SavedPlate, plate_inputs, restore_plate
+from app.part_choices import PartChoice
 from app.tip_racks import (
     SavedCapabilities,
     SavedTipRack,
@@ -99,6 +100,7 @@ class Snapshot(StrictModel):
     custom_assembly_v1: dict[str, JsonValue] | None = None
     standalone_fixture: dict[str, JsonValue] | None = None
     upstream_project: dict[str, JsonValue] | None = None
+    part_choices: Annotated[dict[str, PartChoice], Field(max_length=512)] | None = None
     build_logs: list[dict[str, JsonValue]] | None = None
     inspection_extension: dict[str, JsonValue] | None = None
     generic_sample_capacity: Annotated[int, Field(ge=1, le=6)] | None = None
@@ -215,6 +217,8 @@ def make_snapshot(project: dict, history: list[dict]) -> dict:
            if project.get("dimension_provenance") else {}),
         "history": deepcopy(history[-DISPLAY_HISTORY_LIMIT:]),
     }
+    if project.get("part_choices"):
+        payload["part_choices"] = deepcopy(project["part_choices"])
     if payload["compiler_version"] == "4":
         payload.pop("labware_brief")
         payload.pop("labware_rack")
@@ -521,6 +525,13 @@ def restore_snapshot(snapshot: object) -> tuple[dict, list[dict]]:
 
     if saved.machine_approval and not upgraded and not clearance_upgrade:
         project["machine_approval"] = saved.machine_approval
+    if saved.part_choices:
+        from app.bom_engine import reconcile_part_choices
+
+        project["part_choices"] = {
+            key: value.model_dump() for key, value in saved.part_choices.items()
+        }
+        reconcile_part_choices(project, restoring=True)
     if saved.dimension_provenance:
         from app.lab_profile import DimensionMeasurement
 
@@ -543,8 +554,13 @@ def restore_snapshot(snapshot: object) -> tuple[dict, list[dict]]:
             restored_logs.append(validated.model_dump(mode="json", exclude_none=True))
         project["build_logs"] = restored_logs
         project["build_feedback"] = compute_reprint_diff(project)
-    refresh_workflow(project)
+    from app.design_workflow import machine_signature, workflow_state
     from app.spatial_fit import refresh_spatial_fit
 
+    bound_before_fit = workflow_state(project)["machine_approved"]
     refresh_spatial_fit(project)
+    # A portable approval can predate the derived spatial-fit display in older projects.
+    if bound_before_fit and project["design"]["spatial_fit"]["status"] != "infeasible":
+        project["machine_approval"]["machine_signature"] = machine_signature(project)
+    refresh_workflow(project)
     return project, [entry.model_dump() for entry in saved.history]

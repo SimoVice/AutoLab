@@ -789,6 +789,15 @@ export type PrintEstimate = {
   printer_fit_detail?: string | null;
 };
 
+export type PartCandidate = {
+  issuer: string; part_number: string; label: string; source_url: string | null;
+  source_observed_at?: string | null;
+  basis: 'catalog' | 'supplier_search' | 'user_record'; evidence: string;
+  interface_status: 'matched' | 'unverified' | 'mismatch';
+  checks: { key: string; comparison: string; required: string; unit: string;
+    actual: string | null; status: 'match' | 'mismatch' | 'unknown' }[];
+};
+
 export type PurchasableBomLine = {
   line_id: string;
   group_id: string;
@@ -796,10 +805,13 @@ export type PurchasableBomLine = {
   label: string;
   category: string;
   kind: 'commercial_part' | '3d_printed' | 'requirement';
-  resolution_status: 'catalog_identified' | 'fabricate' | 'selection_required';
+  resolution_status: 'catalog_identified' | 'fabricate' | 'selection_required' | 'user_selected';
+  part_choice?: { candidates: PartCandidate[]; accepted: PartCandidate | null; decision: string | null };
+  owned_quantity?: number; purchase_quantity?: number | null;
   requirement?: {
     name: string; quantity: string | number; unit: string;
     sku?: string; mpn?: string; part_number?: string; supplier?: string; source_file?: string;
+    critical_specs?: { key: string; value: string; unit: string; comparison: string; evidence?: string }[];
   };
   component_ids: string[];
   supplier: string | null;
@@ -813,7 +825,7 @@ export type PurchasableBomLine = {
   unit_price: number | null;
   pack_price: number | null;
   line_total: number | null;
-  price_source: 'live_api' | 'curated_reference' | 'slicer_material_estimate' | 'unpriced' | 'unavailable' | 'stale_observation';
+  price_source: 'live_api' | 'curated_reference' | 'slicer_material_estimate' | 'unpriced' | 'unavailable' | 'stale_observation' | 'quote_required' | 'lab_inventory' | 'quantity_required';
   availability: string;
   stock_quantity?: number | null;
   lead_time_days?: number | null;
@@ -845,6 +857,7 @@ export type PurchasableBom = {
     reference_priced_count: number;
     unpriced_placeholder_count: number;
     unresolved_count: number;
+    quote_required_count: number;
     unavailable_count: number;
     stale_offer_count: number;
     live_api_subtotal: number;

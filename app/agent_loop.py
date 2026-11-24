@@ -43,6 +43,7 @@ _TOOL_STAGES = {
     "adapt_open_hardware_project": "assembling",
     "inspect_upstream_project": "inspecting",
     "generate_purchasable_bom": "verifying",
+    "choose_requirement_part": "designing",
     "check_hardware_compatibility": "verifying",
     "search_supplier_components": "researching",
     "generate_robot_protocol": "verifying",
@@ -121,6 +122,15 @@ CORE PRINCIPLES
   When the tool returns design_required, explain which hardware choice the brief still needs.
   Report selection_required lines with their quantities and the missing part identity. Describe
   the priced portion as a subtotal while any requirement is open.
+  For custom parts and supplies, put the stated critical specifications in critical_specs using
+  exact catalog keys when available, explicit units and equals / at_least / at_most. Keep unknown
+  properties open. To compare, choose, replace or record lab inventory, get the current BOM
+  and call choose_requirement_part with its stable line_id. Use propose for alternatives and
+  questions. Use specify to record required_specs supplied for an existing requirement.
+  Use select only for an affirmative choice, with the user's verbatim instruction. Include the
+  exact inventory_quote when allocating owned_quantity. Leave unused optional fields null or empty.
+  Quote any declared external specifications and source exactly. Report missing interfaces,
+  evidence basis, units on hand, remaining purchase quantity and whether a quote is available.
 - Executable protocols & hardware commissioning: when generating or verifying robot protocols
   (> 6 targets, serial dilutions, multi-dispense for OT-2 or Science Jubilee) or preparing
   physical motion commissioning (GRBL/Klipper/Loopback gateway, limits, watchdog, E-stop), call

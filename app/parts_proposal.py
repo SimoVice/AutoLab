@@ -323,7 +323,10 @@ def build_parts_proposal(
     rows = []
     for purchase in initial_procurement_rows(project) if groups else []:
         gid, quantity = purchase["group_id"], purchase["quantity"]
+        selection = None
         if line := concept_lines.get(gid):
+            selection = (line.get("part_choice") or {}).get("accepted")
+            quantity = line["quantity"]
             low = high = line["line_total"]
             kind = line["price_source"]
             date = bom["catalog_checked_on"] if kind == "curated_reference" else line["fetched_at"]
@@ -335,6 +338,9 @@ def build_parts_proposal(
                 "live_api": "Observed supplier price for the required number of packs.",
                 "unavailable": "The supplier reported this part unavailable at the last check.",
                 "stale_observation": "The previous supplier observation has expired.",
+                "quote_required": "Part selected. A current offer is required.",
+                "quantity_required": "Part selected. Specify the required quantity before pricing.",
+                "lab_inventory": "All units are on hand. Additional purchase cost is zero.",
             }[kind]
         else:
             low, high, note = _allowance(purchase, project)
@@ -342,7 +348,12 @@ def build_parts_proposal(
             kind, date, price_url = "planning_allowance", REVIEWED_ON, None
         item = priced.get(gid, {})
         observation = observed.get(gid, {})
-        offer_usable = kind not in ("unavailable", "stale_observation")
+        pending_choice = line and kind == "unpriced" and (
+            line.get("part_choice") or line.get("reference_candidate"))
+        offer_usable = not (selection or pending_choice) and kind not in (
+            "unavailable",
+            "stale_observation",
+        )
         if offer_usable and (
             item.get("low_usd") is not None and item.get("high_usd") is not None
         ):
@@ -359,7 +370,13 @@ def build_parts_proposal(
             note = "Observed purchase total including required whole packs."
         source, alternatives, assembly = _references(purchase, groups[gid])
         source_label, source_kind = purchase["label"], "selected_project_reference"
-        if not source or gid in ("labware-plate", "tip-rack-options"):
+        if selection:
+            source, source_label, source_kind = (
+                selection["source_url"],
+                selection["label"],
+                selection["basis"],
+            )
+        elif not source or gid in ("labware-plate", "tip-rack-options"):
             prior = source
             source, source_label, source_kind = _source_candidate(purchase, project)
             if (concepts.get(gid, {}).get("basis") == "selection_required"
@@ -462,6 +479,16 @@ def build_parts_proposal(
         }
         if gid == "upstream-platform":
             row["label"] = "Jubilee base remainder (listed kits excluded)"
+        if selection:
+            row.update(
+                label=line["requirement"]["name"],
+                owned_quantity=line["owned_quantity"],
+                purchase_quantity=line["purchase_quantity"],
+                part_choice=line["part_choice"],
+                unit_price_low_usd=line["unit_price"],
+                unit_price_high_usd=line["unit_price"],
+                unit_price_basis="Purchase unit price for the selected component when available.",
+            )
         for cid in purchase["component_ids"]:
             if cid in _fabrication_targets(project):
                 row["fabrication_url"] = (

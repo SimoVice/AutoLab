@@ -26,7 +26,7 @@ def _walk_schemas(node):
             yield from _walk_schemas(item)
 
 
-def test_all_26_openai_tool_schemas_are_strict_and_complete():
+def test_openai_tool_schemas_are_strict_and_complete():
     from app.agent_tools import openai_tool_schemas
 
     schemas = openai_tool_schemas(new_project())
@@ -53,6 +53,7 @@ def test_all_26_openai_tool_schemas_are_strict_and_complete():
         "adapt_open_hardware_project",
         "inspect_upstream_project",
         "generate_purchasable_bom",
+        "choose_requirement_part",
         "check_hardware_compatibility",
         "search_supplier_components",
         "generate_robot_protocol",

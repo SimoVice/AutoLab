@@ -27,6 +27,27 @@ def machine_signature(project: dict) -> str:
                "cold_transfer_extension": cold}
     if project.get("standalone_fixture"):
         payload["standalone_fixture"] = project["standalone_fixture"].get("spec")
+    selections = {
+        key: {
+            field: item["accepted"].get(field)
+            for field in ("catalog_id", "issuer", "part_number", "facts", "unit")
+        }
+        for key, item in (project.get("part_choices") or {}).items()
+        if item.get("accepted")
+    }
+    if selections:
+        payload["selected_parts"] = selections
+    declared = {
+        key: item["required_specs"]
+        for key, item in (project.get("part_choices") or {}).items()
+        if item.get("required_specs")
+    }
+    if declared:
+        payload["required_part_specs"] = declared
+    cleared = sorted(key for key, item in (project.get("part_choices") or {}).items()
+                     if item.get("selection_cleared"))
+    if cleared:
+        payload["cleared_part_selections"] = cleared
     if project.get("upstream_project"):
         up = project["upstream_project"]
         payload["upstream_project"] = {

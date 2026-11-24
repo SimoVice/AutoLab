@@ -182,6 +182,8 @@ def render_asset(
     if asset == "parts.csv":
         buf = io.StringIO(newline="")
         writer = csv.writer(buf)
+        chosen = {line["group_id"]: line for line in (purchasing_bom or {}).get("lines", [])
+                  if line.get("part_choice")}
         priced = bool(
             price_record
             and price_record.get("project_id") == project_id
@@ -197,10 +199,32 @@ def render_asset(
                 "Local model",
                 "US catalog search",
                 *(PRICE_COLUMNS if priced else []),
+                *(
+                    [
+                        "Selected issuer",
+                        "Selected part number",
+                        "Identity source",
+                        "Source basis",
+                        "Interface review",
+                        "Units on hand",
+                        "Units to purchase",
+                        "Purchase cost basis",
+                        "Purchase total",
+                        "Currency",
+                        "Selection evidence",
+                        "Interface checks",
+                        "Candidates",
+                    ]
+                    if chosen
+                    else []
+                ),
             ]
         )
         keys = {c["key"] for c in design["components"]}
         for row in design["parts"]:
+            line = chosen.get("concept-" + row["key"], {})
+            choice = line.get("part_choice", {})
+            selected = choice.get("accepted") or {}
             writer.writerow(
                 [
                     _safe_cell(v)
@@ -217,6 +241,25 @@ def render_asset(
                                 "concept-" + row["key"], [""] * len(PRICE_COLUMNS)
                             )
                             if priced
+                            else []
+                        ),
+                        *(
+                            [
+                                selected.get("issuer"),
+                                selected.get("part_number"),
+                                selected.get("source_url"),
+                                selected.get("basis"),
+                                selected.get("interface_status"),
+                                line.get("owned_quantity"),
+                                line.get("purchase_quantity"),
+                                line.get("price_source"),
+                                line.get("line_total"),
+                                line.get("currency"),
+                                choice.get("decision"),
+                                json.dumps(selected.get("checks", [])),
+                                json.dumps(choice.get("candidates", [])),
+                            ]
+                            if chosen
                             else []
                         ),
                     )
@@ -266,7 +309,12 @@ def render_asset(
                 *parts,
             ):
                 content, _ = render_asset(
-                    design, project_id, revision, name, price_record=price_record
+                    design,
+                    project_id,
+                    revision,
+                    name,
+                    price_record=price_record,
+                    purchasing_bom=purchasing_bom,
                 )
                 archive.writestr(name, content)
         return buf.getvalue(), "application/zip"

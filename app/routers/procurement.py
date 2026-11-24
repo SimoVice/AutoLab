@@ -314,8 +314,12 @@ async def refresh_purchasable_bom(
                 sem = asyncio.Semaphore(4)
 
                 async def _fetch_line(line: dict[str, Any]) -> None:
-                    cid = line.get("catalog_id")
-                    if not cid or line.get("kind") != "commercial_part":
+                    cid = line.get("offer_id") or line.get("catalog_id")
+                    if (
+                        not cid
+                        or line.get("kind") != "commercial_part"
+                        or line.get("purchase_quantity") == 0
+                    ):
                         return
                     is_shopify = cid in PRODUCTS and PRODUCTS[cid].adapter == "shopify"
                     has_api_pn = bool(line.get("digikey_pn") or line.get("mouser_pn"))
@@ -327,7 +331,7 @@ async def refresh_purchasable_bom(
                                 {
                                     "catalog_id": cid,
                                     "option_id": cid,
-                                    "mpn": line.get("mpn"),
+                                    "mpn": line.get("mpn") if line.get("catalog_id") else None,
                                     "digikey_pn": line.get("digikey_pn"),
                                     "mouser_pn": line.get("mouser_pn"),
                                     "sku": line.get("sku"),
