@@ -309,13 +309,18 @@ def _parse_target_entry(entry: str) -> tuple[str, str | None]:
     return number, unit
 
 
-def normalize_targets(text: str) -> str:
+def normalize_targets(
+    text: str,
+    *,
+    max_targets: int = MAX_TARGETS,
+    max_chars: int = MAX_INPUT_CHARS,
+) -> str:
     """Return canonical target list such as '1 mg/mL, 2 mg/mL'."""
     label = "Targets"
     if not isinstance(text, str):
         raise ValueError(f"{label} must be text such as '1 mM, 2 mM'.")
-    if len(text) > MAX_INPUT_CHARS:
-        raise ValueError(f"{label} exceeds the 1000 character limit.")
+    if len(text) > max_chars:
+        raise ValueError(f"{label} exceeds the {max_chars} character limit.")
     stripped = text.strip()
     if stripped == "":
         raise ValueError(f"{label} must contain at least one value such as '1 mM'.")
@@ -337,8 +342,8 @@ def normalize_targets(text: str) -> str:
     for token in entries:
         if token == "":
             raise ValueError("Targets contain an empty entry; use values such as '1 mM, 2 mM'.")
-    if len(entries) > MAX_TARGETS:
-        raise ValueError(f"Too many targets (maximum {MAX_TARGETS}).")
+    if len(entries) > max_targets:
+        raise ValueError(f"Too many targets (maximum {max_targets}).")
     if not entries:
         raise ValueError(f"{label} must contain at least one value such as '1 mM'.")
     parsed = [_parse_target_entry(e) for e in entries]

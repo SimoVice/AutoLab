@@ -32,6 +32,7 @@ from app.routers import (
     media,
     procurement,
     projects,
+    software,
     upstream,
 )
 from app.routers.chat import send_message
@@ -68,6 +69,7 @@ for router_module in (
     fixtures,
     labware,
     media,
+    software,
     upstream,
 ):
     app.include_router(router_module.router)

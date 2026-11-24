@@ -80,6 +80,33 @@ async def download_instructions(
                 "Cache-Control": "no-store",
             },
         )
+    if format in ("opentrons", "jubilee"):
+        from app.design_workflow import workflow_state
+        from app.protocol_generators import (
+            generate_jubilee_protocol,
+            generate_opentrons_protocol,
+        )
+
+        if not workflow_state(current)["machine_approved"]:
+            raise HTTPException(
+                status_code=409, detail="Approve the machine before generating its protocol."
+            )
+        try:
+            generated = (
+                generate_opentrons_protocol(current)
+                if format == "opentrons"
+                else generate_jubilee_protocol(current)
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from None
+        return Response(
+            generated["source_code"],
+            media_type="text/x-python",
+            headers={
+                "Content-Disposition": f'attachment; filename="{generated["filename"]}"',
+                "Cache-Control": "no-store",
+            },
+        )
     if format not in names:
         raise HTTPException(
             status_code=422,

@@ -1098,4 +1098,26 @@ def build_document_files(project: dict, procurement: dict | None = None) -> dict
     files["bom/hardware-compatibility.json"] = json.dumps(
         compat, indent=2, ensure_ascii=False, allow_nan=False
     ).encode("utf-8")
+    if (
+        (project.get("plan") or {}).get("status") == "ready"
+        and (project.get("workflow") or {}).get("kind", "liquid_preparation")
+        == "liquid_preparation"
+    ):
+        try:
+            from app.opentrons_verifier import verify_opentrons_protocol
+            from app.protocol_generators import (
+                generate_jubilee_protocol,
+                generate_opentrons_protocol,
+            )
+
+            ot2 = generate_opentrons_protocol(project)
+            jub = generate_jubilee_protocol(project)
+            sim = verify_opentrons_protocol(ot2["source_code"], try_cli=False)
+            files["automation/opentrons_protocol.py"] = ot2["source_code"].encode("utf-8")
+            files["automation/jubilee_protocol.py"] = jub["source_code"].encode("utf-8")
+            files["automation/protocol-simulation.json"] = json.dumps(
+                sim, indent=2, ensure_ascii=False, allow_nan=False
+            ).encode("utf-8")
+        except ValueError:
+            pass
     return files
