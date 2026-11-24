@@ -6,7 +6,7 @@ from test_bench_station_procurement import station_project
 from test_custom_project_routes import client as client
 from test_custom_project_routes import project_fixture
 from test_foundation_storage import source_project
-from test_price_estimation import estimate
+from test_price_estimation import declare
 
 import app.api as api
 from app.parts_proposal import build_parts_proposal, cold_transfer_candidate_rows
@@ -34,17 +34,12 @@ def test_generic_quantities_unit_allocation_and_sum_are_canonical():
     assert "Level the rail base" in result["rows"][0]["assembly_steps"][0]["instruction"]
 
 
-def test_model_group_totals_are_not_multiplied_by_quantity_again():
-    project = project_fixture()
-    cost, _ = estimate(project)
-    result = build_parts_proposal(project, estimate=cost)
-    assert result["summary"]["total_low_usd"] == 40
-    assert result["summary"]["total_high_usd"] == 100
-    assert all(r["price_kind"] == "model_estimate" for r in result["rows"])
-    assert project_with_report(project, None, cost)["parts_proposal"] == result
-    revised = deepcopy(project)
-    revised["revision"] += 1
-    assert build_parts_proposal(revised, estimate=cost) == build_parts_proposal(revised)
+def test_declared_budget_and_priced_subtotal_are_independent():
+    project = declare(project_fixture(), "concept:rail_base")
+    result = build_parts_proposal(project)
+    assert result["summary"]["documented_subtotal"] == 50.12
+    assert result["summary"]["planning_low"] == 80 and result["summary"]["planning_high"] == 120
+    assert project_with_report(project, None)["parts_proposal"] == result
 
 
 def test_bench_and_source_cad_use_their_own_groups():
@@ -55,8 +50,8 @@ def test_bench_and_source_cad_use_their_own_groups():
     ids = {r["group_id"] for r in foundation["rows"]}
     assert "upstream-platform" in ids
     assert "motors" not in ids
-    assert len(ids) == len(foundation["rows"])
-    assert foundation["summary"]["total_high_usd"] > foundation["summary"]["total_low_usd"] > 0
+    assert len({row["line_id"] for row in foundation["rows"]}) == len(foundation["rows"])
+    assert foundation["summary"]["total_high_usd"] == foundation["summary"]["total_low_usd"] > 0
 
 
 def test_cold_candidates_are_reviewed_options_not_silent_hardware_additions():
@@ -65,10 +60,10 @@ def test_cold_candidates_are_reviewed_options_not_silent_hardware_additions():
     rows = cold_transfer_candidate_rows(project)
     assert project == before
     assert [r["group_id"] for r in rows] == ["cold-transfer-fridge", "cold-transfer-motion"]
-    assert rows[0]["line_total_low_usd"] == 900
-    assert rows[1]["line_total_high_usd"] == 1200
+    assert rows[0]["line_total_low_usd"] is None
+    assert rows[1]["line_total_high_usd"] is None
     assert all(
-        r["evidence"]["kind"] == "planning_allowance" and r["evidence"]["url"] is None for r in rows
+        r["evidence"]["kind"] == "unpriced" and r["evidence"]["url"] is None for r in rows
     )
     assert "NOT replaced" in rows[0]["assembly_steps"][0]["instruction"]
     assert "NOT established" in rows[1]["assembly_steps"][0]["instruction"]
@@ -93,10 +88,11 @@ def test_commercial_base_includes_one_pipette_without_double_counting():
     project["sourcing"] = commercial_sourcing()
     result = build_parts_proposal(project)
     rows = {r["group_id"]: r for r in result["rows"]}
-    assert rows["platform"]["line_total_low_usd"] == 15950
+    assert rows["platform"]["line_total_low_usd"] is None
+    assert rows["platform"]["planning_basis"]["low_usd"] == 15950
     assert rows["pipettes"]["price_kind"] == "included_in_base"
     assert rows["pipettes"]["line_total_high_usd"] == 0
-    assert result["summary"]["total_low_usd"] == (15950 + rows["labware"]["line_total_low_usd"])
+    assert result["summary"]["total_low_usd"] == 352.99
 
 
 def test_all_routes_have_actionable_sources_and_honest_unit_basis():
@@ -106,8 +102,8 @@ def test_all_routes_have_actionable_sources_and_honest_unit_basis():
             assert row["source_url"].startswith("https://")
             assert row["selected_product_label"]
             assert row["source_kind"]
-            assert "not a quoted unit price" in row["unit_price_basis"]
-            if row["price_kind"] == "unpriced":
+            assert row["unit_price_basis"]
+            if row["cost_category"] == "unpriced":
                 assert row["line_total_high_usd"] is row["line_total_low_usd"] is None
             else:
                 assert row["line_total_high_usd"] >= row["line_total_low_usd"]
@@ -166,23 +162,21 @@ def test_tip_profiles_keep_supplier_price_scope_and_only_printed_model_download(
         printed, TipRackUpdate(), "Use the printed holder", accept_placement=True
     )
     cases = (
-        (selected(profile=TIPONE), "USA Scientific TipOne 200", "usascientific.com", 30, 120),
-        (selected(profile=OPENTRONS), "Opentrons OT-2 300", "opentrons.com", 40, 160),
-        (printed, "Custom printed holder", "protolabs.com", 30, 200),
+        (selected(profile=TIPONE), "usascientific.com", "quote_required"),
+        (selected(profile=OPENTRONS), "opentrons.com", "curated_reference"),
+        (printed, "protolabs.com", "slicer_material_estimate"),
     )
-    for project, label, domain, low, high in cases:
+    for project, domain, kind in cases:
         api._sessions[project["id"]] = api.ProjectSession(project=project)
         response = client.get(f"/api/projects/{project['id']}/parts?revision={project['revision']}")
         assert response.status_code == 200
         row = next(r for r in response.json()["rows"] if r["group_id"] == "tip-rack-options")
-        assert row["selected_product_label"].startswith(label)
         assert domain in row["source_url"]
-        assert (row["line_total_low_usd"], row["line_total_high_usd"]) == (low, high)
-        assert row["price_kind"] == "planning_allowance"
+        assert row["price_kind"] == kind and row["planning_basis"] is None
+        assert (row["line_total_low_usd"] is None) == (kind=="quote_required")
         if project["tip_rack"]["kind"] == "rim_supported_tip_rack":
             assert client.get(row["fabrication_url"]).status_code == 200
             assert client.get(row["fabrication_stl_url"]).status_code == 200
-            assert "separate pack" in row["price_note"]
             assert any("disposable tips separately" in a["label"] for a in row["alternatives"])
         else:
             assert "fabrication_url" not in row
@@ -246,7 +240,7 @@ def test_current_price_observation_link_is_separate_from_project_reference(monke
     expected = "https://www.adafruit.com/product/5525"
     proposal = build_parts_proposal(project, report)
     row = next(r for r in proposal["rows"] if r["group_id"] == "concept-controller_board")
-    assert row["price_kind"] == "verified_supplier"
+    assert row["price_kind"] == "live_api"
     assert row["price_source_url"] == row["evidence"]["url"] == expected
     assert row["evidence"]["observed_at"]
     stale = deepcopy(report)

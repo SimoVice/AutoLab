@@ -160,7 +160,7 @@ def test_selected_ot2_keeps_its_own_consumables_in_api_and_agent():
     result = asyncio.run(execute_tool(
         "generate_purchasable_bom", {}, ToolContext(project=project, user_message="List parts.")
     ))
-    assert result.ok and result.data["status"] == "itemized"
+    assert result.ok and result.data["status"] == "incomplete"
     assert [row["mpn"] for row in result.data["lines"]] == [r["mpn"] for r in payload["lines"]]
 
 
@@ -336,7 +336,7 @@ def test_phase5_http_routes_fx_download_and_zip_exports(monkeypatch: pytest.Monk
     get_res = client.get(f"/api/projects/{pid}/bom", params={"revision": rev, "currency": "USD"})
     assert get_res.status_code == 200
     payload = get_res.json()
-    assert payload["bom"]["summary"]["unpriced_placeholder_count"] == 0
+    assert payload["bom"]["summary"]["unpriced_placeholder_count"] == 2
     assert payload["compatibility"]["status"] == "compatible"
 
     # Cold GET CHF without FX refresh returns 409 honestly

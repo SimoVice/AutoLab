@@ -165,7 +165,9 @@ def readable_text(text: object, names: dict[str, str]) -> str:
     return re.sub(pattern, lambda match: codes[match.group(0)], value)
 
 
-def build_instruction_guide(project: dict, procurement: dict | None = None) -> dict:
+def build_instruction_guide(
+    project: dict, procurement: dict | None = None, *, purchasing_bom=None
+) -> dict:
     """Build a deterministic preview from canonical accepted/draft geometry and selections."""
     from app.assembly_steps import assembly_steps
     design = project.get("design") or {}
@@ -180,9 +182,7 @@ def build_instruction_guide(project: dict, procurement: dict | None = None) -> d
     )
     report = _procurement(project, procurement)
     from app.parts_proposal import build_parts_proposal
-    from app.price_estimation import estimate_for_project
 
-    cost_estimate = estimate_for_project(project, project.get("cost_estimate"), report)
     steps = []
 
     def add(
@@ -1113,7 +1113,7 @@ def build_instruction_guide(project: dict, procurement: dict | None = None) -> d
         status: sum(step["status"] == status for step in steps)
         for status in ("ready", "reference_only", "needs_design")
     }
-    proposal = build_parts_proposal(project, report, cost_estimate)
+    proposal = build_parts_proposal(project, report, bom=purchasing_bom)
     return {
         "schema_version": 1,
         "presentation_names": presentation_names(project, steps),
@@ -1133,7 +1133,6 @@ def build_instruction_guide(project: dict, procurement: dict | None = None) -> d
         "physical validation record",
         "procurement_report_id": report["report_id"] if report else None,
         "procurement": report,
-        "cost_estimate": cost_estimate,
         "parts_proposal": proposal,
         "assembly_steps": assembly_steps(project, steps, proposal),
         "software_guidance": build_software_guidance(project),
@@ -1225,81 +1224,6 @@ def step_details_html(step: dict, *, names: dict[str, str] | None = None) -> str
     return "".join(sections)
 
 
-def cost_estimate_html(guide: dict) -> str:
-    """Show estimate ranges without relabelling them as observed supplier prices."""
-    estimate = guide.get("cost_estimate")
-    if not estimate:
-        return ""
-    def esc(value):
-        return html.escape(str(value if value is not None else "Unknown"), quote=True)
-    summary = estimate["summary"]
-    low, high = summary["project_total_low_usd"], summary["project_total_high_usd"]
-    label = (
-        "Estimated purchase scope total"
-        if summary["coverage_complete"]
-        else "Known + estimated partial range"
-    )
-    if low is None:
-        low, high = (
-            summary["known_plus_estimated_low_usd"],
-            summary["known_plus_estimated_high_usd"],
-        )
-    headline = f"USD {low:,.2f}–{high:,.2f}" if low is not None else "Range unavailable"
-    rows = []
-    for row in estimate["rows"]:
-        amount = (
-            f"USD {row['low_usd']:,.2f}–{row['high_usd']:,.2f}"
-            if row["low_usd"] is not None
-            else "Unknown"
-        )
-        rows.append(
-            '<article class="procurement-item"><h3>'
-            + esc(row["label"])
-            + "</h3><p>"
-            + esc(row["source_kind"].replace("_", " "))
-            + ": "
-            + esc(amount)
-            + " — group total for quantity "
-            + esc(row["quantity"])
-            + ".</p><p>"
-            + esc(row["scope"])
-            + "</p><p>"
-            + esc(row["rationale"])
-            + "</p><p>Assumptions: "
-            + esc("; ".join(row["assumptions"]) or "No model assumptions; see price status.")
-            + "</p>"
-            + (
-                "<p>Excluded items: "
-                + esc(", ".join(guide.get("presentation_names", {}).get(key, key.replace("-", " "))
-                                for key in row["excluded_group_ids"])) + "</p>"
-                if row["excluded_group_ids"]
-                else ""
-            )
-            + "</article>"
-        )
-    return (
-        '<section class="card"><h2>Project cost planning range</h2><p>'
-        + esc(label)
-        + ": <strong>"
-        + esc(headline)
-        + "</strong></p><p>Status: "
-        + esc(estimate["status"])
-        + "; verified subtotal USD "
-        + esc(summary["verified_subtotal_usd"])
-        + "; groups still unknown: "
-        + esc(summary["missing_count"])
-        + ".</p><p>Model estimates are not supplier quotes. "
-        "A covered planning scope is not a verified complete-machine BOM.</p><p>Generated: "
-        + esc(estimate.get("generated_at"))
-        + "; model: "
-        + esc(estimate.get("model"))
-        + '.</p><div class="procurement-grid">'
-        + "".join(rows)
-        + "</div><p>"
-        + esc("; ".join(estimate["exclusions"]))
-        + "</p></section>"
-    )
-
 
 def software_guidance_html(guide: dict) -> str:
     """Keep software and the current declarative configuration in the same guide."""
@@ -1339,9 +1263,8 @@ def software_guidance_html(guide: dict) -> str:
 def procurement_html(guide: dict) -> str:
     """Display only the bound report's current prices, with gaps and dates visible."""
     report = guide.get("procurement")
-    cost_html = cost_estimate_html(guide)
     if not report:
-        return cost_html + (
+        return (
             '<section class="card"><h2>US procurement</h2><p>No current '
             "report is attached. Refresh prices for this "
             "revision.</p></section>"
@@ -1386,7 +1309,7 @@ def procurement_html(guide: dict) -> str:
             + f'</p><p class="procurement-source">{source}</p>'
             + f'<p class="meta">Fetched: {esc(row.get("fetched_at"))}</p></article>'
         )
-    return cost_html + (
+    return (
         '<section class="card"><h2>Bound US procurement snapshot</h2><p>Report '
         + esc(report.get("report_id"))
         + " · fetched "
@@ -1415,51 +1338,86 @@ def procurement_html(guide: dict) -> str:
 
 
 def _budget_range(low, high):
-    if low is None or high is None:
+    if low is None:
         return "Price needed"
 
     def usd(number):
         return f"${number:,.2f}".removesuffix(".00")
 
+    if high is None:
+        return "From " + usd(low)
     return usd(low) if low == high else f"{usd(low)}–{usd(high)}"
 
 
 def _parts_budget(proposal):
     summary = proposal["summary"]
     total = _budget_range(summary["total_low_usd"], summary["total_high_usd"])
-    labels = {"verified_supplier": "Supplier price", "included_in_base": "Included in base",
-              "model_estimate": "Model estimate", "planning_allowance": "Planning estimate",
-              "curated_reference": "Catalog reference", "slicer_material_estimate": "Filament cost",
-              "live_api": "Supplier price", "unpriced": "Selection required",
-              "unavailable": "Supplier unavailable", "stale_observation": "Recheck supplier"}
+    planning = (
+        _budget_range(summary["planning_low"], summary["planning_high"])
+        if summary["planning_count"]
+        else "None recorded"
+    )
+    filament = (
+        _budget_range(summary["printed_material_subtotal"], summary["printed_material_subtotal"])
+        if summary["printed_line_count"]
+        else "No printed parts"
+    )
+    breakdown = (
+        f"Documented prices subtotal (USD) {total}. Planning allowances {planning}. "
+        f"Filament estimate {filament}. Missing purchase prices {summary['missing_price_count']}."
+    )
     records = []
     for row in proposal["rows"]:
-        records.append((
-            row.get("selected_product_label") or row["label"], row["quantity"],
-            _budget_range(row["unit_price_low_usd"], row["unit_price_high_usd"]),
-            _budget_range(row["line_total_low_usd"], row["line_total_high_usd"]),
-            labels.get(row["price_kind"], "Estimate"), _safe_url(row.get("source_url") or ""),
-        ))
-    return total, records
+        basis = row.get("planning_basis")
+        budget = _budget_range(basis["low_usd"], basis["high_usd"]) if basis else ""
+        detail = ""
+        if basis:
+            detail = " · ".join(
+                filter(
+                    None,
+                    (
+                        basis["kind"].replace("_", " "),
+                        basis["detail"],
+                        basis.get("observed_on"),
+                        basis.get("source_url"),
+                    ),
+                )
+            )
+        records.append(
+            (
+                row["label"],
+                row["quantity"],
+                _budget_range(row["line_total_low_usd"], row["line_total_high_usd"]),
+                row["price_kind"].replace("_", " "),
+                budget,
+                detail,
+                _safe_url(row.get("price_source_url") or row.get("source_url") or ""),
+            )
+        )
+    return breakdown, records
 
 
 def parts_budget_html(proposal):
     if not proposal or not proposal["rows"]:
         return ""
-    total, records = _parts_budget(proposal)
+    breakdown, records = _parts_budget(proposal)
     rows = []
-    for name, qty, unit, amount, basis, url in records:
+    for name, qty, amount, kind, budget, detail, url in records:
         part = html.escape(name)
         if url:
             part = f'<a href="{html.escape(url, quote=True)}">{part}</a>'
-        rows.append(f'<tr><th scope="row">{part}</th><td>{qty}</td><td>{unit}</td>'
-                    f"<td>{amount}</td><td>{basis}</td></tr>")
-    return ('<section class="card"><h2>Parts &amp; prices</h2>'
-            f"<p>Subtotal for priced items (USD) <strong>{total}</strong>. "
-            "Excludes shipping, tax and labor.</p>"
-            '<div class="table-scroll"><table><thead><tr><th>Part or purchase group</th>'
-            '<th>Qty</th><th>Per unit or set</th><th>Line total</th><th>Price basis</th>'
-            "</tr></thead><tbody>" + "".join(rows) + "</tbody></table></div></section>")
+        rows.append(
+            f'<tr><th scope="row">{part}</th><td>{html.escape(str(qty))}</td>'
+            f"<td>{amount}</td><td>{html.escape(kind)}</td>"
+            f"<td>{budget} {html.escape(detail)}</td></tr>"
+        )
+    return (
+        '<section class="card"><h2>Parts &amp; prices</h2>'
+        f"<p>{breakdown} Excludes shipping, tax and labor.</p>"
+        '<div class="table-scroll"><table><thead><tr><th>Purchase line</th>'
+        "<th>Qty</th><th>Line total</th><th>Cost basis</th><th>Planning allowance</th>"
+        "</tr></thead><tbody>" + "".join(rows) + "</tbody></table></div></section>"
+    )
 
 
 def assembly_checklist_html(guide):
@@ -1477,16 +1435,23 @@ def assembly_checklist_html(guide):
 def _parts_budget_markdown(proposal, plain):
     if not proposal["rows"]:
         return []
-    total, records = _parts_budget(proposal)
-    lines = ["## Parts & prices", "", f"Subtotal for priced items (USD) **{total}**. "
-             "Excludes shipping, tax and labor.", "",
-             "| Part or purchase group | Qty | Per unit or set | Line total | Price basis |",
-             "| --- | ---: | ---: | ---: | --- |"]
-    for name, qty, unit, amount, basis, url in records:
+    breakdown, records = _parts_budget(proposal)
+    lines = [
+        "## Parts & prices",
+        "",
+        breakdown,
+        "Excludes shipping, tax and labor.",
+        "",
+        "| Purchase line | Qty | Line total | Cost basis | Planning allowance |",
+        "| --- | ---: | ---: | --- | --- |",
+    ]
+    for name, qty, amount, kind, budget, detail, url in records:
         part = plain(name)
         if url:
             part = f"[{part}](<{url}>)"
-        lines.append(f"| {part} | {qty} | {unit} | {amount} | {basis} |")
+        lines.append(
+            f"| {part} | {plain(qty)} | {amount} | {plain(kind)} | {budget} {plain(detail)} |"
+        )
     return [*lines, ""]
 
 
@@ -1669,40 +1634,6 @@ def build_guide_markdown(guide: dict) -> bytes:
                 "",
             ]
         )
-    estimate = guide.get("cost_estimate")
-    if estimate:
-        summary = estimate["summary"]
-        low, high = (
-            summary["known_plus_estimated_low_usd"],
-            summary["known_plus_estimated_high_usd"],
-        )
-        amount = f"USD {low:,.2f}–{high:,.2f}" if low is not None else "Unavailable"
-        lines.extend(
-            [
-                "## Project cost planning range",
-                "",
-                f"Status: {plain(estimate['status'])}; known + estimated scope: {amount}; "
-                f"groups still unknown: {summary['missing_count']}.",
-                "Model estimates are not supplier quotes or a verified complete-machine BOM.",
-                "",
-            ]
-        )
-        for row in estimate["rows"]:
-            amount = (
-                f"USD {row['low_usd']:,.2f}–{row['high_usd']:,.2f}"
-                if row["low_usd"] is not None
-                else "Unknown"
-            )
-            lines.extend(
-                [
-                    f"- {plain(row['label'])}: {plain(row['source_kind'])}, {amount}; "
-                    f"group total for quantity {row['quantity']}.",
-                    "  Scope: " + plain(row["scope"]),
-                    "  Assumptions: " + plain("; ".join(row["assumptions"])),
-                    "  Basis: " + plain(row["rationale"]),
-                ]
-            )
-        lines.extend(["", "Exclusions: " + plain("; ".join(estimate["exclusions"])), ""])
     software = guide.get("software_guidance")
     if software:
         lines.extend(["## Software & protocols", "", plain(software["reusable_hardware"]),
@@ -1724,11 +1655,13 @@ def build_guide_markdown(guide: dict) -> bytes:
     return "\n".join(lines).encode("utf-8")
 
 
-def build_instruction_files(project: dict, procurement: dict | None = None) -> dict[str, bytes]:
+def build_instruction_files(
+    project: dict, procurement: dict | None = None, *, bom=None
+) -> dict[str, bytes]:
     """Generate HTML/Markdown/JSON immediately; never generate geometry or call a provider."""
     from app.assembly import build_guide_html
 
-    guide = build_instruction_guide(project, procurement)
+    guide = build_instruction_guide(project, procurement, purchasing_bom=bom)
     return {
         "assembly-guide.html": build_guide_html(project, guide["steps"], guide=guide),
         "assembly-guide.md": build_guide_markdown(guide),

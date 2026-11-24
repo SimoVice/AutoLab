@@ -156,6 +156,8 @@ def test_expected_file_set_and_extension_plan():
         "automation/preview.py",
         "automation/protocol-simulation.json",
         "bill-of-materials.csv",
+        "cost-estimate.csv",
+        "cost-estimate.json",
         "bom/hardware-compatibility.json",
         "bom/purchasable-bom.csv",
         "bom/purchasable-bom.json",

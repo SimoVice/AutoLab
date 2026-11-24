@@ -1,24 +1,20 @@
-"""Offline price-range boundaries; mocked model outputs are not live estimates."""
+"""Evidence-backed budgets, freshness, whole lines and revision bindings."""
 
 import asyncio
-import csv
-import io
 import json
 from copy import deepcopy
-from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
 
-import httpx
 import pytest
+from pydantic import ValidationError
 
-from app import price_estimation as prices
 from app import procurement
-from app.assembly import build_document_files
+from app.agent_tools import ToolContext, execute_tool
+from app.bom_engine import build_complete_bom
+from app.budget_allowances import LineBudget, reconcile_budgets
 from app.domain import new_project
-from app.foundation_design import foundation_sourcing
-from app.instructions import build_instruction_guide
-from app.openai_models import DEFAULT_MODEL
+from app.price_estimation import purchase_cost_report
+from app.project_storage import make_snapshot, restore_snapshot
 
 
 def project_fixture():
@@ -32,22 +28,6 @@ def project_fixture():
         g for g in project["sourcing"]["groups"] if g["id"] in {"controller", "fixtures"}
     ]
     return project
-
-
-def response_rows(project, report=None):
-    return [
-        {
-            "group_id": row["group_id"],
-            "status": "estimated",
-            "low_usd": 10.0,
-            "high_usd": 25.0,
-            "assumptions": ["Synthetic test assumes one purchase group."],
-            "rationale": "Offline model fixture; material cost only, not a supplier quote.",
-            "excluded_group_ids": row["excluded_group_ids"],
-        }
-        for row in prices.price_context(project, report)["rows"]
-        if row["source_kind"] == "unknown"
-    ]
 
 
 def supplier_report(project, *, price=12.0):
@@ -77,243 +57,255 @@ def supplier_report(project, *, price=12.0):
     }
 
 
-def estimate(project, rows=None, report=None, *, http_status=200, finish="stop", handler=None):
-    calls = []
-    rows = response_rows(project, report) if rows is None else rows
-
-    def provider(request):
-        calls.append(json.loads(request.content))
-        if handler:
-            return handler(request)
-        return httpx.Response(
-            http_status,
-            json={
-                "model": DEFAULT_MODEL,
-                "choices": [
-                    {"finish_reason": finish, "message": {"content": json.dumps({"rows": rows})}}
-                ],
-                "usage": {"prompt_tokens": 100, "completion_tokens": 40, "total_tokens": 140},
-            },
-        )
-
-    async def run():
-        async with httpx.AsyncClient(transport=httpx.MockTransport(provider)) as client:
-            return await prices.estimate_project_prices(
-                project,
-                report,
-                client=client,
-                settings=SimpleNamespace(
-                    api_key="offline-only", base_url="https://unit.invalid/v1", model=DEFAULT_MODEL
-                ),
-            )
-
-    return asyncio.run(run()), calls
-
-
-def test_one_model_call_and_revision_bound_group_total_without_mutation():
-    project = project_fixture()
-    original = deepcopy(project)
-    result, calls = estimate(project)
-    assert project == original and len(calls) == 1
-    assert calls[0]["model"] == DEFAULT_MODEL
-    assert calls[0]["max_completion_tokens"] == 4800
-    assert result["status"] == "ready" and result["project_revision"] == project["revision"]
-    assert result["summary"]["project_total_low_usd"] == 20
-    assert result["summary"]["project_total_high_usd"] == 50
-    assert result["usage"]["total_tokens"] == 140
-    assert all(
-        r["price_basis"] == "group_total" and r["price_source_url"] is None for r in result["rows"]
-    )
-    assert prices.estimate_for_project(project, result) == result
-
-
-def test_verified_pack_total_wins_and_is_never_multiplied_again(monkeypatch):
-    project = project_fixture()
-    project["sourcing"]["groups"][0]["quantity"] = 4
-    monkeypatch.setitem(
-        procurement.PRODUCTS, "pico", replace(procurement.PRODUCTS["pico"], pack_size=3)
-    )
-    report = supplier_report(project)
-    report["rows"][0].update(pack_size=3, pack_count=2, unit_price=2, pack_price=6, line_total=12)
-    original = deepcopy(report)
-    result, calls = estimate(project, report=report)
-    assert len(calls) == 1 and report == original
-    inputs = json.loads(calls[0]["messages"][1]["content"])
-    assert [r["group_id"] for r in inputs["rows"]] == ["fixtures"]
-    verified = next(r for r in result["rows"] if r["group_id"] == "controller")
-    assert verified["low_usd"] == verified["high_usd"] == 12
-    assert verified["pack_count"] == 2 and verified["quantity"] == 4
-    assert result["summary"]["project_total_low_usd"] == 22
-
-
-def test_parent_remainder_excludes_all_candidate_kits_and_no_double_count():
-    project = project_fixture()
-    project["sourcing"] = foundation_sourcing(project)
-    context = prices.price_context(project)
-    parent = next(r for r in context["rows"] if r["group_id"] == "upstream-platform")
-    children = [r for r in context["rows"] if r["parent_group_id"] == "upstream-platform"]
-    assert len(children) == 6
-    assert {r["group_id"] for r in children} <= set(parent["excluded_group_ids"])
-    assert set(parent["excluded_group_ids"]) == {
-        r["group_id"] for r in context["rows"] if r["group_id"] != "upstream-platform"
-    }
-    rows = response_rows(project)
-    result, _ = estimate(project, rows)
-    assert result["status"] == "ready"
-    assert result["summary"]["project_total_low_usd"] == len(rows) * 10
-    next(r for r in rows if r["group_id"] == "upstream-platform")["excluded_group_ids"] = []
-    failed, calls = estimate(project, rows)
-    assert len(calls) == 1 and failed["status"] == "failed"
-    assert failed["summary"]["project_total_low_usd"] is None
+def declare(project, line_id, low=80, high=120, quote="Allow USD 80–120 for this line."):
+    ctx = ToolContext(project=project, user_message=quote)
+    args = {"line_id": line_id, "budget": {"low_usd": low, "high_usd": high, "user_quote": quote}}
+    outcome = asyncio.run(execute_tool("set_line_budget", args, ctx))
+    assert outcome.ok, outcome.summary
+    return ctx.project
 
 
 @pytest.mark.parametrize(
-    "mutation",
+    ("quote", "low", "high"),
     [
-        "zero",
-        "negative",
-        "nan",
-        "boolean",
-        "reversed",
-        "equal",
-        "missing",
-        "extra",
-        "duplicate",
-        "url",
-        "no_assumptions",
-        "wrong_units",
-        "round_to_zero",
+        ("USD 80–120", 80, 120),
+        ("$80 to $120", 80, 120),
+        ("$80-$120", 80, 120),
+        ("80-120 USD", 80, 120),
+        ("USD 4.25", 4.25, 4.25),
+        ("USD 0", 0, 0),
+        ("$1,200–1,500", 1200, 1500),
     ],
 )
-def test_malformed_model_output_is_an_honest_failure_not_zero(mutation):
+def test_supported_numeric_declarations(quote, low, high):
+    assert LineBudget(low_usd=low, high_usd=high, user_quote=quote).low_usd == low
+
+
+@pytest.mark.parametrize(
+    ("quote", "low", "high"),
+    [
+        ("Estimate this camera", 80, 120),
+        ("EUR 80–120", 80, 120),
+        ("CAD $80", 80, 80),
+        ("USD 80–120", 80, 100),
+        ("USD 120–80", 120, 80),
+        ("USB 80-120", 80, 120),
+        ("$10.005", 10, 10),
+        ("-$50", 50, 50),
+        ("−50 USD", 50, 50),
+        ("USD 10", True, 10),
+        ("USD 5", float("nan"), 5),
+        ("USD 10", -10, 10),
+    ],
+)
+def test_unsubstantiated_or_invalid_numbers_are_rejected(quote, low, high):
+    with pytest.raises(ValidationError):
+        LineBudget(low_usd=low, high_usd=high, user_quote=quote)
+
+
+def test_tool_requires_verbatim_user_evidence_and_current_unpriced_line():
+    from test_custom_project_routes import project_fixture as concept
+
+    project = concept()
+    ctx = ToolContext(project=project, user_message="How much is the rail?")
+    args = {
+        "line_id": "concept:rail_base",
+        "budget": {"low_usd": 80, "high_usd": 120, "user_quote": "Allow USD 80–120."},
+    }
+    assert not asyncio.run(execute_tool("set_line_budget", args, ctx)).ok
+    ctx.user_message = args["budget"]["user_quote"]
+    for line in ["unknown-id", "concept:controller_board"]:
+        assert not asyncio.run(execute_tool("set_line_budget", {**args, "line_id": line}, ctx)).ok
+    assert ctx.project == project
+
+
+def test_budget_roundtrip_idempotent_replace_clear_and_scope_change():
+    from test_custom_project_pricing import modified_project
+    from test_custom_project_routes import project_fixture as concept
+
+    original = concept()
+    key = "concept:rail_base"
+    saved = declare(original, key)
+    assert declare(saved, key) == saved
+    rebudgeted = declare(saved, key, 5, 5, "Allow USD 5 for this line.")
+    assert purchase_cost_report(rebudgeted)["summary"]["planning_low"] == 5
+    loaded, _ = restore_snapshot(make_snapshot(saved, []))
+    assert loaded["budget_allowances"] == saved["budget_allowances"]
+    assert purchase_cost_report(loaded)["summary"]["planning_low"] == 80
+    tampered = make_snapshot(saved, [])
+    tampered["budget_allowances"][key]["low_usd"] = 17
+    with pytest.raises(ValueError):
+        restore_snapshot(tampered)
+
+    def longer_rail(raw):
+        raw["components"][0]["primitives"][0]["size_mm"][0] += 1
+
+    changed = modified_project(saved, longer_rail)
+    reconcile_budgets(changed)
+    assert not changed["budget_allowances"]
+    ctx = ToolContext(project=loaded, user_message="Remove the rail budget.")
+    assert asyncio.run(execute_tool("set_line_budget", {"line_id": key, "budget": None}, ctx)).ok
+    assert purchase_cost_report(ctx.project)["summary"]["planning_low"] is None
+
+
+def test_legacy_model_sidecar_never_supplies_prices():
+    from test_custom_project_routes import project_fixture as concept
+
+    from app.parts_proposal import build_parts_proposal
+
+    project = concept()
+    old = {
+        "project_id": project["id"],
+        "project_revision": project["revision"],
+        "rows": [
+            {
+                "group_id": "concept-rail_base",
+                "source_kind": "model_estimate",
+                "low_usd": 456789,
+                "high_usd": 456790,
+                "rationale": "Typical class price",
+            }
+        ],
+    }
+    assert "456789" not in json.dumps(build_parts_proposal(project, estimate=old))
+    project["cost_estimate"] = old
+    assert "456789" not in json.dumps(purchase_cost_report(project))
+
+
+def test_sourced_floor_keeps_open_ceiling_and_original_date_in_other_currencies():
+    from test_commercial_design import layout_project
+
+    from app.commercial_design import adopt_commercial
+
+    project = adopt_commercial(layout_project())
+    fx = {
+        "rates": {"USD": 1, "EUR": 0.9},
+        "base": "USD",
+        "rate_date": "2026-11-24",
+        "source": "test",
+    }
+    usd = build_complete_bom(project)
+    eur = build_complete_bom(project, currency="EUR", fx_rates=fx)
+    us, eu = usd["lines"][0], eur["lines"][0]
+    assert us["line_total"] is eu["line_total"] is None
+    assert eu["planning_basis"] == us["planning_basis"]
+    assert us["planning_basis"]["source_url"] and us["planning_basis"]["observed_on"]
+    assert (eu["planning_low"], eu["planning_high"]) == (14355, None)
+    assert usd["summary"]["documented_subtotal"] == 352.99
+    assert usd["summary"]["planning_high"] is eur["summary"]["planning_high"] is None
+
+
+def test_expired_observation_is_separate_from_unchanged_budgets():
     project = project_fixture()
-    rows = response_rows(project)
-    if mutation == "zero":
-        rows[0]["low_usd"] = 0
-    elif mutation == "negative":
-        rows[0]["low_usd"] = -1
-    elif mutation == "nan":
-        rows[0]["low_usd"] = float("nan")
-    elif mutation == "boolean":
-        rows[0]["low_usd"] = True
-    elif mutation == "reversed":
-        rows[0]["low_usd"] = 50
-    elif mutation == "equal":
-        rows[0]["low_usd"] = 25
-    elif mutation == "missing":
-        rows.pop()
-    elif mutation == "extra":
-        rows[0]["group_id"] = "another-supplier-sku"
-    elif mutation == "duplicate":
-        rows[1] = deepcopy(rows[0])
-    elif mutation == "url":
-        rows[0]["rationale"] = "Price from https://invented.invalid"
-    elif mutation == "no_assumptions":
-        rows[0]["assumptions"] = []
-    elif mutation == "wrong_units":
-        rows[0]["unit_price"] = 10
-    else:
-        rows[0].update(low_usd=0.001, high_usd=0.002)
-    result, calls = estimate(project, rows)
-    assert len(calls) == 1 and result["status"] == "failed"
-    assert result["summary"]["project_total_low_usd"] is None
-    assert all(r["low_usd"] is None and r["source_kind"] == "unknown" for r in result["rows"])
+    report = supplier_report(project, price=7)
+    result = purchase_cost_report(project, report)
+    assert result["summary"]["live_api_subtotal"] == 7
+    expired = deepcopy(report)
+    expired["expires_at"] = "2000-01-01T00:00:00Z"
+    result = purchase_cost_report(project, expired)
+    row = next(r for r in result["rows"] if r["group_id"] == "controller")
+    assert row["source_kind"] == "stale_observation" and row["documented_usd"] is None
+    assert not result["summary"]["planning_count"]
 
 
-def test_unknown_and_failure_keep_verified_prices_separate():
+def test_legacy_draft_does_not_acquire_template_prices_from_its_sourcing_groups():
+    project = new_project()
+    project.pop("workflow", None)
+    assert project["sourcing"]["groups"]
+    ledger = purchase_cost_report(project)
+    assert ledger["status"] == "design_required" and ledger["rows"] == []
+    assert ledger["summary"]["documented_subtotal"] is ledger["summary"]["planning_low"] is None
+
+
+def test_undated_supplier_amount_cannot_replace_a_catalog_price():
     project = project_fixture()
-    report = supplier_report(project)
-    rows = response_rows(project, report)
-    rows[0].update(status="unknown", low_usd=None, high_usd=None, assumptions=[])
-    result, _ = estimate(project, rows, report)
-    assert result["status"] == "partial" and result["summary"]["missing_count"] == 1
-    assert "omitted planning allowances" in result["issue"]
-    assert result["summary"]["verified_subtotal_usd"] == 12
-    assert result["summary"]["project_total_high_usd"] is None
-    failure, calls = estimate(project, report=report, http_status=503)
-    assert len(calls) == 1 and failure["status"] == "failed"
-    assert failure["summary"]["verified_subtotal_usd"] == 12
-    assert failure["summary"]["known_plus_estimated_low_usd"] == 12
-    assert failure["summary"]["project_total_low_usd"] is None
-
-
-def test_timeout_and_truncation_never_retry_or_accept_partial_prices():
-    project = project_fixture()
-
-    def timeout(request):
-        raise httpx.ReadTimeout("offline timeout", request=request)
-
-    for kwargs in ({"handler": timeout}, {"finish": "length"}):
-        result, calls = estimate(project, **kwargs)
-        assert len(calls) == 1 and result["status"] == "failed"
-        assert result["summary"]["project_total_low_usd"] is None
-
-
-def test_revisions_scopes_and_expiry_are_checked_and_stale_read_is_idempotent():
-    project = project_fixture()
-    result, _ = estimate(project)
-    changed = deepcopy(project)
-    changed["revision"] += 1
-    assert prices.estimate_for_project(changed, result) is None
-    changed = deepcopy(project)
-    changed["sourcing"]["groups"][0]["quantity"] += 1
-    assert prices.estimate_for_project(changed, result) is None
-    at = datetime.now(UTC) + timedelta(days=2)
-    stale = prices.estimate_for_project(project, result, now=at)
-    assert stale["status"] == "stale"
-    assert stale["summary"]["project_total_low_usd"] is None
-    assert stale["last_known_summary"]["project_total_low_usd"] == 20
-    assert prices.estimate_for_project(project, stale, now=at) == stale
-    invalid = deepcopy(result)
-    invalid["rows"][0]["low_usd"] = -200
-    assert prices.estimate_for_project(project, invalid) is None
-
-
-def test_new_supplier_observation_overrides_model_range_without_reestimating():
-    project = project_fixture()
-    result, _ = estimate(project)
-    fresh = prices.estimate_for_project(project, result, supplier_report(project, price=7))
-    assert fresh["summary"]["verified_subtotal_usd"] == 7
-    assert fresh["summary"]["project_total_low_usd"] == 17
-    assert fresh["summary"]["estimated_count"] == 1
-
-
-def test_instruction_downloads_escape_estimates_and_keep_supplier_csv_separate():
-    project = project_fixture()
-    rows = response_rows(project)
-    rows[0]["assumptions"] = ["<script>alert('unsafe')</script> synthetic material"]
-    report, _ = estimate(project, rows)
-    project["cost_estimate"] = report
-    guide = build_instruction_guide(project)
-    assert guide["cost_estimate"] == report
-    files = build_document_files(project)
-    assert json.loads(files["cost-estimate.json"]) == report
-    assert b"&lt;script&gt;" in files["assembly-guide.html"]
-    assert b"<script>alert" not in files["assembly-guide.html"]
-    assert b"Project cost planning range" in files["assembly-guide.md"]
-    records = list(csv.DictReader(io.StringIO(files["cost-estimate.csv"].decode())))
-    assert (
-        records[0]["price_basis"] == "group_total" and records[0]["source_kind"] == "model_estimate"
+    quote = {
+        "availability": "InStock",
+        "pack_price": 24567,
+        "source_url": "https://example.org/pico",
+    }
+    line = next(
+        r
+        for r in build_complete_bom(project, live_quotes={"pico": quote})["lines"]
+        if r["group_id"] == "controller"
     )
-    assert b"model_estimate" not in files["bill-of-materials.csv"]
+    assert line["price_source"] == "curated_reference" and line["line_total"] != 24567
 
 
-def test_prompt_requires_broad_allowances_not_exact_specs_or_printer_ownership():
-    project = project_fixture()
-    project["sourcing"] = foundation_sourcing(project)
-    project["fabrication_capabilities"] = {"printer_access": "unknown"}
-    original = deepcopy(project)
-    result, calls = estimate(project)
-    prompt = calls[0]["messages"][0]["content"]
-    assert "For EVERY understood group" in prompt
-    assert "NOT reasons for unknown" in prompt
-    assert "outsourced fabrication service" in prompt
-    assert "NEVER a recorded printer capability" in prompt
-    assert "all other separately budgeted groups" in prompt
-    assert "never exact catalog evidence" in prompt
-    inputs = json.loads(calls[0]["messages"][1]["content"])
-    basis = {row["group_id"]: row["allowance_basis"] for row in inputs["rows"]}
-    for group_id in ("upstream-platform", "pipette", "fixtures", "power"):
-        assert basis[group_id]["understood"] and basis[group_id]["scope_items"]
-    assert "not automatic refusal" in " ".join(basis["fixtures"]["planning_assumptions"])
-    assert project == original and result["summary"]["coverage_complete"]
+def test_available_offer_replaces_the_allowance_only_for_its_line():
+    from test_bench_station_procurement import station_project
+
+    from app.budget_allowances import budget_signature
+
+    project = station_project(["inspect"])
+    # The purchasing catalog can retain identified items with no documented price.
+    from unittest.mock import patch
+
+    from app.bom_engine import load_purchasable_catalog
+
+    catalog = load_purchasable_catalog()
+    catalog["items"]["camera-module-3"]["reference_unit_price_usd"] = None
+    with patch("app.bom_engine.load_purchasable_catalog", return_value=catalog):
+        line = build_complete_bom(project)["lines"][0]
+        budget = LineBudget(low_usd=60, high_usd=80, user_quote="Budget USD 60–80 for the camera.")
+        project["budget_allowances"] = {
+            line["line_id"]: {
+                **budget.model_dump(),
+                "scope_signature": budget_signature(project, line),
+            }
+        }
+        assert build_complete_bom(project)["summary"]["planning_low"] == 60
+        quote = {
+            "pack_price": 27,
+            "availability": "InStock",
+            "source_url": "https://example.org/5657",
+            "fetched_at": "2026-11-24T12:00:00Z",
+        }
+        bom = build_complete_bom(project, live_quotes={"camera-module-3": quote})
+        assert bom["summary"]["documented_subtotal"] == 27
+        assert bom["summary"]["planning_low"] is None
+        assert not bom["lines"][0].get("planning_basis")
+
+
+def test_unchanged_concept_geometry_keeps_its_budget_across_pose_and_prose_edits():
+    from test_custom_project_pricing import modified_project
+    from test_custom_project_routes import project_fixture as concept
+
+    original = declare(concept(), "concept:sample_tray")
+
+    def move(raw):
+        raw["components"][1]["placement_mm"] = [10, 10, 0]
+        raw["components"][1]["assembly"] = "Use the same part in the new location."
+
+    changed = modified_project(original, move)
+    reconcile_budgets(changed)
+    assert changed["budget_allowances"] == original["budget_allowances"]
+
+
+def test_both_csv_formats_preserve_subtotals_fabrication_and_missing_prices():
+    import csv
+    import io
+
+    from test_foundation_storage import source_project
+
+    from app.bom_engine import bom_to_csv
+    from app.price_estimation import estimate_csv
+
+    project = declare(source_project(), "upstream-platform")
+    bom = build_complete_bom(project)
+    s = bom["summary"]
+    for content, documented, filament in (
+        (bom_to_csv(bom), "documented_line_total", "printed_material_total"),
+        (estimate_csv(purchase_cost_report(project)), "documented_usd", "printed_material_usd"),
+    ):
+        rows = list(csv.DictReader(io.StringIO(content.decode("utf-8"))))
+        assert len(rows) == s["line_count"] and len({r["line_id"] for r in rows}) == len(rows)
+        assert float(rows[0]["revision_planning_low"]) == 80
+        assert float(rows[0]["revision_planning_high"]) == 120
+        assert float(rows[0]["revision_documented_subtotal"]) == s["documented_subtotal"]
+        assert int(rows[0]["revision_missing_price_count"]) == s["missing_price_count"]
+        assert all(r["revision_documented_subtotal"] == "" for r in rows[1:])
+        assert round(sum(float(r[documented] or 0) for r in rows), 2) == s["documented_subtotal"]
+        material = sum(float(r[filament] or 0) for r in rows)
+        assert round(material, 2) == s["printed_material_subtotal"]
+        assert all(not (r[documented] and r[filament]) for r in rows)

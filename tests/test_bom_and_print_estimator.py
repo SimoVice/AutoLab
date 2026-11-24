@@ -73,7 +73,8 @@ def test_purchasable_catalog_integrity():
     assert cat["schema_version"] == "1"
     for item_id, item in cat["items"].items():
         assert item["id"] == item_id
-        assert item["reference_unit_price_usd"] > 0
+        if item["reference_unit_price_usd"] is not None:
+            assert item["reference_unit_price_usd"] > 0 and item["source_url"].startswith("https://")
         assert item["pack_size"] >= 1
         assert isinstance(item["specs"], dict) and item["specs"].get("kind")
 
@@ -102,7 +103,7 @@ def test_identified_parts_across_supported_designs():
         }
     )
     bom_fx = build_complete_bom(fx_proj, currency="CHF", fx_rates=fx)
-    assert bom_fx["summary"]["unpriced_placeholder_count"] == 0
+    assert bom_fx["summary"]["unpriced_placeholder_count"] == 2
     assert bom_fx["summary"]["printed_line_count"] >= 3
     assert bom_fx["summary"]["total_filament_mass_g"] > 0
     assert bom_fx["currency"] == "CHF"
@@ -110,7 +111,7 @@ def test_identified_parts_across_supported_designs():
     # 2. Custom workstation (formerly 5 unpriced placeholders!)
     ws = designed_workstation(cooling_enabled=True)
     bom_ws = build_complete_bom(ws, currency="EUR", fx_rates=fx)
-    assert bom_ws["summary"]["unpriced_placeholder_count"] == 0
+    assert bom_ws["summary"]["quote_required_count"] > 0
     groups_ws = {line["group_id"] for line in bom_ws["lines"]}
     assert {"frame", "linear-motion", "pipette", "power", "cooling", "fixtures"} <= groups_ws
 
@@ -118,7 +119,7 @@ def test_identified_parts_across_supported_designs():
     jub = adopt_foundation(new_project(), bed_drop_mm=25.0)
     jub["sourcing"] = foundation_sourcing(jub)
     bom_jub = build_complete_bom(jub, currency="USD")
-    assert bom_jub["summary"]["unpriced_placeholder_count"] == 0
+    assert bom_jub["summary"]["unpriced_placeholder_count"] >= 2
     assert any(line["catalog_id"] == "duet3-mini5plus" for line in bom_jub["lines"])
 
     # 4. Concept design with 2020 extrusion + printed cradle
@@ -182,7 +183,7 @@ def test_identified_parts_across_supported_designs():
         }
     )
     bom_conc = build_complete_bom(conc)
-    assert bom_conc["summary"]["unpriced_placeholder_count"] == 0
+    assert bom_conc["summary"]["quote_required_count"] == 1
     assert any(line["catalog_id"] == "extrusion-2020-500" for line in bom_conc["lines"])
     assert any(line["kind"] == "3d_printed" for line in bom_conc["lines"])
 
@@ -192,8 +193,9 @@ def test_identified_parts_across_supported_designs():
         StationProposal(operations=["weigh", "read_barcode", "print_label"])
     )
     bom_bs = build_complete_bom(bs)
-    assert bom_bs["summary"]["unpriced_placeholder_count"] == 0
-    assert bom_bs["summary"]["commercial_line_count"] == 3
+    assert bom_bs["summary"]["unpriced_placeholder_count"] == 6
+    assert bom_bs["summary"]["documented_subtotal"] is None
+    assert bom_bs["summary"]["printed_line_count"] == 0
 
 
 def test_bom_keeps_live_api_separate_from_curated_reference_and_exports_safe_csv():
@@ -228,6 +230,8 @@ def test_supplier_price_tier_applies_to_the_orderable_pack_quantity():
     from app.bom_engine import _catalog_line, _collect_live_rows
 
     observations = _collect_live_rows(None, {"pico-h": {
+        "source_url": "https://www.adafruit.com/product/5525",
+        "fetched_at": "2026-11-24T12:00:00Z",
         "pack_size": 2, "min_order_qty": 3, "price_breaks": [
             {"minimum_packs": 1, "pack_price": "8.00"},
             {"minimum_packs": 5, "pack_price": "6.00"},

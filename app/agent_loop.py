@@ -44,6 +44,7 @@ _TOOL_STAGES = {
     "inspect_upstream_project": "inspecting",
     "generate_purchasable_bom": "verifying",
     "choose_requirement_part": "designing",
+    "set_line_budget": "designing",
     "check_hardware_compatibility": "verifying",
     "search_supplier_components": "researching",
     "generate_robot_protocol": "verifying",
@@ -118,7 +119,9 @@ CORE PRINCIPLES
   multi-currency pricing (USD/CHF/EUR), 3D print time/filament, or electronics/motor/power/CSI
   compatibility, call generate_purchasable_bom and/or check_hardware_compatibility (or
   search_supplier_components to look up real MPNs), separate live API totals from curated reference
-  and filament estimates, state shipping/VAT/duty exclusions, and justify choices with pros/cons.
+  and filament estimates. Show planning ranges separately and name their basis. Keep missing prices
+  open. Record an explicit whole-line USD budget using set_line_budget and the user's exact words.
+  State shipping/VAT/duty exclusions and justify choices with pros/cons.
   When the tool returns design_required, explain which hardware choice the brief still needs.
   Report selection_required lines with their quantities and the missing part identity. Describe
   the priced portion as a subtotal while any requirement is open.

@@ -28,8 +28,8 @@ def test_cold_candidates_available_before_hardware_without_geometry_mutation():
     project = new_project()
     before = deepcopy(project)
     reply = cold_component_reply(project)
-    assert "accucold.com" in reply and "$900" in reply and "$2,200" in reply
-    assert "servocity.com" in reply and "$300" in reply and "$1,200" in reply
+    assert "accucold.com" in reply and "Quote needed" in reply and "$2,200" not in reply
+    assert "servocity.com" in reply and "$300" not in reply and "Quote needed" in reply
     assert "hudsonrobotics.com" in reply
     assert project == before
 

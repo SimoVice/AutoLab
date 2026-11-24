@@ -84,14 +84,24 @@ def report_for_project(project: dict, report: dict | None, *, now: datetime | No
         return None
     result = deepcopy(report)
     at = now or _now()
-    result["is_expired"] = at >= _date(result["expires_at"])
+    try:
+        result["is_expired"] = at >= _date(result["expires_at"])
+    except (ValueError, TypeError, AttributeError):
+        return None
     for row in result["rows"]:
+        if not isinstance(row, dict) or "group_id" not in row or "freshness" not in row:
+            return None
         if row["freshness"] != "fresh" or not row.get("fetched_at"):
             continue
-        if at < _date(row["fetched_at"]) + timedelta(seconds=CACHE_TTL_SECONDS):
+        try:
+            valid_until = _date(row["fetched_at"]) + timedelta(seconds=CACHE_TTL_SECONDS)
+            fresh = not result["is_expired"] and at < valid_until
+        except (ValueError, TypeError, AttributeError):
+            return None
+        if fresh:
             continue
         row["freshness"] = "stale"
-        row["last_known_price"] = row["unit_price"]
+        row["last_known_price"] = row.get("unit_price")
         row["last_known_fetched_at"] = row["fetched_at"]
         row["last_known_line_total"] = row["line_total"]
         row["unit_price"] = None
@@ -105,15 +115,11 @@ def report_for_project(project: dict, report: dict | None, *, now: datetime | No
 
 def project_with_report(project: dict, report: dict | None, estimate: dict | None = None) -> dict:
     result = deepcopy(project)
+    result.pop("cost_estimate", None)
+    result.pop("procurement_report", None)
     bound = report_for_project(project, report)
     if bound is not None:
         result["procurement_report"] = bound
-    if estimate is not None:
-        from app.price_estimation import estimate_for_project
-
-        cost = estimate_for_project(project, estimate, bound)
-        if cost is not None:
-            result["cost_estimate"] = cost
     from app.parts_proposal import build_parts_proposal
 
     result["parts_proposal"] = build_parts_proposal(project, report, estimate)

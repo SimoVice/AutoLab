@@ -93,7 +93,6 @@ def accept_project(
     preserve_cold: bool = True,
 ) -> None:
     """Rebind trusted sidecars at a validated project transition, never on reads."""
-    from app.price_estimation import rebind_estimate
     from app.procurement import rebind_report
 
     before = session.project
@@ -115,22 +114,20 @@ def accept_project(
         updated.clear()
         updated.update(candidate)
     from app.bom_engine import reconcile_part_choices
+    from app.budget_allowances import reconcile_budgets
 
+    # Some design compilers rebuild the project rather than copying optional records.
+    if "budget_allowances" not in updated and before.get("budget_allowances"):
+        updated["budget_allowances"] = deepcopy(before["budget_allowances"])
     reconcile_part_choices(updated)
+    reconcile_budgets(updated)
     report = rebind_report(before, updated, session.procurement_report)
-    estimate = rebind_estimate(
-        before,
-        updated,
-        session.cost_estimate,
-        session.procurement_report,
-        report,
-    )
     from app.design_workflow import refresh_workflow
 
     refresh_workflow(updated)
     session.project = updated
     session.procurement_report = report
-    session.cost_estimate = estimate
+    session.cost_estimate = None
 
 
 def check_revision(project: dict, revision: int) -> None:

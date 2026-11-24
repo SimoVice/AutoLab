@@ -798,6 +798,11 @@ export type PartCandidate = {
     actual: string | null; status: 'match' | 'mismatch' | 'unknown' }[];
 };
 
+export type PlanningBasis = {
+  kind: string; low_usd: number; high_usd: number | null;
+  detail: string; source_url: string | null; observed_on: string | null;
+};
+
 export type PurchasableBomLine = {
   line_id: string;
   group_id: string;
@@ -825,7 +830,10 @@ export type PurchasableBomLine = {
   unit_price: number | null;
   pack_price: number | null;
   line_total: number | null;
-  price_source: 'live_api' | 'curated_reference' | 'slicer_material_estimate' | 'unpriced' | 'unavailable' | 'stale_observation' | 'quote_required' | 'lab_inventory' | 'quantity_required';
+  planning_basis?: PlanningBasis;
+  planning_low: number | null;
+  planning_high: number | null;
+  price_source: 'live_api' | 'curated_reference' | 'slicer_material_estimate' | 'unpriced' | 'unavailable' | 'stale_observation' | 'quote_required' | 'lab_inventory' | 'quantity_required' | 'included_in_base';
   availability: string;
   stock_quantity?: number | null;
   lead_time_days?: number | null;
@@ -863,7 +871,13 @@ export type PurchasableBom = {
     live_api_subtotal: number;
     reference_catalog_subtotal: number;
     printed_material_subtotal: number;
-    total_estimated_cost: number;
+    documented_subtotal: number | null;
+    documented_count: number;
+    missing_price_count: number;
+    planning_count: number;
+    planning_low: number | null;
+    planning_high: number | null;
+    total_estimated_cost: number | null;
     total_filament_mass_g: number;
     total_print_time_minutes: number;
     max_lead_time_days: number;

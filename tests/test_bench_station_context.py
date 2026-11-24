@@ -65,9 +65,9 @@ def test_actual_model_payload_has_steps_candidates_and_only_bound_price_facts():
     assert facts['footprint_mm'] == project['bench_station']['footprint_mm']
     assert facts['steps'] == project['bench_station']['steps']
     assert facts['equipment_candidates'][0]['operation'] == 'read_barcode'
-    assert facts['pricing']['supplier']['known_partial_subtotal'] == 34.5
-    assert facts['pricing']['model_estimate']['summary']['estimated_additional_low_usd'] == 100
-    assert len(facts['pricing']['supplier']['items']) == 1
+    assert facts["pricing"]["summary"]["documented_subtotal"] is None
+    assert facts["pricing"]["summary"]["planning_low"] is None
+    assert len(facts["pricing"]["items"]) == 6
     encoded = json.dumps(state)
     assert '99999' not in encoded and 'must not be sent' not in encoded
     assert 'dated_fallback' not in encoded
@@ -83,8 +83,8 @@ def test_missing_or_stale_prices_do_not_use_legacy_liquid_fallback():
         project[key] = {'project_id': project['id'], 'project_revision': project['revision'] - 1,
                         'summary': {'project_total_low_usd': 99999}}
     facts = _bench_station_facts(project)
-    assert facts['pricing']['supplier_status'] == 'not_checked'
-    assert facts['pricing']['model_estimate_status'] == 'not_estimated'
+    assert facts["pricing"]["summary"]["live_api_priced_count"] == 0
+    assert facts["pricing"]["summary"]["planning_count"] == 0
     assert '99999' not in json.dumps(facts)
     project['workflow']['kind'] = 'liquid_preparation'
     assert _bench_station_facts(project) is None

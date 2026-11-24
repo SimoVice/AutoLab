@@ -90,9 +90,9 @@ def cold_component_reply(project, report=None, estimate=None):
         rows = cold_transfer_candidate_rows(project)
     lines = []
     for row in rows:
-        low, high = row["line_total_low_usd"], row["line_total_high_usd"]
+        low = row["line_total_low_usd"]
         label = row.get("selected_product_label") or row["label"]
-        price = f"${low:,.2f}" if low == high else f"${low:,.0f}–${high:,.0f}"
+        price = "Quote needed" if low is None else f"${low:,.2f}"
         lines.append(f"- [{label}]({row['source_url']}): {price} "
                      f"({row['price_kind'].replace('_', ' ')}). {row['price_note']}")
         for alternative in row["alternatives"]:
@@ -152,16 +152,17 @@ def complete_component_changes(current, updated, reply):
         "engineering_design", "concept_design", "bench_station"
     )):
         return reply
-    before = {row["group_id"]: row for row in build_parts_proposal(current)["rows"]}
-    after = build_parts_proposal(updated)["rows"]
+    def key(row):
+        return row.get("line_id", row["group_id"])
 
     def identity(row):
         return (row.get("selected_id"), row.get("selected_product_label"),
                 row["label"], row.get("source_url"), tuple(row.get("component_ids", [])))
 
-    changed = [row for row in after if not row["group_id"].startswith("cold-transfer-")
-               and (row["group_id"] not in before
-                    or identity(row) != identity(before[row["group_id"]]))]
+    before = {key(row): identity(row) for row in build_parts_proposal(current)["rows"]}
+    changed = [row for row in build_parts_proposal(updated)["rows"]
+               if not row["group_id"].startswith("cold-transfer-")
+               and identity(row) != before.get(key(row))]
     lines = []
     for row in changed:
         low, high = row["line_total_low_usd"], row["line_total_high_usd"]

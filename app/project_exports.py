@@ -68,7 +68,7 @@ def _check_coherence(project: dict, job: dict) -> None:
         )
     if _cost_sha256(project) != job.get("cost_estimate_sha256"):
         raise ExportError(
-            409, "Export cost estimate is stale. Generate files with the current range."
+            409, "Purchasing evidence changed. Generate files with the current cost breakdown."
         )
     _ensure_supported(project)
 
@@ -95,19 +95,11 @@ def _procurement_sha256(project: dict) -> str | None:
     return hashlib.sha256(canonical).hexdigest()
 
 
-def _cost_sha256(project: dict) -> str | None:
-    estimate = project.get("cost_estimate")
-    if estimate is None:
-        return None
-    if (
-        not isinstance(estimate, dict)
-        or estimate.get("project_id") != project.get("id")
-        or estimate.get("project_revision") != project.get("revision")
-        or not estimate.get("estimate_id")
-    ):
-        raise ExportError(409, "Cost estimate does not match the current project revision.")
-    canonical = json.dumps(estimate, sort_keys=True, allow_nan=False).encode("utf-8")
-    return hashlib.sha256(canonical).hexdigest()
+def _cost_sha256(project: dict) -> str:
+    from app.bom_engine import build_complete_bom
+
+    bom = build_complete_bom(project, procurement_report=project.get("procurement_report"))
+    return _input_sha256({"lines": bom["lines"], "summary": bom["summary"]})
 
 
 def _media_type(name: str) -> str:

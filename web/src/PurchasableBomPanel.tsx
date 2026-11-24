@@ -1,3 +1,4 @@
+import { budgetRange } from './budgetDisplay';
 import { useEffect, useRef, useState } from 'react';
 import type {
   BomCurrency,
@@ -23,6 +24,7 @@ type Props = {
 };
 
 const priceLabels: Record<PurchasableBomLine['price_source'], string> = {
+  included_in_base: 'Included in base',
   unpriced: 'Selection required', unavailable: 'Supplier unavailable', stale_observation: 'Recheck supplier',
   live_api: 'Live API', slicer_material_estimate: '3D printed', curated_reference: 'Reference',
   quote_required: 'Quote required', lab_inventory: 'Lab inventory', quantity_required: 'Quantity required',
@@ -234,9 +236,8 @@ export default function PurchasableBomPanel({ project, busy = false, onSelectPar
         <>
           <div className="bom-kpis">
             <div className="bom-kpi-card">
-              <span>Estimated subtotal ({bom.currency})</span>
-              <strong>{bom.summary.line_count > bom.summary.unpriced_placeholder_count
-                ? fmtMoney(bom.summary.total_estimated_cost, bom.currency) : 'Price needed'}</strong>
+              <span>Documented prices subtotal ({bom.currency})</span>
+              <strong>{fmtMoney(bom.summary.documented_subtotal, bom.currency)}</strong>
               <small>
                 {bom.summary.line_count} lines · {bom.summary.unresolved_count} awaiting selection
                 {bom.summary.unavailable_count > 0 && ` · ${bom.summary.unavailable_count} unavailable`}
@@ -264,6 +265,11 @@ export default function PurchasableBomPanel({ project, busy = false, onSelectPar
                 {bom.summary.total_filament_mass_g.toFixed(0)} g ·{' '}
                 {fmtDuration(bom.summary.total_print_time_minutes)}
               </small>
+            </div>
+            <div className="bom-kpi-card">
+              <span>Planning allowances</span>
+              <strong>{budgetRange(bom.summary.planning_low, bom.summary.planning_high, bom.currency)}</strong>
+              <small>{bom.summary.missing_price_count} lines still need purchase prices</small>
             </div>
             <div className="bom-kpi-card">
               <span>Longest known lead time</span>
@@ -368,6 +374,9 @@ export default function PurchasableBomPanel({ project, busy = false, onSelectPar
                     </td>
                     <td>
                       <strong>{fmtMoney(line.line_total, bom.currency)}</strong>
+                      {line.planning_basis && <span className="bom-line-meta">Planning allowance · {budgetRange(line.planning_low, line.planning_high, bom.currency)}<br />{line.planning_basis.detail}
+                        {line.planning_basis.source_url && <a href={line.planning_basis.source_url} target="_blank" rel="noreferrer">Source · {line.planning_basis.observed_on}</a>}
+                      </span>}
                       {line.unit_price != null && <span className="bom-line-meta">
                         {fmtMoney(line.unit_price, bom.currency)} / {line.unit}
                       </span>}

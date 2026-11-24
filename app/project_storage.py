@@ -10,6 +10,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 
+from app.budget_allowances import SavedBudget
 from app.commercial_design import CommercialProposal, adopt_commercial
 from app.conversation_history import DISPLAY_HISTORY_LIMIT
 from app.design_spec import FoundationLayoutProposal, LayoutProposal, apply_candidate
@@ -100,6 +101,7 @@ class Snapshot(StrictModel):
     custom_assembly_v1: dict[str, JsonValue] | None = None
     standalone_fixture: dict[str, JsonValue] | None = None
     upstream_project: dict[str, JsonValue] | None = None
+    budget_allowances: Annotated[dict[str, SavedBudget], Field(max_length=512)] | None = None
     part_choices: Annotated[dict[str, PartChoice], Field(max_length=512)] | None = None
     build_logs: list[dict[str, JsonValue]] | None = None
     inspection_extension: dict[str, JsonValue] | None = None
@@ -217,6 +219,8 @@ def make_snapshot(project: dict, history: list[dict]) -> dict:
            if project.get("dimension_provenance") else {}),
         "history": deepcopy(history[-DISPLAY_HISTORY_LIMIT:]),
     }
+    if project.get("budget_allowances"):
+        payload["budget_allowances"] = deepcopy(project["budget_allowances"])
     if project.get("part_choices"):
         payload["part_choices"] = deepcopy(project["part_choices"])
     if payload["compiler_version"] == "4":
@@ -532,6 +536,13 @@ def restore_snapshot(snapshot: object) -> tuple[dict, list[dict]]:
             key: value.model_dump() for key, value in saved.part_choices.items()
         }
         reconcile_part_choices(project, restoring=True)
+    if saved.budget_allowances:
+        from app.budget_allowances import reconcile_budgets
+
+        project["budget_allowances"] = {
+            key: value.model_dump() for key, value in saved.budget_allowances.items()
+        }
+        reconcile_budgets(project, restoring=True)
     if saved.dimension_provenance:
         from app.lab_profile import DimensionMeasurement
 

@@ -28,13 +28,20 @@ These are dated observations, not guaranteed current prices or a complete quotat
 
 ## What the numbers mean
 
-The subtotal includes freshly observed, available listed items only. Unknown parts
-are not assigned zero cost. The interface separates expired last-known prices and
-dated original catalog references from fresh offers. A short 15-minute cache avoids
-repeated supplier requests; its original observation timestamps remain visible.
-An open tab rechecks the saved report at expiry or when returning to the window,
-without automatically querying suppliers. Use **Refresh US prices** for a new
-supplier check.
+The **documented prices subtotal** adds the current supplier and dated catalog
+subtotals. Each line shows its source and purchase quantity. The supplier report
+also gives its own subtotal for fresh observations. Its cache retains their original
+timestamps for 15 minutes. Use **Refresh US prices** to request a new observation.
+
+**Planning allowances** use a published monetary basis or a budget entered in chat
+for the entire line. For example, “Allow USD 80–120 for inspection supplies” records
+one range for those supplies. A published starting price has an open upper bound.
+A line without monetary evidence shows an outstanding purchase price. An allowance
+can still apply while a quote is pending. Filament is estimated separately from
+part geometry and print settings. CSV and JSON preserve these distinctions and
+the evidence behind each range. The purchasing CSV puts documented amounts and
+filament in distinct columns. The first item also carries the revision subtotals
+and missing-price count.
 
 The US market setting specifies source listings and currency. It does not determine
 shipping eligibility, destination-specific sales tax, duties or lead time. Those
@@ -91,41 +98,20 @@ USD currency, variants and pack quantities. Failed or ambiguous pages stay unkno
 there is no unrestricted web crawling or model-generated supplier URL. See
 [verification](verification.md) for the actual software, supplier and browser checks.
 
-## Early project cost planning ranges
+## Recording and revising a budget
 
-When a design becomes available, the interface requests one revision-bound model
-cost estimate automatically. Unchanged purchase scopes retain their valid ranges
-across recipe edits; new or changed scopes receive new allowances. An explicit
-manual refresh can request a fresh estimate. Each request makes at most one model
-call. Reusing an allowance does not extend its original 24-hour expiry.
+In **Parts & prices**, identify the outstanding line, then give its name and USD
+amount or range in chat. The declaration applies to the listed quantity. Saving
+the project keeps the original wording and the purchasing scope. Recipe edits
+can retain the declaration. Changing the selected part, quantity or relevant
+geometry requires a new declaration. An available purchase price takes priority
+on that line. Legacy amounts generated from a part name have no monetary basis
+and are omitted when an older project reopens.
 
-If estimating additional scopes fails, existing valid prices and allowances stay
-visible in a partial total. The missing scopes and error remain explicit, and
-**Refresh cost estimate** retries the missing allowances without discarding the
-retained ones. Failed requests do not retry automatically in a loop. Missing or
-expired costs never become zero-priced hardware.
-
-The USD summary separates current verified supplier totals, model-estimated
-additions and groups still unknown. For understood hardware groups, missing SKUs,
-loads or fabrication details prompt broad planning allowances with stated
-assumptions. A tentative polymer/cut-stock or outsourced fabrication scenario is
-an estimate assumption, never recorded printer access or an adopted material.
-Jubilee's remaining-platform allowance excludes the candidate kits and all other
-separately budgeted groups. Every amount is a **group total**, already covering
-its quantity and whole packs; do not multiply it again.
-
-A supplier refresh replaces a model allowance with the current verified group
-total when available, preserving supplier identity, pack arithmetic and evidence.
-Model ranges never acquire invented supplier citations or become quotations.
-Preparation volume, target count and rack capacity do not become hardware purchase
-quantities: three preparations in a 96-well plate do not mean 96 plates.
-
-Immediate HTML, Markdown and JSON instructions show the same estimate and
-assumptions. The full package also contains separate `cost-estimate.json` and
-`cost-estimate.csv`; supplier reports retain their observation-only price fields.
-These are scoped purchase allowances, not proof of a complete compatible BOM or
-hardware validation. Shipping, tax, assembly labor, engineering, testing and
-support remain excluded; any assumed fabrication service is identified separately.
+The same revision supplies the parts workspace, purchasing CSV/JSON and build
+guide. The confirmed workstation ZIP includes the purchasing BOM and a separate
+cost breakdown in CSV and JSON. A bench station's plan JSON includes its itemized
+purchasing BOM.
 
 ## Parametric tube rack
 

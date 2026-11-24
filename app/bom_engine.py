@@ -107,7 +107,7 @@ def _catalog_line(
         supplier = live.get("supplier") or supplier
         sku = live.get("sku") or sku
     elif (live.get("freshness") == "fresh" and live.get("status") == "priced"
-          and live.get("line_total") is not None):
+          and (live.get("pack_price") is not None or live.get("unit_price") is not None)):
         pack_size = max(1, int(live.get("pack_size") or pack_size))
         packs_needed = max(math.ceil(quantity / pack_size), int(live.get("min_order_qty") or 1))
         tiers = sorted(live.get("price_breaks") or [], key=lambda t: t["minimum_packs"])
@@ -160,6 +160,13 @@ def _catalog_line(
         stock_qty = lead_days = fetched_at = adapter = None
         source_url = entry.get("source_url")
 
+    budget = None
+    if price_source == "quote_required" and entry.get("planning_basis"):
+        budget = deepcopy(entry["planning_basis"])
+        for field in ("low_usd", "high_usd"):
+            if budget[field] is not None:
+                packs = math.ceil(quantity / pack_size)
+                budget[field] = _money_float(Decimal(str(budget[field])) * packs)
     return {
         "line_id": f"{group_id}:{item_id}",
         "group_id": group_id,
@@ -191,6 +198,7 @@ def _catalog_line(
         "adapter": adapter,
         "specs": deepcopy(entry.get("specs") or {}),
         "notes": role_note,
+        **({"planning_basis": budget} if budget else {}),
         "print_estimate": None,
     }
 
@@ -283,13 +291,22 @@ def _collect_live_rows(
         for row in procurement_report.get("rows") or []:
             if not isinstance(row, dict):
                 continue
-            if (selected_id := row.get("selected_id")) and row.get("status") in {
-                "priced", "unavailable"
-            }:
+            selected_id = row.get("selected_id")
+            if not (
+                selected_id
+                and row.get("catalog_supported")
+                and row.get("sku")
+                and (row.get("fetched_at") or row.get("last_known_fetched_at"))
+                and row.get("currency") in {"USD", "CHF", "EUR"}
+                and (row.get("price_source_url") or row.get("availability_source_url"))
+            ):
+                continue
+            if row.get("status") in {"priced", "unavailable"}:
                 by_id[str(selected_id)] = row
     if isinstance(live_quotes, dict):
         for key, quote in live_quotes.items():
-            if not isinstance(quote, dict):
+            if not (isinstance(quote, dict) and quote.get("source_url")
+                    and quote.get("fetched_at")):
                 continue
             price_breaks = quote.get("price_breaks") or []
             unavail = quote.get("availability") in UNAVAILABLE_STATES
@@ -778,46 +795,38 @@ def _bench_station_bom_lines(
     catalog_items: dict[str, dict[str, Any]],
     lab_profile: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
-    station = project["bench_station"]
-    ops = (station.get("proposal") or {}).get("operations") or []
-    lines: list[dict[str, Any]] = []
-    op_catalog = {
-        "weigh": ("bench-balance-ohaus", "Precision benchtop balance candidate"),
-        "print_label": ("bench-label-printer", "Thermal chemical-resistant label printer"),
-        "read_barcode": ("bench-barcode-usb", "2D USB-HID barcode scanner candidate"),
-        "inspect": ("usb-webcam-1080p", "1080p USB inspection camera candidate"),
-    }
-    for op in ops:
-        cat_id, note = op_catalog[op]
-        lines.append(
-            _catalog_line(
-                cat_id,
-                1,
-                group_id=f"bench-{op}-equipment",
-                component_ids=[op],
-                role_note=note,
-                currency=currency,
-                fx_rates=fx_rates,
-                live_rows=live_rows,
-                catalog_items=catalog_items,
-            )
-        )
-    mod_count = max(1, len(ops))
-    lines.append(
-        _printed_line(
-            "station-locator-tray",
-            "Printed Bench Station Alignment & Hand-off Guide Trays",
-            [140.0, 100.0, 12.0],
-            group_id="bench-printed-trays",
-            quantity=mod_count,
-            material="PLA",
-            lab_profile=lab_profile,
+    from app.procurement import initial_procurement_rows
+
+    return [
+        _scope_line(row, currency, fx_rates, live_rows, catalog_items)
+        for row in initial_procurement_rows(project)
+    ]
+
+
+def _scope_line(row, currency, fx_rates, live_rows, catalog_items):
+    gid = row["group_id"]
+    item = row["selected_id"]
+    if item in catalog_items:
+        return _catalog_line(
+            item,
+            row["quantity"],
+            group_id=gid,
+            component_ids=row["component_ids"],
+            role_note=row.get("compatibility_note") or "",
             currency=currency,
             fx_rates=fx_rates,
-            role_note="Locating guides keeping station zones aligned on the lab bench.",
+            live_rows=live_rows,
+            catalog_items=catalog_items,
         )
-    )
-    return lines
+    requirement = {
+        "name": row["label"],
+        "quantity": row["quantity"],
+        "unit": "set",
+        "notes": row.get("compatibility_note"),
+    }
+    line = _open_requirement(requirement, currency, gid, row["component_ids"])
+    line.update(line_id=gid, source_url=row.get("price_source_url"), scope_selection=item)
+    return line
 
 
 def _workstation_bom_lines(
@@ -839,12 +848,9 @@ def _workstation_bom_lines(
     lines: list[dict[str, Any]] = []
 
     if is_ot2:
-        ref_usd = 15950.0
-        unit_p = (
-            ref_usd
-            if currency == "USD"
-            else convert_currency(ref_usd, "USD", currency, fx_rates)
-        )
+        from app.platform_profiles import platform_profiles
+
+        context = next(p["cost_context"] for p in platform_profiles() if p["id"] == "opentrons-ot2")
         lines.append(
             {
                 "line_id": "platform:opentrons-ot2",
@@ -865,19 +871,27 @@ def _workstation_bom_lines(
                 "pack_size": 1,
                 "packs_to_order": 1,
                 "currency": currency,
-                "unit_price": unit_p,
-                "pack_price": unit_p,
-                "line_total": unit_p,
-                "price_source": "curated_reference",
+                "unit_price": None,
+                "pack_price": None,
+                "line_total": None,
+                "price_source": "quote_required",
                 "availability": "vendor_quote_required",
                 "stock_quantity": None,
-                "lead_time_days": 21,
+                "lead_time_days": None,
                 "source_url": "https://opentrons.com/products/robots/ot-2/",
                 "fetched_at": None,
-                "adapter": "curated_reference_catalog",
+                "adapter": None,
                 "specs": {"kind": "commercial_robot", "supply_voltage_v": 115.0},
                 "notes": "Base price starting-at USD reference; request formal quotation.",
                 "print_estimate": None,
+                "planning_basis": {
+                    "kind": context["kind"],
+                    "low_usd": context["amount"],
+                    "high_usd": None,
+                    "source_url": context["source_url"],
+                    "observed_on": context["checked_on"],
+                    "detail": context["detail"],
+                },
             }
         )
         lines.append(
@@ -1299,6 +1313,53 @@ def _workstation_bom_lines(
     return lines
 
 
+def _classify_cost(line, project, fx_rates, checked_on):
+    from app.budget_allowances import budget_signature
+
+    source = line["price_source"]
+    line["cost_category"] = {
+        "live_api": "documented",
+        "curated_reference": "documented",
+        "slicer_material_estimate": "printed_material",
+        "lab_inventory": "on_hand",
+        "included_in_base": "included",
+    }.get(source, "unpriced")
+    line["documented_line_total"] = (
+        line["line_total"] if line["cost_category"] == "documented" else None
+    )
+    line["printed_material_total"] = (
+        line["line_total"] if line["cost_category"] == "printed_material" else None
+    )
+    if source == "curated_reference":
+        line["price_checked_on"] = checked_on
+    line["budget_scope_signature"] = budget_signature(project, line)
+    if line["cost_category"] != "unpriced" or source == "quantity_required":
+        line.pop("planning_basis", None)
+    record = (project.get("budget_allowances") or {}).get(line["line_id"])
+    if (
+        record
+        and record["scope_signature"] == line["budget_scope_signature"]
+        and line["cost_category"] == "unpriced"
+    ):
+        line["planning_basis"] = {
+            "kind": "user_declared",
+            "low_usd": record["low_usd"],
+            "high_usd": record["high_usd"],
+            "detail": record["user_quote"],
+            "source_url": None,
+            "observed_on": None,
+        }
+    basis = line.get("planning_basis")
+    line["planning_low"] = line["planning_high"] = None
+    if basis:
+        for field in ("low", "high"):
+            amount = basis[field + "_usd"]
+            if amount is not None:
+                line["planning_" + field] = convert_currency(
+                    amount, "USD", line["currency"], fx_rates
+                )
+
+
 def purchasing_route(project: dict[str, Any]) -> str:
     for key in ("standalone_fixture", "upstream_project", "concept_design", "bench_station"):
         if project.get(key):
@@ -1323,10 +1384,43 @@ def build_complete_bom(
     curr, eff_fx = _resolve_currency_and_fx(
         currency, fx_rates, requires_rates=route_kind != "unselected"
     )
+    if lab_profile is None and route_kind != "unselected":
+        from app.lab_profile import load_lab_profile
+
+        lab_profile = load_lab_profile()
     catalog_data = load_purchasable_catalog()
     catalog_items = catalog_data["items"]
     cached_quotes = cached_official_quotes(curr, eff_fx or cached_fx_rates("USD"))
+    from app.procurement import report_for_project
+
+    procurement_report = report_for_project(project, procurement_report)
+    if procurement_report:
+        from app.procurement import initial_procurement_rows
+
+        expected = {r["group_id"]: r for r in initial_procurement_rows(project)}
+        keys = (
+            "selected_id",
+            "supplier",
+            "sku",
+            "quantity",
+            "pack_size",
+            "pack_count",
+            "component_ids",
+        )
+        procurement_report["rows"] = [
+            row
+            for row in procurement_report["rows"]
+            if (scope := expected.get(row["group_id"]))
+            and all(row.get(k) == scope.get(k) for k in keys)
+        ]
     live_rows = _collect_live_rows(procurement_report, {**cached_quotes, **(live_quotes or {})})
+
+    if any(r.get("currency", curr) != curr for r in live_rows.values()):
+        eff_fx = eff_fx or cached_fx_rates("USD")
+        if not eff_fx:
+            live_rows = {key: r for key, r in live_rows.items()
+                         if r.get("currency", curr) == curr or r["status"] == "unavailable"
+                         or r.get("freshness") == "stale"}
 
     compilers = {
         "standalone_fixture": _fixture_bom_lines, "upstream_project": _upstream_bom_lines,
@@ -1339,6 +1433,26 @@ def build_complete_bom(
             project, currency=curr, fx_rates=eff_fx, live_rows=live_rows,
             catalog_items=catalog_items, lab_profile=lab_profile,
         )
+
+    if route_kind == "workstation":
+        from app.procurement import initial_procurement_rows
+
+        existing = {line["group_id"] for line in lines}
+        commercial = (project.get("design", {}).get("platform") or {}).get("id") == "opentrons-ot2"
+        for row in initial_procurement_rows(project):
+            gid = row["group_id"]
+            if gid in existing or (commercial and gid not in {"pipettes", "labware"}):
+                continue
+            extra = _scope_line(row, curr, eff_fx, live_rows, catalog_items)
+            if commercial and gid == "pipettes":
+                extra.update(
+                    price_source="included_in_base",
+                    line_total=0.0,
+                    resolution_status="included",
+                    availability="included",
+                    notes="One instrument pipette is included in the platform scope.",
+                )
+            lines.append(extra)
 
     live_sub = Decimal(0)
     ref_sub = Decimal(0)
@@ -1356,6 +1470,7 @@ def build_complete_bom(
             record = (project.get("part_choices") or {}).get(line["line_id"])
             if record and signature == record["requirement_signature"]:
                 _apply_choice(line, record, catalog_items, live_rows, eff_fx)
+        _classify_cost(line, project, eff_fx, catalog_data["checked_on"])
         lt = line.get("line_total")
         if lt is None:
             unpriced_placeholders += 1
@@ -1374,7 +1489,15 @@ def build_complete_bom(
         if line.get("lead_time_days"):
             max_lead_days = max(max_lead_days, int(line["lead_time_days"]))
 
-    total_combined = live_sub + ref_sub + print_sub
+    documented = [r for r in lines if r["cost_category"] == "documented"]
+    allowances = [r for r in lines if r.get("planning_basis")]
+    low = sum(Decimal(str(r["planning_low"])) for r in allowances)
+    high = (
+        sum(Decimal(str(r["planning_high"])) for r in allowances)
+        if allowances and all(r["planning_high"] is not None for r in allowances)
+        else None
+    )
+    documented_subtotal = _money_float(live_sub + ref_sub) if documented else None
     unresolved = sum(line.get("resolution_status") == "selection_required" for line in lines)
     if route_kind == "unselected":
         status = "design_required"
@@ -1383,7 +1506,7 @@ def build_complete_bom(
     else:
         status = "itemized"
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "project_id": project["id"],
         "project_revision": project["revision"],
@@ -1397,6 +1520,12 @@ def build_complete_bom(
         "lines": lines,
         "summary": {
             "line_count": len(lines),
+            "documented_count": len(documented),
+            "documented_subtotal": documented_subtotal,
+            "planning_count": len(allowances),
+            "planning_low": _money_float(low) if allowances else None,
+            "planning_high": _money_float(high) if high is not None else None,
+            "missing_price_count": sum(r["cost_category"] == "unpriced" for r in lines),
             "commercial_line_count": sum(1 for r in lines if r["kind"] == "commercial_part"),
             "printed_line_count": sum(1 for r in lines if r["kind"] == "3d_printed"),
             "live_api_priced_count": sum(1 for r in lines if r["price_source"] == "live_api"),
@@ -1412,15 +1541,14 @@ def build_complete_bom(
             "live_api_subtotal": _money_float(live_sub),
             "reference_catalog_subtotal": _money_float(ref_sub),
             "printed_material_subtotal": _money_float(print_sub),
-            "total_estimated_cost": _money_float(total_combined),
+            "total_estimated_cost": documented_subtotal,  # Legacy key for the priced subtotal.
             "total_filament_mass_g": round(total_mass_g, 2),
             "total_print_time_minutes": round(total_print_min, 1),
             "max_lead_time_days": max_lead_days,
         },
         "shipping_and_tax_scope": (
-            f"All totals in {curr} reflect unit/pack component hardware prices and analytical "
-            "filament material cost ONLY. Shipping, VAT/sales tax, import duties, and assembly "
-            "labor are explicitly excluded."
+            f"Purchases, planning budgets and filament costs are shown separately in {curr}. "
+            "Shipping, VAT/sales tax, duties and assembly labor are excluded."
         ),
         "exclusions": list(SHIPPING_AND_TAX_EXCLUSIONS),
     }
@@ -1437,10 +1565,27 @@ def _safe_csv_cell(val: object) -> object:
     return val
 
 
+def revision_cost_columns(summary):
+    """CSV header totals are populated once, alongside the first purchase line."""
+    return {
+        "revision_documented_subtotal": summary["documented_subtotal"],
+        "revision_planning_low": summary["planning_low"],
+        "revision_planning_high": summary["planning_high"],
+        "revision_printed_material_subtotal": (
+            summary["printed_material_subtotal"] if summary["printed_line_count"] else None
+        ),
+        "revision_missing_price_count": summary["missing_price_count"],
+        "revision_unresolved_requirements": summary["unresolved_count"],
+    }
+
+
 def bom_to_csv(bom: dict[str, Any]) -> bytes:
     """Serialize itemized purchasable BOM to formula-safe CSV."""
     buf = io.StringIO(newline="")
+    totals = revision_cost_columns(bom["summary"])
     columns = [
+        "project_id",
+        "project_revision",
         "line_id",
         "group_id",
         "label",
@@ -1479,6 +1624,16 @@ def bom_to_csv(bom: dict[str, Any]) -> bytes:
         "pack_price",
         "line_total",
         "price_source",
+        "price_checked_on",
+        "cost_category",
+        "documented_line_total",
+        "printed_material_total",
+        "planning_low",
+        "planning_high",
+        "planning_kind",
+        "planning_detail",
+        "planning_source",
+        "planning_observed_on",
         "availability",
         "stock_quantity",
         "fetched_at",
@@ -1487,11 +1642,21 @@ def bom_to_csv(bom: dict[str, Any]) -> bytes:
         "print_time_minutes",
         "source_url",
         "notes",
+        *totals,
     ]
     writer = csv.DictWriter(buf, fieldnames=columns, extrasaction="ignore")
     writer.writeheader()
-    for line in bom.get("lines") or []:
-        rec = dict(line)
+    for index, line in enumerate(bom.get("lines") or []):
+        rec = dict(line, project_id=bom["project_id"], project_revision=bom["project_revision"])
+        if index == 0:
+            rec.update(totals)
+        basis = line.get("planning_basis") or {}
+        rec.update(
+            planning_kind=basis.get("kind"),
+            planning_detail=basis.get("detail"),
+            planning_source=basis.get("source_url"),
+            planning_observed_on=basis.get("observed_on"),
+        )
         for key, value in (line.get("requirement") or {}).items():
             rec[f"requirement_{key}"] = value
         if specs := (line.get("requirement") or {}).get("critical_specs"):

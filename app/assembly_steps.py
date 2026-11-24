@@ -3,18 +3,20 @@
 
 def assembly_steps(project: dict, technical_steps: list[dict], proposal: dict) -> list[dict]:
     steps = []
-    rows = {row["group_id"]: row for row in proposal["rows"]}
     technical = {step["id"]: step for step in technical_steps}
 
     def add(title, *instructions, reference=None, group=None, component_ids=()):
         links = [{"title": src["title"], "url": src["url"]}
                  for src in technical.get(reference, {}).get("sources", [])[:2]]
-        row = rows.get(group, {})
-        url = row.get("source_url")
-        if url and not any(src["url"] == url for src in links):
-            links.append({"title": row.get("selected_product_label") or row["label"], "url": url})
-        if row.get("fabrication_url"):
-            links.insert(0, {"title": "Download part model (STEP)", "url": row["fabrication_url"]})
+        for row in proposal["rows"]:
+            if row["group_id"] != group:
+                continue
+            for link_title, url in (
+                (row.get("selected_product_label") or row["label"], row.get("source_url")),
+                ("Download part model (STEP)", row.get("fabrication_url")),
+            ):
+                if url and not any(src["url"] == url for src in links):
+                    links.append({"title": link_title, "url": url})
         ids = list(component_ids) or technical.get(reference, {}).get("component_ids", [])
         if not ids and group:
             ids = next((g.get("component_ids", []) for g in
@@ -79,7 +81,14 @@ def assembly_steps(project: dict, technical_steps: list[dict], proposal: dict) -
             "Put empty source and sample tubes in their proposed positions. Check the tube rim "
             "and cap clearance, then locate and secure each rack so it returns to the same spot.",
             reference="racks", group="fixtures")
-    tip = rows.get("tip-rack-options", {}).get("selected_product_label") or "the proposed tip rack"
+    tip = next(
+        (
+            r["selected_product_label"]
+            for r in proposal["rows"]
+            if r["group_id"] == "tip-rack-options"
+        ),
+        "the proposed tip rack",
+    )
     add("Place the tips and tip waste",
         f"Install {tip} beside the waste container. Try an unused tip from your actual box. "
         "Check that the pipette seats it, lifts without moving the rack and ejects it into waste.",

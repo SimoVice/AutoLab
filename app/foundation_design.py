@@ -84,14 +84,9 @@ def foundation_sourcing(project: dict) -> dict:
             ],
         },
     )
-    selected = [
-        next(o for o in g["options"] if o["id"] == g["selected_id"]) for g in sourcing["groups"]
-    ]
-    sourcing["subtotal"] = round(
-        sum(g["quantity"] * (o["unit_price"] or 0) for g, o in zip(sourcing["groups"], selected)), 2
-    )
-    sourcing["unpriced_count"] = sum(o["unit_price"] is None for o in selected)
-    sourcing["is_lower_bound"] = any(o["price_kind"] == "starting_at" for o in selected)
+    from app.catalog import sourcing_totals
+
+    sourcing.update(sourcing_totals(sourcing["groups"]))
     return sourcing
 
 

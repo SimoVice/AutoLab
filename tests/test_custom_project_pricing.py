@@ -1,7 +1,6 @@
 """Offline independent purchase scopes, quantities and safe custom-project pricing."""
 
 import asyncio
-import json
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -9,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from test_custom_project_routes import client as client
 from test_custom_project_routes import install, project_fixture, proposal
-from test_price_estimation import estimate, response_rows
+from test_price_estimation import declare
 
 import app.api as api
 from app import price_estimation as prices
@@ -73,26 +72,23 @@ def test_observed_pack_totals_use_declared_quantity_without_second_multiplicatio
     assert controller['quantity'] == 3 and controller['pack_count'] == 2
     assert controller['pack_price'] == 7.5 and controller['line_total'] == 15
     assert report['known_partial_subtotal'] == 22.5
-    result, requests = estimate(project, report=report)
-    assert len(requests) == 1
-    provider = json.loads(requests[0]['messages'][1]['content'])
-    assert {row['group_id'] for row in provider['rows']} == {
-        'concept-rail_base', 'concept-sample_tray'}
-    assert result['summary']['project_total_low_usd'] == 42.5
-    assert result['summary']['project_total_high_usd'] == 72.5
+    result = prices.purchase_cost_report(project, report)
+    assert result["summary"]["live_api_subtotal"] == 22.5
+    assert result["summary"]["documented_subtotal"] == 22.5
+    assert result["summary"]["planning_low"] is None
 
 
-def test_unobserved_model_ranges_are_entire_group_totals_not_per_board():
+def test_declared_budget_applies_once_to_the_entire_supply_line():
+    raw = proposal()
+    raw["supplies"][0].update(source_id=None)
     project = project_fixture()
-    result, calls = estimate(project)
-    assert len(calls) == 1 and result['status'] == 'ready'
-    assert result['summary']['project_total_low_usd'] == 40
-    assert result['summary']['project_total_high_usd'] == 100
-    payload = json.loads(calls[0]['messages'][1]['content'])
-    controller = next(r for r in payload['rows'] if r['group_id'] == 'concept-controller_board')
-    assert controller['quantity'] == 3
-    assert controller['price_basis'] == 'group_total'
-    assert all(row['price_source_url'] is None for row in result['rows'])
+    project["concept_design"] = compile_concept(raw)
+    updated = declare(project, "concept:controller_board")
+    result = prices.purchase_cost_report(updated)
+    row = next(r for r in result["rows"] if r["line_id"] == "concept:controller_board")
+    assert row["quantity"] == 3
+    assert row["planning_low_usd"] == result["summary"]["planning_low"] == 80
+    assert row["documented_usd"] is None
 
 
 def test_pose_assembly_prose_and_illustrative_finish_preserve_purchase_scope():
@@ -121,7 +117,6 @@ def test_revisions_invalidate_only_changed_purchase_scopes(monkeypatch, change, 
     project = project_fixture()
     supplier_fixture(monkeypatch)
     report = asyncio.run(procurement.refresh_procurement(project))
-    ranges, _ = estimate(project, report=report)
     updated = modified_project(project, change)
     rebound = procurement.rebind_report(project, updated, report)
     assert rebound['project_revision'] == updated['revision']
@@ -129,51 +124,9 @@ def test_revisions_invalidate_only_changed_purchase_scopes(monkeypatch, change, 
     assert rebound['expires_at'] == report['expires_at']
     assert changed_group not in rebound['revision_binding']['retained_group_ids']
     assert procurement.report_for_project(updated, report) is None
-    revised_estimate = prices.rebind_estimate(project, updated, ranges, report, rebound)
-    assert revised_estimate['project_revision'] == updated['revision']
-    assert changed_group in revised_estimate['pending_scope_group_ids']
-    assert revised_estimate['expires_at'] == ranges['expires_at']
-
-
-def test_estimates_preserve_unchanged_scopes_across_pose_only_revision(monkeypatch):
-    project = project_fixture()
-    supplier_fixture(monkeypatch)
-    report = asyncio.run(procurement.refresh_procurement(project))
-    ranges, _ = estimate(project, report=report)
-    updated = modified_project(project, lambda p: p['components'][1].update(
-        placement_mm=[10, 10, 0], assembly='Fit and check the revised position.'))
-    rebound = procurement.rebind_report(project, updated, report)
-    retained = prices.rebind_estimate(project, updated, ranges, report, rebound)
-    assert retained['pending_scope_group_ids'] == []
-    assert retained['summary'] == ranges['summary']
-    assert retained['expires_at'] == ranges['expires_at']
-
-
-def test_provider_failure_retains_unknown_prices_instead_of_free_parts():
-    project = project_fixture()
-    result, calls = estimate(project, http_status=503)
-    assert len(calls) == 1 and result['status'] == 'failed'
-    assert result['summary']['project_total_low_usd'] is None
-    assert result['summary']['project_total_high_usd'] is None
-    assert all(row['low_usd'] is None and row['high_usd'] is None for row in result['rows'])
-
-
-@pytest.mark.parametrize('edit', [
-    lambda rows: rows.append(deepcopy(rows[0])),
-    lambda rows: rows.pop(),
-    lambda rows: rows[0].update(low_usd=0),
-    lambda rows: rows[0].update(low_usd=100, high_usd=10),
-    lambda rows: rows[0].update(rationale='See https://invented.invalid/prices'),
-])
-def test_invalid_or_ambiguous_model_price_rows_fail_safely(edit):
-    project = project_fixture()
-    rows = response_rows(project)
-    edit(rows)
-    result, calls = estimate(project, rows=rows)
-    assert len(calls) == 1
-    assert result['status'] == 'failed'
-    assert result['summary']['project_total_low_usd'] is None
-    assert result['summary']['project_total_high_usd'] is None
+    current = prices.purchase_cost_report(updated, rebound)
+    assert current["project_revision"] == updated["revision"]
+    assert current["summary"]["planning_low"] is None
 
 
 def test_supplier_failure_is_not_a_quote_or_zero_price(monkeypatch):
@@ -234,20 +187,13 @@ def test_refresh_api_is_explicit_revision_bound_and_uses_supply_quantities(clien
 def test_price_get_and_snapshot_never_trigger_estimation(client, monkeypatch):
     project = project_fixture()
     url = install(project)
-    calls = []
-
-    async def forbidden(*args, **kwargs):
-        calls.append(True)
-        raise AssertionError('Read must never invoke price model.')
-
-    monkeypatch.setattr(prices, 'estimate_project_prices', forbidden)
     revision = project['revision']
     first = client.get(url + '/cost-estimate', params={'revision': revision})
-    assert first.status_code == 200 and first.json()['state'] == 'not_estimated'
+    assert first.status_code == 200 and first.json()['state'] == 'current'
     saved = client.get(url + '/snapshot', params={'revision': revision})
     reopened = client.post('/api/projects/open', content=saved.content)
     assert reopened.status_code == 201
-    assert calls == []
+    assert first.json()["estimate"]["summary"]["planning_low"] is None
 
 
 def test_generated_proposal_duplicate_supply_keys_are_rejected_before_pricing():
@@ -257,59 +203,14 @@ def test_generated_proposal_duplicate_supply_keys_are_rejected_before_pricing():
         compile_concept(p)
 
 
-def test_explicit_cost_post_is_cached_until_force_and_rejects_untrusted_payload(
-        client, monkeypatch):
-    project = project_fixture()
-    url = install(project)
-    ranges, _ = estimate(project)
-    calls = []
-
-    async def fake(project_copy, report, **kwargs):
-        calls.append(deepcopy(project_copy))
-        return deepcopy(ranges)
-
-    monkeypatch.setattr(prices, 'estimate_project_prices', fake)
-    revision = project['revision']
-    first = client.post(url + '/cost-estimate', json={'project_revision': revision})
-    assert first.status_code == 200 and first.json()['estimate']['status'] == 'ready'
-    second = client.post(url + '/cost-estimate', json={'project_revision': revision})
-    assert second.status_code == 200 and len(calls) == 1
-    assert client.get(url + '/cost-estimate', params={
-        'revision': revision}).json()['state'] == 'current'
-    assert client.post(url + '/cost-estimate', json={
-        'project_revision': revision, 'force': True}).status_code == 200
-    assert len(calls) == 2
-    for invalid in ({'project_revision': revision, 'force': 'true'},
-                    {'project_revision': revision, 'model': 'unreviewed-model'},
-                    {'project_revision': revision - 1}):
-        assert client.post(url + '/cost-estimate', json=invalid).status_code in (409, 422)
-    assert len(calls) == 2
-
-
-def test_mid_estimate_revision_change_does_not_publish_stale_ranges(client, monkeypatch):
-    project = project_fixture()
-    url = install(project)
-    ranges, _ = estimate(project)
-
-    async def slow(project_copy, report, **kwargs):
-        api._sessions[project['id']].project['revision'] += 1
-        return deepcopy(ranges)
-
-    monkeypatch.setattr(prices, 'estimate_project_prices', slow)
-    result = client.post(url + '/cost-estimate', json={'project_revision': project['revision']})
-    assert result.status_code == 409
-    assert api._sessions[project['id']].cost_estimate is None
-
-
 def test_same_runtime_reopen_retains_observation_times_without_fetch_or_inference(
         client, monkeypatch):
     project = project_fixture()
     url = install(project)
     calls = supplier_fixture(monkeypatch)
     report = asyncio.run(procurement.refresh_procurement(project))
-    ranges, _ = estimate(project, report=report)
     session = api._sessions[project['id']]
-    session.procurement_report, session.cost_estimate = report, ranges
+    session.procurement_report = report
     saved = client.get(url + '/snapshot', params={'revision': project['revision']})
     assert 'known_partial_subtotal' not in saved.text
     reopened = client.post('/api/projects/open', content=saved.content)
@@ -318,8 +219,10 @@ def test_same_runtime_reopen_retains_observation_times_without_fetch_or_inferenc
     assert restored.procurement_report['report_id'] == report['report_id']
     assert restored.procurement_report['fetched_at'] == report['fetched_at']
     assert restored.procurement_report['expires_at'] == report['expires_at']
-    assert restored.cost_estimate['estimate_id'] == ranges['estimate_id']
-    assert restored.cost_estimate['expires_at'] == ranges['expires_at']
+    assert (
+        prices.purchase_cost_report(restored.project, restored.procurement_report)["summary"]
+        == (prices.purchase_cost_report(project, report)["summary"])
+    )
     assert len(calls) == 2
 
 

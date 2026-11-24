@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import type { Project } from './types';
+import { budgetRange } from './budgetDisplay';
+import type { PlanningBasis, Project, PurchasableBom } from './types';
 import { modelComponents } from './modelComponents';
 import './parts-workspace.css';
 
 type Proposal = {
   project_id: string; project_revision: number;
-  rows: { group_id: string; label: string; selected_product_label?: string; source_kind?: string; unit_price_basis?: string; quantity: number; unit: string;
+  rows: { line_id: string; planning_basis?: PlanningBasis | null; group_id: string; label: string; selected_product_label?: string; source_kind?: string; unit_price_basis?: string; quantity: number; unit: string;
     unit_price_low_usd: number | null; unit_price_high_usd: number | null;
     line_total_low_usd: number | null; line_total_high_usd: number | null;
     price_kind: string; price_note: string; source_url: string | null; fabrication_url?: string;
@@ -15,7 +16,7 @@ type Proposal = {
     alternatives: { label: string; url: string; note: string }[];
     component_ids: string[];
   }[];
-  summary: { total_low_usd: number | null; total_high_usd: number | null; priced_count: number; unpriced_count: number; row_count: number; exclusions: string[] };
+  summary: PurchasableBom['summary'] & { total_low_usd: number | null; total_high_usd: number | null; priced_count: number; unpriced_count: number; row_count: number; exclusions: string[] };
   limitations: string[];
 };
 const money = (value: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(value);
@@ -35,7 +36,7 @@ const priceLabels: Record<string, string> = {
   slicer_material_estimate: 'Filament estimate', unpriced: 'Selection required',
   unavailable: 'Supplier unavailable', stale_observation: 'Recheck supplier',
   quote_required: 'Quote required', lab_inventory: 'Lab inventory', quantity_required: 'Quantity required',
-  model_estimate: 'Model estimate', included_in_base: 'Included in base',
+  included_in_base: 'Included in base',
 };
 
 function sourceLabel(value: string) {
@@ -95,10 +96,14 @@ export default function PartsProposal({ project, refreshKey, onSelect, selectedI
   return <div className="parts-proposal" aria-busy={loading}>
     <div className="parts-total">
       <div>
-        <h3>{summary.unpriced_count ? 'Priced items subtotal' : 'Listed parts total'}</h3>
+        <h3>Documented prices subtotal</h3>
         <strong>{range(summary.total_low_usd, summary.total_high_usd)}</strong>
       </div>
-      <p>{summary.row_count} items, USD<br />Planning ranges, not a quote.</p>
+      <dl className="cost-breakdown">
+        <div><dt>Planning allowances</dt><dd>{budgetRange(summary.planning_low, summary.planning_high)}</dd></div>
+        <div><dt>Filament estimate</dt><dd>{summary.printed_line_count ? money(summary.printed_material_subtotal) : 'No printed parts'}</dd></div>
+        <div><dt>Missing purchase prices</dt><dd>{summary.missing_price_count} of {summary.row_count} lines</dd></div>
+      </dl>
     </div>
 
     {components.length > 0 && <section className="parts-component-browser" aria-label="Browse model components">
@@ -138,10 +143,10 @@ export default function PartsProposal({ project, refreshKey, onSelect, selectedI
         const linkLabel = sourceLabels[row.source_kind ?? ''] ?? sourceLabel(row.source_url ?? '');
         const visibleComponents = row.component_ids
           .filter(id => components.some(part => part.id === id));
-        const priceLabel = priceLabels[row.price_kind] ?? 'Estimate';
+        const priceLabel = priceLabels[row.price_kind] ?? 'Price needed';
 
         return (
-          <tr key={row.group_id}>
+          <tr key={row.line_id}>
             <th scope="row">
               <strong>{row.label}</strong>
               {row.selected_product_label && row.selected_product_label !== row.label && (
@@ -173,7 +178,7 @@ export default function PartsProposal({ project, refreshKey, onSelect, selectedI
                 <p>{row.unit_price_basis}</p>
                 {row.evidence.observed_at && <p>
                   {['verified_supplier', 'live_api', 'unavailable', 'stale_observation'].includes(row.price_kind)
-                    ? 'Supplier checked' : row.price_kind === 'model_estimate' ? 'Estimate generated' : 'Reference dated'}
+                    ? 'Supplier checked' : 'Reference dated'}
                   {' '}{new Date(row.evidence.observed_at).toLocaleDateString('en-US', { timeZone: 'UTC' })}
                 </p>}
                 {safeUrl(row.evidence.url) && row.evidence.url !== row.source_url && (
@@ -185,7 +190,7 @@ export default function PartsProposal({ project, refreshKey, onSelect, selectedI
                       <a href={safeUrl(row.reference_observation.url)} target="_blank" rel="noopener noreferrer">{money(row.reference_observation.unit_price_usd)}</a>
                     ) : money(row.reference_observation.unit_price_usd)}
                     {' '}({row.reference_observation.observed_on}); {row.reference_observation.scope}.
-                    {' '}Included within the allowance above, never added again.
+                    {' '}Component reference only.
                   </small>
                 )}
                 {row.alternatives.length > 0 && (
@@ -209,7 +214,12 @@ export default function PartsProposal({ project, refreshKey, onSelect, selectedI
             </th>
             <td>{row.quantity}</td>
             <td>{range(row.unit_price_low_usd, row.unit_price_high_usd)}</td>
-            <td><strong>{range(row.line_total_low_usd, row.line_total_high_usd)}</strong></td>
+            <td><strong>{range(row.line_total_low_usd, row.line_total_high_usd)}</strong>
+              {row.planning_basis && <div><small>Planning allowance · {budgetRange(row.planning_basis.low_usd, row.planning_basis.high_usd)}</small>
+                <small>{row.planning_basis.kind === 'user_declared' ? 'User declaration' : 'Published starting price'} · {row.planning_basis.detail}</small>
+                {safeUrl(row.planning_basis.source_url) && <a href={safeUrl(row.planning_basis.source_url)} target="_blank" rel="noopener noreferrer">Budget source · {row.planning_basis.observed_on}</a>}
+              </div>}
+            </td>
           </tr>
         );
       })}
@@ -217,7 +227,7 @@ export default function PartsProposal({ project, refreshKey, onSelect, selectedI
         <tfoot>
           <tr>
             <th scope="row" colSpan={3}>
-              {summary.unpriced_count ? 'Priced items subtotal' : 'Listed parts total'}
+              Documented prices subtotal
             </th>
             <td>{range(summary.total_low_usd, summary.total_high_usd)}</td>
           </tr>

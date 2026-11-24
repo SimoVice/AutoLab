@@ -52,6 +52,12 @@ and unit while its supplier, ordering code and price remain open. The parts
 workspace and the downloadable purchasing list show these requirements alongside
 identified catalog items and modeled filament costs.
 
+The documented subtotal covers current supplier offers and dated catalog prices for
+the required packs. Filament and planning budgets have separate amounts. A researcher
+can assign a whole-line USD range in chat, for example “Budget USD 80–120 for
+inspection supplies.” A published starting price retains its source, date and open
+upper bound. The parts workspace and downloads show which lines still need a price.
+
 Use chat to compare exact part numbers, select a component, replace it, or allocate
 units already in the lab to a custom or imported requirement. Each choice keeps
 its source, the original requirement and any declared interface constraints.

@@ -745,30 +745,15 @@ def _bench_station_facts(project: dict) -> dict | None:
     facts["equipment_candidates"] = [{key: part[key] for key in (
         "operation", "label", "source_title", "source_url") if key in part}
         for part in station["parts"]]
-    facts["pricing"] = {"market": "US", "currency": "USD", "supplier_status": "not_checked",
-        "model_estimate_status": "not_estimated", "interpretation":
-        "Only revision-matched prices below may be discussed. Candidate references are not "
-        "purchases or verified compatibility. Model allowances are not supplier quotations; "
-        "no current complete machine price is implied. Never use the liquid catalogue."}
-    for namespace, prefix, fields in (
-        ("procurement_report", "supplier", ("report_id", "fetched_at", "expires_at",
-         "is_expired", "known_partial_subtotal", "coverage", "exclusions")),
-        ("cost_estimate", "model_estimate", ("status", "model", "generated_at", "expires_at",
-         "summary", "exclusions")),
-    ):
-        record = project.get(namespace)
-        if not record or (record.get("project_id"), record.get("project_revision")) != (
-                project.get("id"), project.get("revision")):
-            continue
-        details = {key: deepcopy(record[key]) for key in fields if key in record}
-        row_fields = ("group_id", "label", "source_kind", "low_usd", "high_usd", "unit_price",
-                      "line_total", "status", "freshness", "fetched_at", "price_source_url",
-                      "issue", "assumptions")
-        details["items"] = [{key: deepcopy(row[key]) for key in row_fields if key in row}
-            for row in record.get("rows", [])
-            if str(row.get("group_id", "")).startswith("bench-")]
-        facts["pricing"][prefix] = details
-        facts["pricing"][f"{prefix}_status"] = "revision_matched_record"
+    from app.price_estimation import purchase_cost_report
+
+    costs = purchase_cost_report(project, project.get("procurement_report"))
+    facts["pricing"] = {
+        "currency": costs["currency"],
+        "summary": costs["summary"],
+        "items": costs["rows"],
+        "exclusions": costs["exclusions"],
+    }
     return facts
 
 

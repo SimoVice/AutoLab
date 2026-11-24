@@ -20,12 +20,15 @@ PRICE_COLUMNS = [
     "Supplier checked at",
     "Supplier valid until",
     "Supplier price URL",
-    "Model estimate status",
-    "Model low USD",
-    "Model high USD",
-    "Model generated at",
-    "Model valid until",
-    "Model source",
+    "Catalog line USD",
+    "Catalog checked on",
+    "Catalog price URL",
+    "Printed material USD",
+    "Planning low USD",
+    "Planning high USD",
+    "Planning basis",
+    "Planning evidence",
+    "Planning source URL",
     "Price scope and exclusions",
     "Price record exported at",
 ]
@@ -51,15 +54,15 @@ def _money(value):
 
 
 def price_record_for_project(
-    project: dict, procurement: dict | None = None, estimate: dict | None = None
+    project: dict, procurement: dict | None = None, estimate: dict | None = None, *, bom=None
 ) -> dict:
     """Read trusted runtime sidecars only; never fetch or read imported project prices.
 
     Values are dated records, not renewable quotes. Invalid, expired and unmatched
     values are omitted; missing prices are explicit and never written as zero.
     """
+    from app.bom_engine import build_complete_bom
     from app.instructions import _safe_url
-    from app.price_estimation import estimate_for_project
     from app.procurement import initial_procurement_rows, report_for_project
 
     now = datetime.now(UTC)
@@ -74,33 +77,14 @@ def price_record_for_project(
         and _future(report.get("expires_at"), now)
     )
     observed = {row["group_id"]: row for row in report["rows"]} if report else {}
-    try:
-        ranges = estimate_for_project(project, estimate, report, now=now)
-    except (ArithmeticError, KeyError, TypeError, ValueError):
-        ranges = None
-    ranges_current = bool(
-        ranges
-        and ranges.get("estimate_id")
-        and ranges.get("generated_at")
-        and ranges.get("status") not in ("stale", "failed")
-        and _future(ranges.get("expires_at"), now)
-    )
-    modeled = {row["group_id"]: row for row in ranges["rows"]} if ranges else {}
+    if bom is None:
+        bom = build_complete_bom(project, procurement_report=report)
+    amounts = {r["group_id"]: r for r in bom["lines"]}
     rows = {}
-    identity = (
-        "selected_id",
-        "supplier",
-        "sku",
-        "quantity",
-        "pack_size",
-        "pack_count",
-        "price_source_url",
-        "component_ids",
-    )
     for expected in initial_procurement_rows(project):
         key = expected["group_id"]
         observation = observed.get(key, {})
-        value = modeled.get(key, {})
+        line = amounts.get(key, {})
         status = (
             "Unchecked supplier listing"
             if expected.get("catalog_supported")
@@ -113,54 +97,35 @@ def price_record_for_project(
         elif observation.get("status") == "unavailable":
             status = "Supplier item unavailable; price omitted"
         supplier = ["", "", "", "", "", "", "", ""]
-        if (
-            report_current
-            and observation.get("status") == "priced"
-            and observation.get("freshness") == "fresh"
-            and observation.get("fetched_at")
-            and expected.get("catalog_supported")
-            and all(observation.get(field) == expected.get(field) for field in identity)
-            and _money(observation.get("line_total"))
-            and observation.get("line_total", 0) > 0
-        ):
-            status = "Dated supplier observation; not a quote"
+        basis = line.get("planning_basis") or {}
+        catalog = line.get("price_source") == "curated_reference"
+        if line.get("price_source") == "live_api":
+            status = "Dated supplier observation"
             supplier = [
-                _money(observation.get("unit_price")),
-                _money(observation.get("pack_price")),
-                observation.get("pack_size"),
-                observation.get("pack_count"),
-                _money(observation.get("line_total")),
-                observation["fetched_at"],
-                report["expires_at"],
-                _safe_url(observation.get("price_source_url")),
-            ]
-        model_status = (
-            "Expired model estimate omitted"
-            if ranges and ranges.get("status") == "stale"
-            else "Model estimate unavailable; no valid range"
-            if ranges and not ranges_current
-            else "Model estimate unavailable for this revision"
-            if estimate and not ranges
-            else "Not estimated"
-        )
-        model = ["", "", "", "", ""]
-        if ranges_current and value.get("source_kind") == "model_estimate":
-            model_status = "Model planning range; not a supplier price"
-            model = [
-                _money(value.get("low_usd")),
-                _money(value.get("high_usd")),
-                ranges["generated_at"],
-                ranges["expires_at"],
-                ranges.get("model") or "Model",
+                _money(line["unit_price"]),
+                _money(line["pack_price"]),
+                line["pack_size"],
+                line["packs_to_order"],
+                _money(line["line_total"]),
+                line["fetched_at"],
+                report.get("expires_at") if report else None,
+                _safe_url(line.get("source_url")),
             ]
         rows[key] = [
             status,
             *supplier,
-            model_status,
-            *model,
-            "Line totals and model ranges cover the entire listed quantity. "
-            "Excludes shipping, tax, assembly, engineering and validation. "
-            "Dated record only; refresh in the application before budgeting.",
+            _money(line["line_total"]) if catalog else "",
+            line.get("price_checked_on") if catalog else "",
+            line.get("source_url") if catalog else "",
+            _money(line.get("line_total"))
+            if line.get("cost_category") == "printed_material"
+            else "",
+            _money(line.get("planning_low")),
+            _money(line.get("planning_high")),
+            basis.get("kind"),
+            basis.get("detail"),
+            basis.get("source_url"),
+            "Each amount covers the listed quantity. Shipping, tax and labor are excluded.",
             now.isoformat(),
         ]
     return {"project_id": project["id"], "revision": project["revision"], "rows": rows}

@@ -6,7 +6,6 @@ Reviewed references are candidates, not replacements for accepted source geometr
 
 from __future__ import annotations
 
-from decimal import ROUND_HALF_UP, Decimal
 from urllib.parse import urlencode
 
 REVIEWED_ON = "2026-11-03"
@@ -147,96 +146,6 @@ def _source_candidate(row, project):
     )
 
 
-def _money(value):
-    return float(Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
-
-
-def _allowance(row, project):
-    """Explicit engineering budget scenarios; none of these are supplier facts."""
-    gid = row["group_id"]
-    text = (gid + " " + row["label"]).lower()
-    if gid == "tip-rack-options":
-        tips = project.get("tip_rack") or {}
-        if tips.get("kind") == "rim_supported_tip_rack":
-            return 30, 200, (
-                "Proposed $10–150 holder fabrication plus $20–50 for a separate pack "
-                "of purchased tips. Exact tip SKU, pack size and fit need review."
-            )
-        if tips.get("profile_id") == "tipone_96_tiprack_200ul":
-            return 30, 120, (
-                "Planning allowance for one supplier pack of TipOne 200 µL stack racks "
-                "(1111-0200). Confirm the pack size and price with the supplier."
-            )
-        return 40, 160, (
-            "Planning allowance for one supplier pack of Opentrons OT-2 300 µL tips/racks. "
-            "Select rack/refill packaging and obtain its current price."
-        )
-    if gid == "cold-transfer-fridge":
-        return 900, 2200, "One compact laboratory refrigerator; custom door actuation excluded."
-    if gid == "cold-transfer-motion":
-        return (
-            300,
-            1200,
-            (
-                "One custom Cartesian transfer assembly: rails, drives, gripper, bracket, "
-                "local controls and wiring; excludes refrigerator and main workstation."
-            ),
-        )
-    if "upstream-platform:" in gid:
-        return 50, 400, "One labelled kit only; no kit constituents charged separately."
-    if gid == "upstream-platform":
-        return 350, 1000, "Remaining base hardware only; excludes every separately listed kit."
-    if gid == "platform":
-        from app.platform_profiles import platform_profiles
-
-        context = next(p for p in platform_profiles() if p["id"] == "opentrons-ot2")["cost_context"]
-        amount = context["amount"]
-        return (
-            amount,
-            _money(amount * 1.4),
-            (
-                f"OT-2 starts at ${amount:,.0f}; upper bound adds a proposed 40% allowance, "
-                "not a quote. One pipette included in this scenario."
-            ),
-        )
-    if gid == "labware-plate":
-        return (
-            292.99,
-            432.99,
-            (
-                "One Corning 3596 case of 50 at the dated manufacturer listing of $282.99 "
-                "plus a proposed $10–150 custom-holder fabrication allowance. "
-                "This scenario purchases the full case, not a fictitious single-plate vendor unit."
-            ),
-        )
-    if any(word in text for word in ("camera", "inspection-camera")):
-        return 30, 100, "Camera, local holder and cable only; host and arm excluded."
-    if any(word in text for word in ("arm", "gantry", "motion", "robot")):
-        return 100, 900, "Custom mechanism fabrication and basic drives; commissioning excluded."
-    if any(word in text for word in ("printer", "balance", "scale", "scanner", "reader")):
-        return (
-            100,
-            1000,
-            ("Equipment class allowance; exact capacity, accessories and SKU unresolved."),
-        )
-    if any(word in text for word in ("motor", "driver", "controller", "sensor", "probe")):
-        return 10, 80, "One basic electronics/drive item; ratings and connections need selection."
-    if any(word in text for word in ("cool", "peltier", "refrig")):
-        return 40, 180, "One cooling subassembly; thermal performance remains unverified."
-    if "pipette" in text:
-        return 100, 450, "One basic pipetting mechanism and custom mount; calibration excluded."
-    if any(word in text for word in ("frame", "power")):
-        return 60, 300, "One labelled structural or electrical scope, excluding other rows."
-    return (
-        10,
-        150,
-        (
-            "One labelled item/set, simple polymer print or cut stock plus local fixing hardware; "
-            "outsourced fabrication at the upper bound. Material/process remain proposals."
-        ),
-    )
-
-
 def _references(row, group):
     alternatives = [
         {
@@ -289,86 +198,52 @@ def _references(row, group):
 
 
 def build_parts_proposal(
-    project: dict, report: dict | None = None, estimate: dict | None = None
+    project: dict, report: dict | None = None, estimate: dict | None = None, *, bom=None
 ) -> dict:
     """Pure revision-bound view; never fetch sources, mutate state or call a model."""
     from app.bom_engine import build_complete_bom, purchasing_route
-    from app.price_estimation import estimate_for_project
-    from app.procurement import initial_procurement_rows, procurement_groups, report_for_project
+    from app.procurement import initial_procurement_rows, procurement_groups
 
-    # Document previews may carry a legacy partial report. It is not a valid
-    # current observation without expiry/fetch metadata; keep it out of prices.
-    current = (
-        report_for_project(project, report)
-        if (
-            isinstance(report, dict)
-            and report.get("expires_at")
-            and isinstance(report.get("rows"), list)
-        )
-        else None
-    )
-    cost = estimate_for_project(project, estimate, current)
-    priced = {r["group_id"]: r for r in (cost or {}).get("rows", [])}
-    observed = {r["group_id"]: r for r in (current or {}).get("rows", [])}
-    # Older standalone sourcing scenarios supply explicit groups and have no workflow.
-    scopes_available = "workflow" not in project or purchasing_route(project) != "unselected"
-    groups = {g["id"]: g for g in procurement_groups(project)} if scopes_available else {}
+    if bom is None:
+        bom = build_complete_bom(project, procurement_report=report)
+    route = purchasing_route(project)
+    has_groups = route in {"concept_design", "bench_station", "workstation"}
+    groups = {g["id"]: g for g in procurement_groups(project)} if has_groups else {}
+    purchases = {r["group_id"]: r for r in initial_procurement_rows(project)} if groups else {}
     concepts = {
         "concept-" + p["key"]: p for p in (project.get("concept_design") or {}).get("parts", [])
     }
-    concept_lines = {}
-    if concepts:
-        bom = build_complete_bom(project, procurement_report=current)
-        concept_lines = {line["group_id"]: line for line in bom["lines"]}
     rows = []
-    for purchase in initial_procurement_rows(project) if groups else []:
-        gid, quantity = purchase["group_id"], purchase["quantity"]
-        selection = None
-        if line := concept_lines.get(gid):
-            selection = (line.get("part_choice") or {}).get("accepted")
-            quantity = line["quantity"]
-            low = high = line["line_total"]
-            kind = line["price_source"]
-            date = bom["catalog_checked_on"] if kind == "curated_reference" else line["fetched_at"]
-            price_url = line["source_url"]
-            note = {
+    for line in bom["lines"]:
+        gid = line["group_id"]
+        purchase = purchases.get(gid) or {
+            "group_id": gid,
+            "label": line["label"],
+            "selected_id": line["catalog_id"] or gid,
+            "component_ids": line["component_ids"],
+            "price_source_url": line["source_url"],
+        }
+        quantity = line["quantity"]
+        selection = (line.get("part_choice") or {}).get("accepted")
+        kind = line["price_source"]
+        date = line.get("price_checked_on") or line["fetched_at"]
+        price_url = line["source_url"] if line["cost_category"] == "documented" else None
+        note = (
+            line["notes"]
+            or {
                 "unpriced": "Identify the part and its purchasing unit to obtain a price.",
                 "curated_reference": "Dated catalog price for the required number of packs.",
                 "slicer_material_estimate": "Estimated filament cost for this modeled part.",
                 "live_api": "Observed supplier price for the required number of packs.",
                 "unavailable": "The supplier reported this part unavailable at the last check.",
                 "stale_observation": "The previous supplier observation has expired.",
-                "quote_required": "Part selected. A current offer is required.",
-                "quantity_required": "Part selected. Specify the required quantity before pricing.",
-                "lab_inventory": "All units are on hand. Additional purchase cost is zero.",
+                "quote_required": "Request a quote for this configuration.",
+                "quantity_required": "Specify the required quantity before pricing.",
+                "lab_inventory": "All required units are on hand.",
+                "included_in_base": "Included in the platform scope.",
             }[kind]
-        else:
-            low, high, note = _allowance(purchase, project)
-            low, high = low * quantity, high * quantity
-            kind, date, price_url = "planning_allowance", REVIEWED_ON, None
-        item = priced.get(gid, {})
-        observation = observed.get(gid, {})
-        pending_choice = line and kind == "unpriced" and (
-            line.get("part_choice") or line.get("reference_candidate"))
-        offer_usable = not (selection or pending_choice) and kind not in (
-            "unavailable",
-            "stale_observation",
         )
-        if offer_usable and (
-            item.get("low_usd") is not None and item.get("high_usd") is not None
-        ):
-            low, high = item["low_usd"], item["high_usd"]
-            kind = item["source_kind"]
-            note = " ".join([item.get("rationale", ""), *item.get("assumptions", [])])
-            date = item.get("fetched_at") or (cost or {}).get("generated_at")
-            price_url = item.get("price_source_url")
-        elif (offer_usable and observation.get("freshness") == "fresh"
-              and observation.get("line_total") is not None):
-            low = high = observation["line_total"]
-            kind, date = "verified_supplier", observation["fetched_at"]
-            price_url = observation.get("price_source_url")
-            note = "Observed purchase total including required whole packs."
-        source, alternatives, assembly = _references(purchase, groups[gid])
+        source, alternatives, assembly = _references(purchase, groups.get(gid, {}))
         source_label, source_kind = purchase["label"], "selected_project_reference"
         if selection:
             source, source_label, source_kind = (
@@ -421,19 +296,19 @@ def build_parts_proposal(
             assembly += (
                 " This is a sourcing/quotation route; SKU and fabrication process need selection."
             )
+        if (
+            line["kind"] == "commercial_part"
+            and line["catalog_id"]
+            and not selection
+            and gid not in ("tip-rack-options", "labware-plate")
+        ):
+            source, source_label, source_kind = line["source_url"], line["label"], "catalog"
         if project.get("design", {}).get("platform") and gid == "platform":
             source = "https://opentrons.com/products/ot-2-robot"
-            # Keep current supplier/model facts if present. The offline scenario
-            # otherwise uses the manufacturer's advertised entry configuration.
-            if kind == "planning_allowance":
-                price_url = "https://opentrons.com/products/categories/robots"
-        if project.get("design", {}).get("platform") and gid == "pipettes":
-            low = high = 0
-            kind, date, price_url = "included_in_base", REVIEWED_ON, None
-            note = (
-                "One pipette is included in the OT-2 base scenario; do not charge it twice. "
-                "Additional channels/ranges require a separate quote."
-            )
+        if line["kind"] == "3d_printed":
+            source_label = line["label"]
+        if gid == "labware-plate" and line["kind"] == "commercial_part" and line["catalog_id"]:
+            source, source_label, source_kind = line["source_url"], line["label"], "catalog"
         part = concepts.get(gid, {})
         if part.get("assembly"):
             assembly = part["assembly"] + " " + assembly
@@ -441,25 +316,25 @@ def build_parts_proposal(
             assembly = " ".join(project["bench_station"].get("steps", [])) + " " + assembly
         row = {
             "group_id": gid,
-            "selected_id": purchase["selected_id"],
-            "label": groups[gid].get("label") or purchase["label"],
+            "line_id": line["line_id"],
+            "selected_id": line["catalog_id"] or purchase["selected_id"],
+            "label": line["label"],
             "selected_product_label": source_label,
             "source_kind": source_kind,
             "quantity": quantity,
-            "unit": part.get("unit") or "item/set",
-            "component_ids": purchase["component_ids"],
-            "unit_price_low_usd": _money(low / quantity) if low is not None else None,
-            "unit_price_high_usd": _money(high / quantity) if high is not None else None,
-            "line_total_low_usd": _money(low) if low is not None else None,
-            "line_total_high_usd": _money(high) if high is not None else None,
+            "unit": (line.get("requirement") or {}).get("unit") or line["unit"],
+            "component_ids": line["component_ids"],
+            "unit_price_low_usd": line["unit_price"],
+            "unit_price_high_usd": line["unit_price"],
+            "line_total_low_usd": line["line_total"],
+            "line_total_high_usd": line["line_total"],
             "price_kind": kind,
             "price_note": note,
+            "cost_category": line["cost_category"],
+            "planning_basis": line.get("planning_basis"),
             "source_url": source,
-            "price_source_url": price_url if kind == "verified_supplier" else None,
-            "unit_price_basis": (
-                "Derived allocation of the entire purchase-group budget, not a quoted unit price; "
-                "whole packs and scoped accessories are included in the line total."
-            ),
+            "price_source_url": price_url,
+            "unit_price_basis": "Purchase unit and whole-pack quantity from the itemized BOM.",
             "evidence": {
                 "kind": kind,
                 "observed_at": date,
@@ -477,6 +352,12 @@ def build_parts_proposal(
                 }
             ],
         }
+        if line["kind"] == "3d_printed" and gid in (
+            "labware-plate",
+            "labware-rack",
+            "tip-rack-options",
+        ):
+            row["source_url"] = FABRICATION_URL
         if gid == "upstream-platform":
             row["label"] = "Jubilee base remainder (listed kits excluded)"
         if selection:
@@ -489,7 +370,7 @@ def build_parts_proposal(
                 unit_price_high_usd=line["unit_price"],
                 unit_price_basis="Purchase unit price for the selected component when available.",
             )
-        for cid in purchase["component_ids"]:
+        for cid in dict.fromkeys([*line["component_ids"], *purchase["component_ids"]]):
             if cid in _fabrication_targets(project):
                 row["fabrication_url"] = (
                     f"/api/projects/{project['id']}/parts/{cid}/model.step"
@@ -521,7 +402,7 @@ def build_parts_proposal(
                 f"/api/projects/{project['id']}/concept/parts/{part['key']}.step"
                 f"?revision={project['revision']}"
             )
-        if source in (CAMERA_URL, GRIPPER_URL):
+        if source == GRIPPER_URL or (source == CAMERA_URL and not price_url):
             row["reference_observation"] = {
                 "unit_price_usd": 29.25 if source == CAMERA_URL else 34.99,
                 "observed_on": REVIEWED_ON,
@@ -529,27 +410,26 @@ def build_parts_proposal(
                 "scope": "Camera board only, excluding host, holder and cables."
                 if source == CAMERA_URL
                 else (
-                    "Gripper kit with servo only; no separate charge above the gantry allowance."
+                    "Gripper kit with servo only. The complete gantry requires a quote."
                 ),
                 "included_in_total": False,
             }
         rows.append(row)
-    priced_rows = [row for row in rows if row["line_total_low_usd"] is not None]
+    totals = bom["summary"]
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "project_id": project["id"],
         "project_revision": project["revision"],
         "currency": "USD",
         "rows": rows,
         "summary": {
-            "total_low_usd": _money(sum(r["line_total_low_usd"] for r in priced_rows))
-            if priced_rows else None,
-            "total_high_usd": _money(sum(r["line_total_high_usd"] for r in priced_rows))
-            if priced_rows else None,
-            "priced_count": len(priced_rows),
-            "unpriced_count": len(rows) - len(priced_rows),
+            **totals,
+            "total_low_usd": totals["documented_subtotal"],
+            "total_high_usd": totals["documented_subtotal"],
+            "priced_count": totals["documented_count"],
+            "unpriced_count": totals["missing_price_count"],
             "row_count": len(rows),
-            "supplier_priced_count": sum(r["price_kind"] == "verified_supplier" for r in rows),
+            "supplier_priced_count": totals["live_api_priced_count"],
             "exclusions": [
                 "Shipping, sales tax, duties, engineering, assembly labor, validation and support."
             ],
@@ -557,7 +437,7 @@ def build_parts_proposal(
         "limitations": [
             "Planning allowances are proposed budgets, not vendor quotes or price observations.",
             "Reference products do not change accepted geometry or establish compatibility.",
-            "Each row is one purchase scope; alternatives are excluded from the total.",
+            "Each row covers one BOM line. Alternatives are excluded from the subtotal.",
             "The listed-scope total is not a complete commissioned-machine quotation.",
         ],
     }
@@ -565,26 +445,22 @@ def build_parts_proposal(
 
 def cold_transfer_candidate_rows(project: dict) -> list[dict]:
     """Discuss sourced options without adding hardware or altering project state."""
-    scenario = {
-        "id": project["id"],
-        "revision": project["revision"],
-        "sourcing": {
-            "groups": [
-                {
-                    "id": gid,
-                    "quantity": 1,
-                    "component_ids": [],
-                    "selected_id": "proposal",
-                    "options": [{"id": "proposal", "label": label, "source_url": None}],
-                }
-                for gid, label in (
-                    ("cold-transfer-fridge", "Dedicated laboratory refrigerator candidate"),
-                    ("cold-transfer-motion", "Custom plate transfer gantry and gripper proposal"),
-                )
-            ]
-        },
-    }
-    return build_parts_proposal(scenario)["rows"]
+    rows = []
+    for gid, label in (
+        ("cold-transfer-fridge", "Accucold ARS1MLDL2B refrigerator candidate"),
+        ("cold-transfer-motion", "ServoCity 3219-0001-0002 reference + custom Cartesian gantry"),
+    ):
+        url, alternatives, instruction = _references({"group_id": gid}, {})
+        rows.append({
+            "group_id": gid, "label": label, "selected_product_label": label, "source_url": url,
+            "price_kind": "unpriced", "line_total_low_usd": None, "line_total_high_usd": None,
+            "price_note": "A quote is needed for this complete purchase scope.",
+            "evidence": {"kind": "unpriced", "url": None, "observed_at": None},
+            "alternatives": alternatives,
+            "assembly_steps": [{"title": label, "instruction": instruction,
+                                "url": GRIPPER_GUIDE if gid == "cold-transfer-motion" else url}],
+        })
+    return rows
 
 
 def render_part_model(project: dict, component_id: str, format: str) -> bytes:

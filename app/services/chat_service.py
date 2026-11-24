@@ -525,7 +525,7 @@ async def handle_chat_message(project_id: str, request: MessageRequest) -> dict 
                     "purchases or verified compatibility. Refresh US prices for supplier data.",
                     "show_components": "Modules and sourcing references lists the current station "
                     "equipment and supplies. Project cost separates supplier observations "
-                    "from model estimates in USD.",
+                    "from recorded planning allowances and filament estimates in USD.",
                     "show_files": "Download layout (SVG), plan (JSON) and assisted runner (Python) "
                     "from the station panel. These are schematic planning and human-operated "
                     "checkpoints, not fabrication CAD or hardware control.",

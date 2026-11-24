@@ -165,7 +165,7 @@ def compile_station(
             'cables, open covers, reach, safety and bench depth require verification.',
             'Manual handoffs and human decisions are required. No control integration, '
             'automatic data association, throughput or laboratory performance is validated.',
-            'The plan contains sourcing candidates; live prices and model estimates are '
+            'The plan contains sourcing candidates. Documented prices and planning budgets are '
             'shown in the site pricing panel. Parts are selection requirements, not '
             'quotations or a complete procurement BOM; machine compatibility is unverified.',
             'Linked products are planning candidates. Their dimensions are not used in '

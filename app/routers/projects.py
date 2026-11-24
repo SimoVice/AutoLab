@@ -466,18 +466,15 @@ async def download_custom_asset(project_id: str, asset: str, revision: int) -> R
         design = session.project.get("concept_design")
         if design is None:
             raise HTTPException(404, "Generate a custom assembly first.")
-        price_record = (
-            price_record_for_project(
-                session.project, session.procurement_report, session.cost_estimate
-            )
-            if asset in ("package.zip", "parts.csv")
-            else None
-        )
+        price_record = None
         purchasing_bom = None
         if asset in ("package.zip", "parts.csv"):
             purchasing_bom = build_complete_bom(
                 session.project, lab_profile=_active_lab_profile(),
                 procurement_report=report_for_project(session.project, session.procurement_report),
+            )
+            price_record = price_record_for_project(
+                session.project, session.procurement_report, bom=purchasing_bom
             )
     try:
         data, mime = await run_in_threadpool(
@@ -760,7 +757,16 @@ async def bench_station_plan(project_id: str, revision: int) -> dict:
         station = session.project.get("bench_station")
         if not station:
             raise HTTPException(status_code=404, detail="No bench station concept exists.")
-        return {"project_id": project_id, "revision": revision, **deepcopy(station)}
+        from app.bom_engine import build_complete_bom
+        from app.procurement import report_for_project
+
+        report = report_for_project(session.project, session.procurement_report)
+        return {
+            "project_id": project_id,
+            "revision": revision,
+            **deepcopy(station),
+            "purchasing_bom": build_complete_bom(session.project, procurement_report=report),
+        }
 
 
 @router.get("/api/projects/{project_id}/bench-station/run.py")

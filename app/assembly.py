@@ -970,10 +970,19 @@ def build_extensions_md(project: dict) -> bytes:
 
 def build_document_files(project: dict, procurement: dict | None = None) -> dict[str, bytes]:
     """Build all standalone document bytes for the snapshot."""
+    from app.bom_engine import bom_to_csv, bom_to_json, build_complete_bom
+    from app.hardware_compatibility import evaluate_hardware_compatibility
     from app.instructions import build_instruction_files
+    from app.lab_profile import load_lab_profile
+    from app.price_estimation import cost_report_from_bom, estimate_csv
+    from app.procurement import report_for_project
+
+    report = procurement if procurement is not None else project.get("procurement_report")
+    active_prof = load_lab_profile()
+    complete_bom = build_complete_bom(project, procurement_report=report, lab_profile=active_prof)
 
     files: dict[str, bytes] = {
-        **build_instruction_files(project, procurement),
+        **build_instruction_files(project, procurement, bom=complete_bom),
         "bill-of-materials.csv": build_bom_csv(project),
         "preparation.csv": build_preparation_csv(project),
         "automation/preview.py": build_preview_source(project),
@@ -981,26 +990,15 @@ def build_document_files(project: dict, procurement: dict | None = None) -> dict
         "extension-plan.json": build_extension_plan(project),
         "extensions.md": build_extensions_md(project),
     }
-    report = procurement if procurement is not None else project.get("procurement_report")
-    if project.get("cost_estimate"):
-        from app.price_estimation import estimate_csv, estimate_for_project
-
-        cost = estimate_for_project(project, project["cost_estimate"], report)
-        if cost is not None:
-            files["cost-estimate.json"] = json.dumps(cost, indent=2, allow_nan=False).encode(
-                "utf-8"
-            )
-            files["cost-estimate.csv"] = estimate_csv(cost)
-            files["README.md"] += (
-                "\n## Project cost planning range\n\n"
-                "cost-estimate.json and cost-estimate.csv preserve this revision's clearly "
-                "labelled "
-                "model planning ranges, assumptions, verified subtotals and unknown purchase "
-                "groups. "
-                "Group totals already include quantity and pack counts; do not multiply them "
-                "again. "
-                "They are not supplier quotes, verified compatibility or a complete-machine BOM.\n"
-            ).encode("utf-8")
+    cost = cost_report_from_bom(complete_bom, report_for_project(project, report))
+    files["cost-estimate.json"] = json.dumps(cost, indent=2, allow_nan=False).encode("utf-8")
+    files["cost-estimate.csv"] = estimate_csv(cost)
+    files["README.md"] += (
+        "\n## Parts and costs\n\n"
+        "cost-estimate.json and cost-estimate.csv list documented purchases, planning allowances, "
+        "filament estimates and outstanding prices for this revision. Each planning amount "
+        "covers the entire listed quantity.\n"
+    ).encode("utf-8")
     if report:
         from app.procurement import report_csv, report_json
 
@@ -1081,17 +1079,6 @@ def build_document_files(project: dict, procurement: dict | None = None) -> dict
             b"in chat; no compatible mount or hardware control is claimed. "
             b"This platform has no physical simulation adapter.\n"
         )
-    from app.bom_engine import bom_to_csv, bom_to_json, build_complete_bom
-    from app.hardware_compatibility import evaluate_hardware_compatibility
-    from app.lab_profile import has_lab_profile_data, load_lab_profile
-
-    loaded_prof = load_lab_profile()
-    active_prof = loaded_prof if has_lab_profile_data(loaded_prof) else None
-    complete_bom = build_complete_bom(
-        project,
-        procurement_report=project.get("procurement_report"),
-        lab_profile=active_prof,
-    )
     compat = evaluate_hardware_compatibility(project, complete_bom, lab_profile=active_prof)
     files["bom/purchasable-bom.json"] = bom_to_json(complete_bom)
     files["bom/purchasable-bom.csv"] = bom_to_csv(complete_bom)

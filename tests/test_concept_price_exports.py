@@ -13,10 +13,9 @@ import pytest
 from test_custom_project_pricing import supplier_fixture
 from test_custom_project_routes import client as client
 from test_custom_project_routes import install, project_fixture
-from test_price_estimation import estimate
+from test_price_estimation import declare
 
 import app.api as api
-from app import price_estimation as prices
 from app import procurement
 from app.concept_files import render_asset
 
@@ -43,7 +42,7 @@ def current_sidecars(monkeypatch, project):
         procurement.PRODUCTS, "pico-h", replace(procurement.PRODUCTS["pico-h"], pack_size=2)
     )
     report = asyncio.run(procurement.refresh_procurement(project))
-    ranges, _ = estimate(project, report=report)
+    ranges = {"project_revision": project["revision"], "rows": [{"low_usd": 99999}]}
     session = api._sessions[project["id"]]
     session.procurement_report, session.cost_estimate = report, ranges
     return report, ranges
@@ -54,12 +53,15 @@ def forbid_external_calls(monkeypatch):
         pytest.fail("Downloading a package must not fetch prices or call a model.")
 
     monkeypatch.setattr(procurement, "fetch_product", forbidden)
-    monkeypatch.setattr(prices, "estimate_project_prices", forbidden)
     monkeypatch.setattr(api, "refresh_procurement", forbidden)
 
 
-def test_standalone_and_zip_export_supplier_packs_and_model_ranges_separately(client, monkeypatch):
-    project = project_fixture()
+def test_standalone_and_zip_export_supplier_packs_and_declared_ranges_separately(
+    client, monkeypatch
+):
+    project = declare(
+        project_fixture(), "concept:rail_base", 10, 25, "Allow USD 10-25 for rail stock."
+    )
     install(project)
     report, ranges = current_sidecars(monkeypatch, project)
     original = deepcopy((project, report, ranges))
@@ -74,15 +76,14 @@ def test_standalone_and_zip_export_supplier_packs_and_model_ranges_separately(cl
     assert board["Supplier checked at"] == report["rows"][2]["fetched_at"]
     assert board["Supplier price URL"] == procurement.PRODUCTS["pico-h"].url
     assert board["Supplier valid until"] == report["expires_at"]
-    assert board["Model low USD"] == board["Model high USD"] == ""
-    assert "not a quote" in board["Supplier price status"]
+    assert board["Planning low USD"] == board["Planning high USD"] == ""
+    assert "supplier observation" in board["Supplier price status"]
     rail = records["Rail base"]
     assert rail["Supplier item USD"] == rail["Supplier line USD"] == ""
-    assert rail["Model low USD"] == "10.00" and rail["Model high USD"] == "25.00"
-    assert rail["Model generated at"] == ranges["generated_at"]
-    assert rail["Model valid until"] == ranges["expires_at"]
-    assert rail["Model source"] == ranges["model"]
-    assert "entire listed quantity" in rail["Price scope and exclusions"]
+    assert rail["Planning low USD"] == "10.00" and rail["Planning high USD"] == "25.00"
+    assert rail["Planning basis"] == "user_declared"
+    assert rail["Planning evidence"] == "Allow USD 10-25 for rail stock."
+    assert rail["Catalog line USD"] == ""
     with zipfile.ZipFile(io.BytesIO(downloaded(client, project, asset="package.zip"))) as archive:
         archived = by_name(archive.read("parts.csv"))
         for name, row in records.items():
@@ -103,16 +104,13 @@ def test_standalone_and_zip_export_supplier_packs_and_model_ranges_separately(cl
     assert (project, report, ranges) == original
 
 
-def test_model_group_totals_are_not_multiplied_by_supply_quantity(client, monkeypatch):
-    project = project_fixture()
+def test_supplier_catalog_and_allowances_use_separate_columns(client):
+    project=project_fixture()
     install(project)
-    ranges, _ = estimate(project)
-    api._sessions[project["id"]].cost_estimate = ranges
-    forbid_external_calls(monkeypatch)
     board = by_name(downloaded(client, project))["Pico H controller boards"]
-    assert board["Quantity"] == "3"
-    assert board["Model low USD"] == "10.00" and board["Model high USD"] == "25.00"
-    assert board["Supplier price status"] == "Unchecked supplier listing"
+    assert board["Quantity"] == "3" and board["Catalog line USD"] == "15.00"
+    assert board["Supplier line USD"] == board["Planning low USD"] == ""
+    assert board["Catalog checked on"] and board["Catalog price URL"]
 
 
 @pytest.mark.parametrize("stale", ["revision", "expiry", "scope"])
@@ -135,26 +133,22 @@ def test_stale_or_expired_records_cannot_supply_price_figures(client, monkeypatc
     records = by_name(downloaded(client, project))
     board = records["Pico H controller boards"]
     assert board["Supplier item USD"] == board["Supplier line USD"] == ""
-    assert all(row["Model low USD"] == row["Model high USD"] == "" for row in records.values())
+    assert all(row["Planning low USD"] == row["Planning high USD"] == ""
+               for row in records.values())
 
 
 def test_unchecked_missing_and_failed_ranges_remain_explicit_and_empty(client, monkeypatch):
     project = project_fixture()
     install(project)
-    failed, _ = estimate(project)
-    failed["status"] = "failed"
+    failed = {"status":"failed","rows":[{"low_usd":19999}]}
     forbid_external_calls(monkeypatch)
-    records = by_name(downloaded(client, project))
-    assert (
-        records["Pico H controller boards"]["Supplier price status"] == "Unchecked supplier listing"
-    )
-    assert "Missing price" in records["Rail base"]["Supplier price status"]
-    assert all(row["Model estimate status"] == "Not estimated" for row in records.values())
-    assert all(row["Supplier line USD"] == row["Model low USD"] == "" for row in records.values())
     api._sessions[project["id"]].cost_estimate = failed
     records = by_name(downloaded(client, project))
-    assert all(row["Model low USD"] == row["Model high USD"] == "" for row in records.values())
-    assert all("unavailable" in row["Model estimate status"] for row in records.values())
+    assert "Missing price" in records["Rail base"]["Supplier price status"]
+    assert all(
+        row["Planning low USD"] == row["Planning high USD"] == "" for row in records.values()
+    )
+    assert "19999" not in str(records)
 
 
 def test_foreign_project_payload_prices_do_not_become_verified_sidecars(client, monkeypatch):
@@ -166,7 +160,8 @@ def test_foreign_project_payload_prices_do_not_become_verified_sidecars(client, 
     api._sessions[project["id"]].cost_estimate = None
     forbid_external_calls(monkeypatch)
     records = by_name(downloaded(client, project))
-    assert all(row["Supplier line USD"] == row["Model low USD"] == "" for row in records.values())
+    assert all(row["Supplier line USD"] == row["Planning low USD"] == ""
+               for row in records.values())
     saved = client.get(
         f"/api/projects/{project['id']}/snapshot", params={"revision": project["revision"]}
     )
@@ -174,7 +169,8 @@ def test_foreign_project_payload_prices_do_not_become_verified_sidecars(client, 
     reopened = client.post("/api/projects/open", content=saved.content)
     assert reopened.status_code == 201, reopened.text
     records = by_name(downloaded(client, reopened.json()["project"]))
-    assert all(row["Supplier line USD"] == row["Model low USD"] == "" for row in records.values())
+    assert all(row["Supplier line USD"] == row["Planning low USD"] == ""
+               for row in records.values())
 
 
 def test_renderer_without_sidecars_preserves_its_original_unpriced_contract():

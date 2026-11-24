@@ -53,6 +53,7 @@ def test_openai_tool_schemas_are_strict_and_complete():
         "adapt_open_hardware_project",
         "inspect_upstream_project",
         "generate_purchasable_bom",
+        "set_line_budget",
         "choose_requirement_part",
         "check_hardware_compatibility",
         "search_supplier_components",

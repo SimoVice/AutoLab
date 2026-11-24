@@ -405,7 +405,17 @@ def evaluate_hardware_compatibility(
 
         req_csi = sum(int(cam["specs"].get("csi_ports_required") or 0) for cam in cameras)
         avail_csi = sum(int(ctrl["specs"].get("csi_ports") or 0) for ctrl in controllers)
-        if req_csi > avail_csi:
+        if req_csi and not controllers:
+            checks.append(
+                _entry(
+                    "camera-csi-interface",
+                    "controller_io",
+                    "warning",
+                    "Camera host interface needs selection",
+                    f"The camera requires {req_csi} CSI-2 port(s). Specify a compatible host.",
+                )
+            )
+        elif req_csi > avail_csi:
             checks.append(
                 _entry(
                     "camera-csi-interface",

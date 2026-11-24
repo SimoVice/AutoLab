@@ -12,7 +12,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.bom_engine import bom_to_csv, bom_to_json, build_complete_bom, purchasing_route
 from app.hardware_compatibility import evaluate_hardware_compatibility
 from app.lab_profile import has_lab_profile_data, load_lab_profile
-from app.model_client import using_model
 from app.procurement import (
     refresh_procurement,
     report_csv,
@@ -145,82 +144,26 @@ async def get_procurement(project_id: str, revision: int) -> dict:
 
 @router.get("/api/projects/{project_id}/cost-estimate")
 async def get_cost_estimate(project_id: str, revision: int) -> dict:
-    from app.price_estimation import estimate_for_project, unestimated_cost
+    from app.price_estimation import purchase_cost_report
 
     session = api_hook("session_for", session_for)(project_id)
     async with session.model_lock():
         check_revision(session.project, revision)
-        estimate = estimate_for_project(
-            session.project, session.cost_estimate, session.procurement_report
-        )
-        current = bool(
-            estimate
-            and estimate.get("status") != "stale"
-            and (not estimate.get("pending_scope_group_ids") or estimate.get("retry_required"))
-        )
         return {
-            "estimate": estimate
-            or unestimated_cost(session.project, session.procurement_report),
-            "state": (
-                "current"
-                if current
-                else (
-                    "needs_estimate"
-                    if estimate and estimate.get("pending_scope_group_ids")
-                    else "not_estimated"
-                )
+            "estimate": purchase_cost_report(
+                session.project, session.procurement_report, lab_profile=_active_lab_profile()
             ),
+            "state": "current",
         }
 
 
 @router.post("/api/projects/{project_id}/cost-estimate")
-async def refresh_cost_estimate(
-    project_id: str, payload: CostEstimateRequest, request: Request
-) -> dict:
-    from app.price_estimation import estimate_for_project, estimate_project_prices
-
-    session = api_hook("session_for", session_for)(project_id)
-
-    async def operation():
-        async with session.estimate_lock:
-            async with session.model_lock():
-                check_revision(session.project, payload.project_revision)
-                if not any(
-                    session.project.get(k)
-                    for k in ("engineering_design", "bench_station", "concept_design")
-                ):
-                    raise HTTPException(
-                        status_code=409, detail="Develop a design before estimating its cost."
-                    )
-                cached = estimate_for_project(
-                    session.project, session.cost_estimate, session.procurement_report
-                )
-                if (
-                    not payload.force
-                    and cached
-                    and cached.get("status") in ("ready", "partial")
-                    and not cached.get("pending_scope_group_ids")
-                ):
-                    return {"estimate": cached, "state": "current"}
-                project = deepcopy(session.project)
-                report = deepcopy(session.procurement_report)
-                model = session.model
-            with using_model(model):
-                if cached and (not payload.force or cached.get("retry_required")):
-                    estimate = await estimate_project_prices(project, report, previous=cached)
-                else:
-                    estimate = await estimate_project_prices(project, report)
-            async with session.model_lock():
-                check_revision(session.project, payload.project_revision)
-                if session.procurement_report != report:
-                    raise HTTPException(
-                        status_code=409, detail="Supplier prices changed. Refresh the estimate."
-                    )
-                session.cost_estimate = estimate
-                return {"estimate": deepcopy(estimate), "state": "current"}
-
-    connected = api_hook("_refresh_procurement_connected", _refresh_procurement_connected)
-    return await connected(request, operation())
+async def refresh_cost_estimate(project_id: str, payload: CostEstimateRequest) -> dict:
+    # Retain the revision-checked refresh entry point for saved clients.
+    result = await get_cost_estimate(project_id, payload.project_revision)
+    if result["estimate"]["status"] == "design_required":
+        raise HTTPException(status_code=409, detail="Develop a design before estimating its cost.")
+    return result
 
 
 @router.post("/api/projects/{project_id}/procurement/refresh")

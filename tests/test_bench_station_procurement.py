@@ -1,12 +1,11 @@
 """Offline bench purchase scopes and model allowances, never supplier evidence."""
 
 import asyncio
-import json
 from copy import deepcopy
 from itertools import combinations
 
 import pytest
-from test_price_estimation import estimate
+from test_price_estimation import declare
 
 from app import price_estimation as prices
 from app import procurement
@@ -63,33 +62,20 @@ def test_only_reviewed_camera_candidate_can_fetch_catalog(monkeypatch):
             assert row['freshness'] == 'unverified'
 
 
-def test_station_allowances_use_one_bounded_call_and_exclude_legacy_bom():
-    project = station_project(['weigh', 'print_label'])
-    original = deepcopy(project)
-    result, calls = estimate(project)
-    assert project == original and len(calls) == 1
-    inputs = json.loads(calls[0]['messages'][1]['content'])
-    assert {r['group_id'] for r in inputs['rows']} == {
-        'bench-weigh-equipment', 'bench-weigh-supplies',
-        'bench-print_label-equipment', 'bench-print_label-supplies',
-    }
-    assert all(row['allowance_basis']['understood'] for row in inputs['rows'])
-    assert all(row['is_candidate'] for row in inputs['rows'])
-    assert result['status'] == 'ready'
-    assert result['summary']['project_total_low_usd'] == 40
-    assert result['summary']['project_total_high_usd'] == 100
-    assert all(row['price_source_url'] is None for row in result['rows'])
-    assert prices.estimate_for_project(project, result) == result
-    revised = deepcopy(project)
-    revised['revision'] += 1
-    revised['bench_station'] = compile_station(StationProposal(operations=['inspect']))
-    assert prices.estimate_for_project(revised, result) is None
+def test_station_prices_follow_selected_equipment_and_declared_supplies():
+    project = station_project(["weigh", "inspect"])
+    base = prices.purchase_cost_report(project)
+    assert (base["summary"]["documented_subtotal"], base["summary"]["planning_low"]) == (25, None)
+    assert base["summary"]["printed_line_count"] == 0
+    project = declare(project, "bench-inspect-supplies")
+    result = prices.purchase_cost_report(project)
+    assert result["summary"]["documented_subtotal"] == 25
+    assert result["summary"]["planning_low"] == 80 and result["summary"]["planning_high"] == 120
+    assert result["summary"]["missing_price_count"] == 3
+    assert all(row["group_id"].startswith("bench-") for row in result["rows"])
 
 
-def test_station_provider_failure_never_becomes_a_zero_cost_quote():
-    project = station_project(['read_barcode'])
-    result, calls = estimate(project, http_status=503)
-    assert len(calls) == 1 and result['status'] == 'failed'
-    assert result['summary']['project_total_low_usd'] is None
-    assert result['summary']['project_total_high_usd'] is None
-    assert all(row['low_usd'] is None and row['high_usd'] is None for row in result['rows'])
+def test_station_without_observations_or_declarations_has_no_amount():
+    result = prices.purchase_cost_report(station_project(["weigh", "read_barcode"]))
+    assert result["summary"]["documented_subtotal"] is result["summary"]["planning_low"] is None
+    assert result["summary"]["missing_price_count"] == 4

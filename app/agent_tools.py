@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.bench_station import MODULES as STATION_MODULES
 from app.bench_station import StationProposal, compile_station
+from app.budget_allowances import SetLineBudgetArgs
 from app.design_sources import reference_library, resolve_reference
 from app.domain import apply_update
 from app.engineering import EngineeringUpdate, apply_engineering_update, state_for
@@ -535,6 +536,13 @@ _TOOL_SPECS: list[tuple[str, str, type[BaseModel]]] = [
         "supplier SKUs/MPNs, lead times, analytical FDM filament/print-time estimates, explicit "
         "shipping/tax exclusions, and hardware compatibility status.",
         GeneratePurchasableBomArgs,
+    ),
+    (
+        "set_line_budget",
+        "Record the user's declared whole-line USD planning amount or range for one unpriced "
+        "BOM line_id. Quote the user's own declaration verbatim. Use equal bounds for one "
+        "amount or null budget to remove a declaration on request.",
+        SetLineBudgetArgs,
     ),
     (
         "choose_requirement_part",
@@ -2349,6 +2357,51 @@ def _tool_inspect_upstream_project(
     )
 
 
+def _tool_set_line_budget(args: SetLineBudgetArgs, ctx: ToolContext) -> ToolResult:
+    from app.bom_engine import build_complete_bom
+
+    name = "set_line_budget"
+    lines = build_complete_bom(ctx.project, procurement_report=ctx.procurement_report)["lines"]
+    line = next((row for row in lines if row["line_id"] == args.line_id), None)
+    if line is None:
+        return _fail(name, "designing", "Choose a current BOM line.")
+    if args.budget and (
+        args.budget.user_quote not in (ctx.user_message or "")
+        or line["cost_category"] != "unpriced"
+    ):
+        return _fail(
+            name, "designing", "Use an unpriced line and the user's exact budget declaration."
+        )
+    record = (
+        {**args.budget.model_dump(), "scope_signature": line["budget_scope_signature"]}
+        if args.budget
+        else None
+    )
+    previous = (ctx.project.get("budget_allowances") or {}).get(args.line_id)
+    changed = previous != record
+    if changed:
+        from app.project_storage import make_snapshot
+
+        project = deepcopy(ctx.project)
+        records = project.setdefault("budget_allowances", {})
+        if record:
+            records[args.line_id] = record
+        else:
+            records.pop(args.line_id, None)
+        project["revision"] += 1
+        make_snapshot(project, [])
+        ctx.project = project
+        ctx.mutated = True
+    return ToolResult(
+        tool=name,
+        ok=True,
+        stage="designing",
+        mutated=changed,
+        summary="Updated the planning budget for this line.",
+        data={"line_id": args.line_id, "budget": record},
+    )
+
+
 def _tool_choose_requirement_part(args: ChoosePartArgs, ctx: ToolContext) -> ToolResult:
     from app.bom_engine import build_complete_bom, load_purchasable_catalog
     from app.design_workflow import machine_signature, refresh_workflow
@@ -2477,18 +2530,23 @@ async def _tool_generate_purchasable_bom(
     )
     compat = evaluate_hardware_compatibility(ctx.project, bom, lab_profile=ctx.lab_profile)
     s = bom["summary"]
-    msg = (
-        f"Generated {s['line_count']}-item BOM in {bom['currency']} "
-        f"(estimated subtotal={s['total_estimated_cost']:.2f} {bom['currency']}, "
-        f"unresolved={s['unresolved_count']}, "
-        f"live_api={s['live_api_subtotal']:.2f}, ref={s['reference_catalog_subtotal']:.2f}, "
-        f"printed={s['printed_material_subtotal']:.2f}, {s['total_filament_mass_g']} g / "
-        f"{s['total_print_time_minutes']} min, compatibility={compat['status']})."
-    )
+    currency = bom["currency"]
+    documented = s["documented_subtotal"]
     if bom["status"] == "design_required":
         msg = "Select or develop a hardware design to generate its parts list."
-    elif s["line_count"] == s["unpriced_placeholder_count"]:
+    elif documented is None:
         msg = "No current price is available for the listed requirements."
+    else:
+        msg = (f"Documented prices subtotal {documented:,.2f} {currency} across "
+               f"{s['documented_count']} of {s['line_count']} lines. "
+               f"{s['missing_price_count']} lines need a purchase price.")
+    if s["planning_count"]:
+        low, high = s["planning_low"], s["planning_high"]
+        allowance = f"from {low:,.2f}" if high is None else f"{low:,.2f}–{high:,.2f}"
+        msg += f" Separate planning allowances {allowance} {currency}."
+    if s["printed_line_count"]:
+        filament = s["printed_material_subtotal"]
+        msg += f" Filament estimate for {s['printed_line_count']} lines {filament:,.2f} {currency}."
     if s["unavailable_count"] or s["stale_offer_count"]:
         msg += (f" Supplier offers unavailable: {s['unavailable_count']}. "
                 f"Observations awaiting a new check: {s['stale_offer_count']}.")
@@ -2532,6 +2590,8 @@ async def _tool_generate_purchasable_bom(
                     "purchase_quantity": ln.get("purchase_quantity"),
                     "packs_to_order": ln["packs_to_order"],
                     "line_total": ln["line_total"],
+                    "cost_category": ln["cost_category"],
+                    "planning_basis": ln.get("planning_basis"),
                     "price_source": ln["price_source"],
                     "availability": ln["availability"],
                     "fetched_at": ln["fetched_at"],
@@ -2540,8 +2600,11 @@ async def _tool_generate_purchasable_bom(
                 }
                 for ln in bom["lines"][:40]
             ],
-            "additional_requirements": [{"line_id": ln["line_id"], "label": ln["label"]}
-                                        for ln in bom["lines"][40:] if ln.get("requirement")],
+            "additional_requirements": [
+                {"line_id": ln["line_id"], "label": ln["label"]}
+                for ln in bom["lines"][40:]
+                if ln.get("requirement")
+            ],
         },
         action_run=run,
     )
@@ -2791,6 +2854,7 @@ _DISPATCH: dict[str, tuple[type[BaseModel], Any, bool]] = {
         True,
     ),
     "choose_requirement_part": (ChoosePartArgs, _tool_choose_requirement_part, False),
+    "set_line_budget": (SetLineBudgetArgs, _tool_set_line_budget, False),
     "check_hardware_compatibility": (
         CheckHardwareCompatibilityArgs,
         _tool_check_hardware_compatibility,

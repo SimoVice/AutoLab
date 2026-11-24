@@ -40,6 +40,26 @@ def cooling_envelope(option_id: str) -> list[float]:
     return [float(value) for value in envelopes[option_id]]
 
 
+def sourcing_totals(groups):
+    documented, floors, missing = Decimal(0), [], 0
+    for group in groups:
+        selected = next(o for o in group["options"] if o["id"] == group["selected_id"])
+        price = selected.get("unit_price")
+        if price is None or selected.get("price_kind") == "starting_at":
+            missing += 1
+            if price is not None:
+                floors.append(Decimal(str(price)) * group["quantity"])
+        else:
+            documented += Decimal(str(price)) * group["quantity"]
+    return {
+        "subtotal": float(documented.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
+        "planning_low": float(sum(floors)) if floors else None,
+        "planning_high": None,
+        "unpriced_count": missing,
+        "is_lower_bound": False,
+    }
+
+
 def build_sourcing(selections: dict[str, str] | None = None, cooling_enabled: bool = True) -> dict:
     """Build a detached sourcing snapshot for the given selections."""
     if selections is None:
@@ -73,23 +93,11 @@ def build_sourcing(selections: dict[str, str] | None = None, cooling_enabled: bo
             raise ValueError(f"Unknown option {option_id} for group {group_id}.")
 
     groups: list[dict] = []
-    total = Decimal("0")
-    unpriced_count = 0
-    is_lower_bound = False
-
     for group in data["groups"]:
         group_id = group["id"]
         if not cooling_enabled and group_id in _DISABLED_GROUPS:
             continue
         selected_id = effective[group_id]
-        selected = next(o for o in group["options"] if o["id"] == selected_id)
-        price = selected["unit_price"]
-        if price is None:
-            unpriced_count += 1
-        else:
-            total += Decimal(str(price)) * group["quantity"]
-        if selected["price_kind"] == "starting_at":
-            is_lower_bound = True
         groups.append(
             {
                 "id": group["id"],
@@ -101,15 +109,13 @@ def build_sourcing(selections: dict[str, str] | None = None, cooling_enabled: bo
             }
         )
 
-    subtotal = float(total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
 
     return {
         "checked_on": data["checked_on"],
         "currency": data["currency"],
-        "subtotal": subtotal,
-        "is_lower_bound": is_lower_bound,
+        **sourcing_totals(groups),
         "incomplete": True,
-        "unpriced_count": unpriced_count,
         "groups": groups,
         "exclusions": list(data["exclusions"]),
     }

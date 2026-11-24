@@ -61,7 +61,7 @@ def row(project, **kwargs):
 
 def test_part_changes_pack_rounding_inventory_approval_and_portable_outputs(project):
     ctx = ToolContext(approve_machine(project), "")
-    base = build_complete_bom(ctx.project)["summary"]["total_estimated_cost"]
+    base = build_complete_bom(ctx.project)["summary"]["documented_subtotal"]
     assert edit(ctx, "propose", "Compare readout boards.", catalog_id="pico-h").ok
     assert workflow_state(ctx.project)["machine_approved"]
     assert row(ctx.project)["line_total"] is None
@@ -72,7 +72,7 @@ def test_part_changes_pack_rounding_inventory_approval_and_portable_outputs(proj
     assert line["part_choice"]["accepted"]["interface_status"] == "matched"
     assert (line["quantity"], line["owned_quantity"], line["purchase_quantity"]) == (3, 1, 2)
     assert line["line_total"] == 10
-    assert build_complete_bom(ctx.project)["summary"]["total_estimated_cost"] == base + 10
+    assert build_complete_bom(ctx.project)["summary"]["documented_subtotal"] == (base or 0) + 10
     version = ctx.project["revision"]
     assert not edit(ctx, "select", selection, catalog_id="pico-h", owned_quantity=1).mutated
     assert ctx.project["revision"] == version
@@ -83,9 +83,12 @@ def test_part_changes_pack_rounding_inventory_approval_and_portable_outputs(proj
             "availability": "InStock",
         }
     }
+    stamp = "2026-11-24T12:00:00Z"
+    observed = {"source_url": "https://www.adafruit.com/product/5525", "fetched_at": stamp}
+    two_pack["pico-h"].update(observed)
     packed = row(ctx.project, live_quotes=two_pack)
     assert (packed["packs_to_order"], packed["line_total"]) == (1, 9)
-    missing = row(ctx.project, live_quotes={"pico-h": {"availability": "OutOfStock"}})
+    missing = row(ctx.project, live_quotes={"pico-h": {**observed, "availability": "OutOfStock"}})
     assert missing["line_total"] is None and missing["resolution_status"] == "user_selected"
     proc = next(
         r for r in initial_procurement_rows(ctx.project) if r["group_id"] == line["group_id"]
@@ -102,7 +105,7 @@ def test_part_changes_pack_rounding_inventory_approval_and_portable_outputs(proj
         None,
         0,
     )
-    assert build_complete_bom(ctx.project)["summary"]["total_estimated_cost"] == base
+    assert build_complete_bom(ctx.project)["summary"]["documented_subtotal"] == base
     assert not any(r["group_id"] == line["group_id"] for r in price_context(ctx.project)["rows"])
     expected = next(
         r for r in build_parts_proposal(ctx.project)["rows"] if r["group_id"] == line["group_id"]
@@ -286,6 +289,8 @@ def test_shared_manufacturer_code_requires_distributor_variant(project):
     quote = {
         "pack_size": 1,
         "sku": "PK-B",
+        "source_url": "https://example.org/pk-b",
+        "fetched_at": "2026-11-24T12:00:00Z",
         "price_breaks": [{"minimum_packs": 1, "pack_price": "4"}],
     }
     priced = row(ctx.project, live_quotes={line["offer_id"]: quote})

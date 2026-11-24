@@ -215,7 +215,7 @@ export default function ProjectResources({ imageCapability = null, project, busy
 
       {priceError && <p className="resource-error" role="alert">{priceError} Use Refresh US prices to try again. The planning breakdown remains available.</p>}
       <div className="parts-links">
-        <button type="button" disabled={busy || costLoading} onClick={onRefreshEstimate}>{costLoading ? 'Updating model estimate…' : costIssue ? 'Retry model estimate' : 'Refresh model estimate'}</button>
+        <button type="button" disabled={busy || costLoading} onClick={onRefreshEstimate}>{costLoading ? 'Updating cost breakdown…' : costIssue ? 'Retry cost breakdown' : 'Refresh cost breakdown'}</button>
         {costIssue && <span role="status">{costIssue} Planning allowances remain visible.</span>}
       </div>
       {rackOptions}

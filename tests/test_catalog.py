@@ -44,11 +44,11 @@ def test_partial_selection_merges_over_defaults():
     assert by_id["drivers"]["selected_id"] == "drv8825"
 
 
-def test_opentrons_selection_is_lower_bound():
+def test_opentrons_floor_is_separate_from_catalog_subtotal():
     sourcing = build_sourcing({"cooling": "opentrons-gen2"}, True)
-    assert sourcing["is_lower_bound"] is True
-    # 4*35.12 + 4*15.95 + 4.00 + 3975.00 + 9.95
-    assert sourcing["subtotal"] == pytest.approx(4193.23)
+    assert sourcing["planning_low"] == 3975 and sourcing["planning_high"] is None
+    # Four motors, four drivers, a controller and a sensor.
+    assert sourcing["subtotal"] == pytest.approx(218.23)
 
 
 def test_cooling_disabled_omits_groups_and_reenable_restores():
@@ -66,7 +66,7 @@ def test_cooling_disabled_omits_groups_and_reenable_restores():
     by_id = {group["id"]: group for group in reenabled["groups"]}
     assert by_id["cooling"]["selected_id"] == "opentrons-gen2"
     assert by_id["temperature-sensor"]["selected_id"] == "bare"
-    assert reenabled["is_lower_bound"] is True
+    assert reenabled["planning_low"] == 3975
 
 
 def test_invalid_group_and_option_raise():
