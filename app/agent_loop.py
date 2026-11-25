@@ -23,6 +23,8 @@ LOGGER = logging.getLogger("autolab.agent_loop")
 
 _TOOL_STAGES = {
     "inspect_project_state": "inspecting",
+    "compare_design_routes": "designing",
+    "choose_design_route": "designing",
     "lookup_reviewed_references": "researching",
     "check_spatial_fit": "verifying",
     "update_project_brief": "designing",
@@ -59,6 +61,21 @@ CORE PRINCIPLES
 - General-purpose automation first: classify non-liquid work (jigs, fixtures, cameras, scales,
   barcodes, custom mechanisms) as workflow_kind='general'. Use workflow_kind='liquid_preparation'
   ONLY when liquid pipetting, aliquoting, or dilution is explicitly part of the task.
+- For a new equipment design, or a change to the operations, interfaces or constraints underlying
+  a proposed design, record the brief, search for relevant equipment and call compare_design_routes.
+  State the material, required performance, interface and available equipment in the user's words.
+  Use arbitrary operation IDs for the task. Map them to the recorded design_capabilities or manual.
+  Compare reusing existing equipment or open CAD, buying equipment and fabricating a design.
+  Distinguish adapter capabilities, manufacturer candidates and measured suitability.
+  Show benefits, tradeoffs and sources. Record a blocker for unresolved or infeasible routes.
+  Ask one specific measurement question when its answer changes the choice. Keep the comparison
+  in the project. Set measurement_key on its question. Record the answer, units and matching
+  key in measurements, using the actual fixture parameter name when applicable.
+  After an affirmative choice call choose_design_route, then its native tool.
+  For original geometry use develop_custom_equipment or configure_standalone_fixture.
+  A route is applied when the tool succeeds. Bind purchased components to exact BOM identities.
+  When a constraint changes, refresh the comparison before changing the geometry. Routine edits to
+  an existing design and requests with an already specified design do not require a new comparison.
 - Standalone printable fixtures & imaging rigs: for printable locating bases, sample holders,
   and overhead camera imaging rigs independent of Jubilee/OT-2, call configure_standalone_fixture
   using a named reference (slas_96_well_plate, petri_dish_90mm, microscope_slide_75x25,

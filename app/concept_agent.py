@@ -368,6 +368,15 @@ async def develop_concept(
         "prior_design": previous,
         "reviewed_sources": sources,
     }
+    if plan := project.get("design_plan"):
+        choice = plan.get("decision") or {}
+        selected = next((o for o in plan["options"] if o["key"] == choice.get("key")), None)
+        if selected:
+            context["design_requirements"] = plan["operations"]
+            context["selected_route"] = selected
+            context["route_sources"] = [
+                s for s in plan["sources"] if s["key"] in selected["source_ids"]
+            ]
     if project.get("project_notes"):
         context["user_project_notes"] = project["project_notes"]
     if history:

@@ -46,6 +46,11 @@ engineering design. Supported adapters connect a selected machine foundation,
 components and task to the appropriate geometry, calculations, guides and exports.
 Accepted revisions keep those outputs tied to the same project.
 
+Open **Design options** to review the requested operations, the equipment already
+available, and the reasons to reuse, buy or fabricate. A choice becomes part of
+the design when its implementation succeeds. The comparison and its sources
+survive Save/Open. [Design options and revisions](docs/platform.md#compare-design-options).
+
 The purchasing list starts once a hardware design exists. For custom assemblies
 and imported part lists, an unidentified component keeps its required quantity
 and unit while its supplier, ordering code and price remain open. The parts

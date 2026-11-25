@@ -10,6 +10,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from app import design_routes
 from app.bench_station import MODULES as STATION_MODULES
 from app.bench_station import StationProposal, compile_station
 from app.budget_allowances import SetLineBudgetArgs
@@ -97,6 +98,7 @@ class ToolContext:
     procurement_report: dict | None = None
     cost_estimate: dict | None = None
     supplier_hits: list[dict] = field(default_factory=list)
+    design_sources: dict = field(default_factory=dict)
     recommendations: list[dict] = field(default_factory=list)
     action_runs: list[dict] = field(default_factory=list)
     mutated: bool = False
@@ -406,6 +408,14 @@ class BuildHardwareCommissioningPackArgs(_StrictArgs):
 
 
 _TOOL_SPECS: list[tuple[str, str, type[BaseModel]]] = [
+    ("compare_design_routes",
+     "Save the requested operations and compare reuse, buy and fabricate options. Map each "
+     "operation to a capability from design_capabilities or manual. Use returned design_source_id "
+     "values, bench:<operation>, platform:<id>, or catalog:<id>. Use inventory_quote for owned "
+     "equipment, blocker for an unavailable route and measurement_question for a deciding unknown.",
+     design_routes.CompareRoutes),
+    ("choose_design_route", "Record one explicitly chosen option by key and verbatim user quote. "
+     "Then run the implementation tool in the active project.", design_routes.ChooseRoute),
     (
         "inspect_project_state",
         "Read the current project state (workflow, brief, 3D dimensions, platform, "
@@ -679,6 +689,10 @@ def _compact_project_state(project: dict, lab_profile: dict | None) -> dict[str,
         "plan": project.get("plan"),
         "active_modules": active_modules,
     }
+    compact["design_capabilities"] = design_routes.CAPABILITIES
+    if project.get("design_plan"):
+        compact["design_plan"] = project["design_plan"]
+        compact["design_plan_needs_review"] = design_routes.needs_review(project)
     if project.get("labware_brief"):
         compact["labware_brief"] = project["labware_brief"]
     if project.get("tip_rack_request"):
@@ -928,6 +942,29 @@ def _tool_lookup_references(args: LookupReviewedReferencesArgs, ctx: ToolContext
     )
 
 
+def _tool_design_routes(args, ctx: ToolContext) -> ToolResult:
+    comparing = isinstance(args, design_routes.CompareRoutes)
+    name = "compare_design_routes" if comparing else "choose_design_route"
+    plan = (design_routes.compare_routes(args, ctx) if comparing
+            else design_routes.choose_route(args, ctx))
+    changed = ctx.project.get("design_plan") != plan
+    if changed:
+        from app.project_storage import make_snapshot
+
+        updated = {**ctx.project, "design_plan": plan, "revision": ctx.project["revision"] + 1}
+        make_snapshot(updated, [])
+        ctx.project = updated
+        ctx.mutated = True
+    question = None
+    if comparing and not plan["decision"]:
+        question = next((o["measurement_question"] for o in plan["options"]
+                         if o["measurement_question"]), None)
+    message = ("Compared design routes against the recorded operations." if comparing else
+               "Recorded the selected route. Run its implementation tool to apply it.")
+    return ToolResult(tool=name, ok=True, stage="designing", mutated=changed, summary=message,
+                      data=plan, requires_human_input=bool(question), question=question)
+
+
 def _tool_update_project_brief(args: UpdateProjectBriefArgs, ctx: ToolContext) -> ToolResult:
     apply_fn = api_hook("apply_update", apply_update)
     patch: dict[str, Any] = {}
@@ -988,9 +1025,44 @@ def _tool_update_project_brief(args: UpdateProjectBriefArgs, ctx: ToolContext) -
                 workspace_height_mm=candidate["summary"].get("workspace_height_mm"),
             )
             candidate["concept_design"] = concept
+        if (previous.get("design_plan") and candidate.get("standalone_fixture")
+                and any(k.startswith("workspace_") for k in patch)):
+            from app.fixture_adapter import compile_standalone_fixture
+
+            candidate["standalone_fixture"] = compile_standalone_fixture(
+                candidate["standalone_fixture"]["spec"], lab_profile=ctx.lab_profile,
+                **{key: candidate["summary"].get(key) for key in
+                   ("workspace_width_mm", "workspace_depth_mm", "workspace_height_mm")},
+            )
         refresh_spatial_fit(candidate)
     except ValueError as exc:
-        return _fail("update_project_brief", "verifying", str(exc))
+        plan = previous.get("design_plan")
+        requested = {k: v for k, v in patch.items()
+                     if k in design_routes.WorkspaceRequest.model_fields}
+        kind = previous["workflow"]["kind"]
+        if (not plan or not any(k.startswith("workspace_") for k in requested)
+                or set(patch) - set(requested) - {"workflow_kind"}
+                or patch.get("workflow_kind", kind) != kind):
+            return _fail("update_project_brief", "verifying", str(exc))
+        prior = {k: v for k, v in (plan.get("pending_workspace") or {}).items() if v is not None}
+        pending = design_routes.WorkspaceRequest(**{**prior, **requested}).model_dump()
+        changed = pending != plan.get("pending_workspace")
+        if changed:
+            ctx.project = {**previous, "revision": previous["revision"] + 1,
+                           "design_plan": {**plan, "pending_workspace": pending}}
+            ctx.mutated = True
+        return ToolResult(tool="update_project_brief", ok=True, stage="designing", mutated=changed,
+                          summary="The new workspace does not fit the previous design. "
+                                  "Compare routes before replacing it.", diagnostics=[str(exc)],
+                          data={"pending_workspace": pending})
+    if previous.get("design_plan", {}).get("pending_workspace"):
+        remaining = deepcopy(previous["design_plan"]["pending_workspace"])
+        for key in patch:
+            remaining.pop(key, None)
+        candidate["design_plan"]["pending_workspace"] = (
+            design_routes.WorkspaceRequest.model_validate(remaining).model_dump()
+            if any(v is not None for v in remaining.values()) else None
+        )
 
     mutated = candidate != previous
     ctx.project = candidate
@@ -2172,6 +2244,7 @@ async def _tool_discover_open_hardware_projects(
             "spdx_id": c["spdx_id"],
             "license_allowed": (c.get("license_gate") or {}).get("allowed"),
             "cad_files": (c.get("cad_files") or [])[:8],
+            "license_files": (c.get("license_files") or [])[:4],
             "bom_files": (c.get("bom_files") or [])[:4],
             "assembly_files": (c.get("assembly_files") or [])[:4],
             "score": c.get("score"),
@@ -2179,6 +2252,10 @@ async def _tool_discover_open_hardware_projects(
         }
         for c in res.get("candidates") or []
     ]
+    for candidate in compact_candidates:
+        if source := design_routes.open_source(candidate):
+            ctx.design_sources[source.key] = source.model_dump()
+            candidate["design_source_id"] = source.key
     summary = (
         f"Discovered {len(compact_candidates)} open-source hardware candidate(s) for "
         f"'{args.query}'."
@@ -2204,11 +2281,15 @@ async def _tool_ingest_open_hardware_project(
 ) -> ToolResult:
     from app.upstream_service import attach_upstream_project
 
+    key = f"open:{args.source_host}:{args.repo_full_name}@{args.commit_sha}"
+    saved = next((s for s in (ctx.project.get("design_plan") or {}).get("sources", [])
+                  if s["key"] == key), {})
     try:
         updated = await attach_upstream_project(
             ctx.project,
             instance_id=args.instance_id, placement=args.placement,
             expected_sha256=args.expected_sha256,
+            license_files=saved.get("license_files") or None,
             source_host=args.source_host,
             repo_full_name=args.repo_full_name,
             commit_sha=args.commit_sha,
@@ -2468,8 +2549,23 @@ def _tool_choose_requirement_part(args: ChoosePartArgs, ctx: ToolContext) -> Too
         )
     previous = ctx.project.get("part_choices", {}).get(args.line_id)
     try:
+        hits = ctx.supplier_hits
+        plan = ctx.project.get("design_plan") or {}
+        selected = (plan.get("decision") or {}).get("key")
+        option = next((o for o in plan.get("options", []) if o["key"] == selected), {})
+        for source in plan.get("sources", []):
+            identity = source.get("supplier_identity")
+            if identity and source["key"] in option.get("source_ids", []) and not any(
+                (h.get("supplier"), h.get("sku")) == (identity["issuer"], identity["part_number"])
+                for h in hits
+            ):
+                hits = [*hits, {"supplier": identity["issuer"], "sku": identity["part_number"],
+                                "source_url": identity["source_url"], "mpn": identity["mpn"],
+                                "fetched_at": identity["source_observed_at"],
+                                "evidence_sha256": identity["evidence_sha256"],
+                                "pack_size": 1 if identity["unit"] == "unit" else None}]
         record = update_choice(args, line, previous, load_purchasable_catalog()["items"],
-                               ctx.supplier_hits, ctx.user_message).model_dump()
+                               hits, ctx.user_message).model_dump()
     except ValueError as exc:
         return _fail(name, "designing", str(exc))
     changed = record != previous and bool(previous or record["candidates"] or
@@ -2695,6 +2791,12 @@ async def _tool_search_supplier_components(
         args.query, currency=args.currency, max_results=args.max_results
     )
     ctx.supplier_hits.extend(res["live_api_results"])
+    for hit in res["live_api_results"]:
+        if source := design_routes.supplier_source(hit):
+            ctx.design_sources[source.key] = source.model_dump()
+            hit["design_source_id"] = source.key
+    for hit in res["catalog_matches"]:
+        hit["design_source_id"] = "catalog:" + hit["catalog_id"]
     return ToolResult(
         tool="search_supplier_components",
         ok=True,
@@ -2855,6 +2957,8 @@ _DISPATCH: dict[str, tuple[type[BaseModel], Any, bool]] = {
     "inspect_project_state": (InspectProjectStateArgs, _tool_inspect_project_state, False),
     "check_spatial_fit": (CheckSpatialFitArgs, _tool_check_spatial_fit, False),
     "lookup_reviewed_references": (LookupReviewedReferencesArgs, _tool_lookup_references, False),
+    "compare_design_routes": (design_routes.CompareRoutes, _tool_design_routes, False),
+    "choose_design_route": (design_routes.ChooseRoute, _tool_design_routes, False),
     "update_project_brief": (UpdateProjectBriefArgs, _tool_update_project_brief, False),
     "update_liquid_recipe": (UpdateLiquidRecipeArgs, _tool_update_liquid_recipe, False),
     "select_platform": (SelectPlatformArgs, _tool_select_platform, False),
@@ -2949,12 +3053,27 @@ async def execute_tool(name: str, arguments: dict[str, Any], ctx: ToolContext) -
         )
 
     snapshot = deepcopy(ctx.project)
+    was_mutated = ctx.mutated
     try:
-        if is_async:
-            return await handler(parsed, ctx)
-        return handler(parsed, ctx)
+        decision = design_routes.pending_adoption(name, parsed, ctx.project)
+        if decision:
+            ctx.project = design_routes.stage_adoption(name, parsed, ctx.project)
+        result = await handler(parsed, ctx) if is_async else handler(parsed, ctx)
+        if decision and (not result.ok or result.requires_human_input):
+            ctx.project, ctx.mutated = snapshot, was_mutated
+            result.mutated = False
+        elif decision:
+            if ctx.project["revision"] == snapshot["revision"]:
+                ctx.project["revision"] += 1
+            plan = ctx.project.setdefault("design_plan", deepcopy(snapshot["design_plan"]))
+            plan["pending_workspace"] = None
+            plan["brief_signature"] = design_routes.brief_signature(ctx.project)
+            plan["decision"] = {**decision, "applied_revision": ctx.project["revision"]}
+            ctx.mutated = result.mutated = True
+            result.data["applied_design_route"] = plan["decision"]
+        return result
     except Exception as exc:
-        ctx.project = snapshot
+        ctx.project, ctx.mutated = snapshot, was_mutated
         LOGGER.warning("Tool %s rolled back after error=%s", name, type(exc).__name__)
         if re.search(r"API key|OpenAI|timeout|reach OpenAI", str(exc), re.I):
             raise

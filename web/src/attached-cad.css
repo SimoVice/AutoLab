@@ -23,6 +23,11 @@
 .cad-instance-details h3, .cad-instance-details p {
   margin: .35rem 0;
 }
+.design-routes ol { margin: .4rem 0; padding-left: 1.4rem; }
+.design-routes .route-coverage { margin: .45rem 0; }
+.design-routes .route-coverage summary { font-weight: 500; }
+.design-routes li + li { margin-top: .35rem; }
+.design-routes h3 small { margin-left: .4rem; font-size: .75em; font-weight: 500; }
 .cad-preview-status {
   white-space: nowrap;
   padding: .2rem .4rem;

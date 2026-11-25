@@ -14,6 +14,7 @@ from app.budget_allowances import SavedBudget
 from app.cad_instances import CadInstance, MatingChange, Name
 from app.commercial_design import CommercialProposal, adopt_commercial
 from app.conversation_history import DISPLAY_HISTORY_LIMIT
+from app.design_routes import DesignPlan
 from app.design_spec import FoundationLayoutProposal, LayoutProposal, apply_candidate
 from app.domain import apply_update, confirm_project, new_project
 from app.engineering import EngineeringState, state_for
@@ -109,6 +110,7 @@ class Snapshot(StrictModel):
     upstream_project: dict[str, JsonValue] | None = None
     cad_instances: dict[Name, CadInstance] | None = None
     mating_change: MatingChange | None = None
+    design_plan: DesignPlan | None = None
     physical_assembly: AssemblyBinding | None = None
     budget_allowances: Annotated[dict[str, SavedBudget], Field(max_length=512)] | None = None
     part_choices: Annotated[dict[str, PartChoice], Field(max_length=512)] | None = None
@@ -211,6 +213,7 @@ def make_snapshot(project: dict, history: list[dict]) -> dict:
            if project.get("build_logs") else {}),
         "platform_id": project.get("design", {}).get("platform", {}).get("id"),
         "engineering": state_for(project),
+        **({"design_plan": deepcopy(project["design_plan"])} if project.get("design_plan") else {}),
         "labware_brief": deepcopy(project.get("labware_brief")),
         "tip_rack": tip_rack_inputs(project),
         "tip_rack_request": deepcopy(project.get("tip_rack_request")),
@@ -506,6 +509,13 @@ def restore_snapshot(
             raise ValueError("Unsupported saved cold-transfer extension.")
         from app.cold_transfer import apply_cold_transfer
         project = apply_cold_transfer(project, bump=False)
+    if saved.design_plan:
+        decision = saved.design_plan.decision
+        if (decision and decision.applied_revision is not None
+                and decision.applied_revision > saved.revision):
+            raise ValueError("The route was applied after the saved project revision.")
+        project["design_plan"] = saved.design_plan.model_dump()
+        project["workflow"] = describe_workflow(project)
     if saved.cad_instances:
         from app.spatial_fit import refresh_spatial_fit
 

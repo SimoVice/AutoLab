@@ -119,6 +119,12 @@ def accept_project(
     from app.budget_allowances import reconcile_budgets
 
     # Some design compilers rebuild the project rather than copying optional records.
+    if before.get("design_plan") and "design_plan" not in updated:
+        updated["design_plan"] = deepcopy(before["design_plan"])
+    if updated.get("design_plan"):
+        from app.design_routes import needs_review
+
+        updated["workflow"]["design_plan_needs_review"] = needs_review(updated)
     if "budget_allowances" not in updated and before.get("budget_allowances"):
         updated["budget_allowances"] = deepcopy(before["budget_allowances"])
     if before.get("cad_instances"):

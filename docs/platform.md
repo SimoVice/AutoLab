@@ -63,6 +63,24 @@ custom assembly through the shared concept compiler; it cannot add a new
 geometry primitive, import arbitrary source CAD or implement a device driver
 through a prompt. Those capabilities need implementation and their own checks.
 
+### Compare design options
+
+Describe the operations, materials, performance, interfaces and equipment you have.
+The assistant can record alternatives under **Design options**. Each alternative
+identifies the operations a supported adapter can represent, any manual steps,
+the sources considered and what still requires a measurement. Catalog references,
+supplier matches, pinned public CAD and your inventory statement have distinct
+origins. A search result establishes identity and file availability. Mechanical
+fit and instrument performance need their own checks.
+
+Choose an option by its displayed name or position in chat. An applied revision
+appears after the fixture, custom design, bench station, imported part, workstation
+platform or BOM selection succeeds. When a measurement decides the fit, a fixture
+parameter entered in millimetres is checked against the recorded answer. If an
+existing station cannot fit a newly requested workspace, its previous geometry
+remains available during the comparison. A successful replacement takes on the
+new dimensions. Save/Open preserves the comparison, including a pending constraint.
+
 ## Current implementation
 
 | Layer | Available now |

@@ -1,3 +1,4 @@
+import DesignRoutes from './DesignRoutes';
 import { CadInstanceDetails } from './AttachedCad';
 import ProjectNotes from './ProjectNotes';
 import SoftwareWorkspace from './SoftwareWorkspace';
@@ -377,7 +378,7 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
   const hasGeneralDesign = Boolean(
     project?.bench_station || project?.concept_design || hasFixtureDesign || hasUpstreamDesign,
   );
-  const hasWorkspaceContent = hasBrief || hasEngineeringDesign || hasSelectedFoundation || hasGeneralDesign;
+  const hasWorkspaceContent = !!project?.design_plan || hasBrief || hasEngineeringDesign || hasSelectedFoundation || hasGeneralDesign;
   const showLiquidParams = supportedLiquid && (Boolean(workflow?.parameters_started) || project?.plan?.status === 'ready');
   const briefHref = project ? `/api/projects/${encodeURIComponent(project.id)}/brief?revision=${encodeURIComponent(String(project.revision))}` : '#';
 
@@ -904,6 +905,7 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
           <div className={`design-content${hasEngineeringDesign ? ' design-content-engineering' : ''}${hasGeneralDesign && hardwareDestination === 'design' ? ' design-content-model' : ''}`}
             hidden={!hasGeneralDesign && hardwareDestination !== 'design'} tabIndex={0}
             ref={hasGeneralDesign ? resourceAnchor : undefined} aria-label="Design and project details">
+          {project?.design_plan && <DesignRoutes plan={project.design_plan} needsReview={!!project.workflow?.design_plan_needs_review} />}
           {project?.cad_instances && <CadInstanceDetails project={project} />}
           {hasGeneralDesign && !hasFixtureDesign && !hasUpstreamDesign && resources}
           {!hasGeneralDesign && hasSelectedFoundation && <SelectedPlatformPreview />}

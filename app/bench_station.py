@@ -110,7 +110,8 @@ def compile_station(
                 for op in proposal.operations]
     width_limit = workspace_width_mm if workspace_width_mm is not None else sum(surfaces)
     if max(surfaces) > width_limit:
-        raise ValueError('Workspace width cannot fit a selected module and its functional surface.')
+        raise ValueError(f'Workspace width ({width_limit:g} mm) cannot fit the largest functional '
+                         f'surface, which requires {max(surfaces):g} mm.')
     max_module_height = max(MODULES[op]['size'][1] for op in proposal.operations)
     if workspace_height_mm is not None and max_module_height + 100.0 > workspace_height_mm + 1e-6:
         raise ValueError(

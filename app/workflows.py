@@ -148,6 +148,10 @@ def describe_workflow(project: dict) -> dict:
             )
     elif kind == "liquid_preparation" and project.get("upstream_project"):
         result.update(**_upstream_meta)
+    if project.get("design_plan"):
+        from app.design_routes import needs_review
+
+        result["design_plan_needs_review"] = needs_review(project)
     return result
 
 

@@ -32,6 +32,8 @@ def test_openai_tool_schemas_are_strict_and_complete():
     schemas = openai_tool_schemas(new_project())
     names = [entry["function"]["name"] for entry in schemas]
     assert names == [
+        "compare_design_routes",
+        "choose_design_route",
         "inspect_project_state",
         "check_spatial_fit",
         "lookup_reviewed_references",

@@ -703,10 +703,9 @@ def _apply_choice(line, record, catalog, live_rows, fx_rates):
             "sku": selected["part_number"] if supplier_part else None,
             "mpn": selected["mpn"], "source_url": selected["source_url"],
         }
-        if supplier_part:
-            entry[{"DigiKey": "digikey_pn", "Mouser": "mouser_pn"}[selected["issuer"]]] = entry[
-                "sku"
-            ]
+        adapter_key = {"DigiKey": "digikey_pn", "Mouser": "mouser_pn"}.get(entry["supplier"])
+        if adapter_key:
+            entry[adapter_key] = entry["sku"]
         entries = {offer_id: entry}
         if selected["checks"][0]["status"] != "match":
             live_rows = {}

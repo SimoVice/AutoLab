@@ -181,7 +181,24 @@ export type ProjectBrief = {
   constraints: string | null;
 };
 
+export type DesignPlan = {
+  operations: { key: string; action: string; material?: string | null; performance?: string | null; interface?: string | null }[];
+  options: {
+    key: string; label: string; strategy: 'reuse' | 'buy' | 'fabricate'; benefit: string; tradeoff: string;
+    coverage: { operation: string; capability: string }[]; source_ids: string[]; inventory_quote: string | null;
+    measurements: { key: string; value: string; unit: string; quote: string }[];
+  }[];
+  sources: { key: string; label: string; url: string | null; detail: string }[];
+  blockers: Record<string, string[]>;
+  pending_workspace?: {
+    workspace_width_mm?: number | null; workspace_depth_mm?: number | null;
+    workspace_height_mm?: number | null; brief_constraints?: string | null;
+  } | null;
+  decision: { key: string; user_quote: string; applied_revision: number | null } | null;
+};
+
 export type ProjectWorkflow = {
+  design_plan_needs_review?: boolean;
   kind: WorkflowKind;
   label: string;
   status: WorkflowStatus;
@@ -254,6 +271,7 @@ export type SpatialFit = {
 };
 
 export type Project = {
+  design_plan?: DesignPlan;
   project_notes?: string;
   design_workflow?: { phase: 'hardware_design' | 'software'; machine_approved: boolean; approval: { machine_signature: string; revision: number } | null; recipe_started: boolean };
   concept_design?: import('./ConceptWorkspace').ConceptDesign;
