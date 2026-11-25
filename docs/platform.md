@@ -73,6 +73,36 @@ through a prompt. Those capabilities need implementation and their own checks.
 | Project continuity | Revisioned designs, portable save/reopen, supported design changes and revision-specific exports. |
 | Software | Equipment-specific setup and protocol-authoring guidance, a standalone logical direct-dilution preview, an operator-assisted bench-station record runner, and a custom-assembly Python sequence controller with default simulation and an opt-in JSON/HTTP gateway integration. |
 
+### Inspect the parts in a project
+
+Open **Parts & prices** and select **Assembly JSON** to download the physical
+assembly for the displayed revision. The same record is included in supported
+build ZIPs and in the bench-station plan. Its project ID survives Save/Open.
+The API download takes the active session ID and the displayed revision.
+
+Each instance has a stable ID, a native component key and a reference to its
+geometry. Its placement gives both the translation in its parent frame and the
+resulting project coordinates in millimetres. For example, a camera mounted on
+a moving stage retains its offset from the stage at rest. The project uses Y
+up. An imported CAD model also records its normalized Z-up frame, the source
+units and the import transform when available. A separately printed fit coupon
+has its own frame and an empty assembly placement.
+
+The geometry fingerprint covers the compiled shapes, frames and placements.
+The source manifest carries the checksum of the original imported file.
+
+Connections identify their two interfaces and the evidence for the proposed
+mount, mating feature or working axis. Purchasing requirements link back to BOM
+line IDs, selected part identities and any associated instances. A catalog
+electrical specification describes a requirement. A modeled mount, a commercial
+envelope and a pinned source file each carry their own origin and evidence.
+
+Portable files keep the existing design inputs and a compact geometry
+fingerprint. Opening an earlier file reconstructs the assembly through its
+original design compiler. For a saved fingerprint mismatch or a known
+geometry-changing compiler migration, the application opens a new draft revision
+for review and approval. The original file stays available to its owner.
+
 The [liquid-handling example](use-cases/liquid-handling.md) shows the engineering
 layer in detail: a workstation adapted to tubes or a microplate, component
 choices, pricing and instructions. Its test records establish that specific

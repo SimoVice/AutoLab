@@ -1378,6 +1378,7 @@ def build_complete_bom(
     currency: str = "USD",
     fx_rates: dict[str, Any] | None = None,
     live_quotes: dict[str, dict[str, Any]] | None = None,
+    use_cached_quotes: bool = True,
 ) -> dict[str, Any]:
     """Build the BOM for the current design, retaining unresolved requirements."""
     route_kind = purchasing_route(project)
@@ -1390,7 +1391,9 @@ def build_complete_bom(
         lab_profile = load_lab_profile()
     catalog_data = load_purchasable_catalog()
     catalog_items = catalog_data["items"]
-    cached_quotes = cached_official_quotes(curr, eff_fx or cached_fx_rates("USD"))
+    cached_quotes = (
+        cached_official_quotes(curr, eff_fx or cached_fx_rates("USD")) if use_cached_quotes else {}
+    )
     from app.procurement import report_for_project
 
     procurement_report = report_for_project(project, procurement_report)

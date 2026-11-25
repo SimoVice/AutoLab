@@ -193,6 +193,11 @@ export default function PurchasableBomPanel({ project, busy = false, onSelectPar
           >
             BOM JSON
           </a>
+          {bom && bom.route_kind !== 'unselected' && (
+            <a href={`${base}/physical-assembly.json?revision=${revision}`} download>
+              Assembly JSON
+            </a>
+          )}
         </div>
       </div>
 

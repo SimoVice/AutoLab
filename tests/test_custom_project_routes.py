@@ -292,6 +292,11 @@ def test_zip_and_downloaded_meshes_match_revision_with_no_remote_work(client, mo
     assert response.headers['cache-control'] == 'no-store'
     assert response.headers['x-content-type-options'] == 'nosniff'
     with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        shared = client.get(url + '/physical-assembly.json', params=query)
+        assert shared.status_code == 200 and shared.headers['cache-control'] == 'no-store'
+        assert archive.read('physical-assembly.json') == shared.content
+        assert client.get(url + '/physical-assembly.json',
+                          params={'revision': project['revision'] - 1}).status_code == 409
         assert len(archive.namelist()) == len(set(archive.namelist()))
         expected = {'guide.html', 'project.json', 'machine.stl', 'controller.py', 'parts.csv',
                     'parts/rail_base.stl', 'parts/sample_tray.stl'}

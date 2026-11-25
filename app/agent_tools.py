@@ -403,7 +403,8 @@ _TOOL_SPECS: list[tuple[str, str, type[BaseModel]]] = [
     (
         "inspect_project_state",
         "Read the current project state (workflow, brief, 3D dimensions, platform, "
-        "active modules, dilution plan, labware, and lab profile) without mutating anything.",
+        "active modules, dilution plan, labware and lab profile). With include_components, "
+        "inspect physical instances, their assembly frames, connections and purchasing links.",
         InspectProjectStateArgs,
     ),
     (
@@ -757,17 +758,28 @@ def _compact_project_state(project: dict, lab_profile: dict | None) -> dict[str,
 def _tool_inspect_project_state(args: InspectProjectStateArgs, ctx: ToolContext) -> ToolResult:
     data = _compact_project_state(ctx.project, ctx.lab_profile)
     if args.include_components:
-        design = ctx.project.get("design") or {}
+        from app.project_assembly import physical_assembly
+
+        assembly = physical_assembly(ctx.project)
         data["components"] = [
             {
-                "id": p.get("id"),
-                "kind": p.get("kind"),
-                "label": p.get("label"),
-                "position": p.get("position"),
-                "size": p.get("size"),
+                "id": p["native_id"], "instance_id": p["id"], "kind": p["kind"],
+                "label": p["label"], "origin": p["origin"], "size": p["size_mm"],
+                "position": (p["placement"] or {}).get("world_translation_mm"),
+                "placement": p["placement"], "frame_id": p["frame_id"],
+                "evidence_ids": p["evidence_ids"],
             }
-            for p in design.get("components", [])
+            for p in assembly["instances"]
         ]
+        data["frames"] = assembly["frames"]
+        data["connections"] = assembly["connections"]
+        data["interfaces"] = assembly["interfaces"]
+        data["procurement_links"] = [
+            {key: r[key] for key in ("id", "bom_line_id", "instance_ids", "evidence_ids",
+                                     "selected_part", "owned_quantity") if key in r}
+            for r in assembly["requirements"]
+        ]
+        data["assembly_evidence"] = assembly["evidence"]
     return ToolResult(
         tool="inspect_project_state",
         ok=True,

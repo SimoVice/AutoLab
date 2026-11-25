@@ -177,6 +177,13 @@ def test_upstream_http_routes_glb_preview_zip_and_save_open_roundtrip(
     zip_resp = client.get(f"/api/projects/{pid}/upstream/download/package.zip?revision={adp_rev}")
     assert zip_resp.status_code == 200
     with zipfile.ZipFile(io.BytesIO(zip_resp.content)) as zf:
+        manifest = client.get(f"/api/projects/{pid}/physical-assembly.json?revision={adp_rev}")
+        assert manifest.status_code == 200 and zf.read("physical-assembly.json") == manifest.content
+        assembly = manifest.json()
+        assert {p["origin"] for p in assembly["instances"]} == {"imported_cad", "source_adaptation"}
+        assert assembly["frames"]["normalized_cad"]["rotation_deg_xyz"] == [-90, 0, 0]
+        assert any(p["kind"] == "cylindrical_feature" for p in assembly["interfaces"])
+        assert {j["kind"] for j in assembly["connections"]} == {"modeled_mating"}
         assert "THIRD_PARTY_NOTICES.md" in zf.namelist()
         assert "bom/bom.csv" in zf.namelist()
         assert "custom/custom-adapter-plate.step" in zf.namelist()

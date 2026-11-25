@@ -217,6 +217,19 @@ async def select_project_model(project_id: str, request: ModelSelectionRequest) 
         return {"project": deepcopy(session.project), "active_model": session.model}
 
 
+@router.get("/api/projects/{project_id}/physical-assembly.json")
+async def download_physical_assembly(project_id: str, revision: int) -> Response:
+    from app.project_assembly import assembly_json
+
+    session = api_hook("session_for", session_for)(project_id)
+    async with session.model_lock():
+        check_revision(session.project, revision)
+        return Response(assembly_json(session.project), media_type="application/json", headers={
+            "Content-Disposition": f'attachment; filename="physical-assembly-r{revision}.json"',
+            "Cache-Control": "no-store",
+        })
+
+
 @router.get("/api/projects/{project_id}/sources")
 async def get_project_sources(project_id: str, revision: int) -> Response:
     session = api_hook("session_for", session_for)(project_id)
@@ -458,6 +471,7 @@ async def download_custom_asset(project_id: str, asset: str, revision: int) -> R
     from app.concept_cad import ConceptCADUnavailable
     from app.concept_files import price_record_for_project, render_asset
     from app.procurement import report_for_project
+    from app.project_assembly import assembly_json
     from app.routers.procurement import _active_lab_profile
 
     session = api_hook("session_for", session_for)(project_id)
@@ -468,6 +482,7 @@ async def download_custom_asset(project_id: str, asset: str, revision: int) -> R
             raise HTTPException(404, "Generate a custom assembly first.")
         price_record = None
         purchasing_bom = None
+        assembly = assembly_json(session.project) if asset == "package.zip" else None
         if asset in ("package.zip", "parts.csv"):
             purchasing_bom = build_complete_bom(
                 session.project, lab_profile=_active_lab_profile(),
@@ -480,6 +495,7 @@ async def download_custom_asset(project_id: str, asset: str, revision: int) -> R
         data, mime = await run_in_threadpool(
             render_asset, design, project_id, revision, asset,
             price_record=price_record, purchasing_bom=purchasing_bom,
+            assembly=assembly,
         )
     except KeyError:
         raise HTTPException(404, "This file is unavailable for the current assembly.") from None
@@ -759,12 +775,14 @@ async def bench_station_plan(project_id: str, revision: int) -> dict:
             raise HTTPException(status_code=404, detail="No bench station concept exists.")
         from app.bom_engine import build_complete_bom
         from app.procurement import report_for_project
+        from app.project_assembly import physical_assembly
 
         report = report_for_project(session.project, session.procurement_report)
         return {
             "project_id": project_id,
             "revision": revision,
             **deepcopy(station),
+            "physical_assembly": physical_assembly(session.project),
             "purchasing_bom": build_complete_bom(session.project, procurement_report=report),
         }
 

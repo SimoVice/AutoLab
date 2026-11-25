@@ -69,6 +69,11 @@ Supplier lookups check exact part numbers and package variants. An unavailable
 offer keeps its supplier and observation date while contributing no amount to
 the subtotal. An expired observation stays dated and prompts a new check.
 
+In **Parts & prices**, download **Assembly JSON** to see which modeled parts a
+purchase line supports, how each part is positioned and what evidence describes
+its interfaces. Each instance keeps its identity when the project is reopened.
+[Inspect the parts in a project](docs/platform.md#inspect-the-parts-in-a-project).
+
 For a new piece of equipment, the **custom-equipment path** can propose an original
 assembly with named parts, attached subassemblies, dimensions and an ordered
 operating sequence. Its 3D view, component models, parts list, assembly guide and

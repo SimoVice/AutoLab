@@ -906,6 +906,7 @@ def build_document_files(project: dict, procurement: dict | None = None) -> dict
     from app.lab_profile import load_lab_profile
     from app.price_estimation import cost_report_from_bom, estimate_csv
     from app.procurement import report_for_project
+    from app.project_assembly import assembly_json
 
     report = report_for_project(
         project, procurement if procurement is not None else project.get("procurement_report")
@@ -915,6 +916,7 @@ def build_document_files(project: dict, procurement: dict | None = None) -> dict
 
     files: dict[str, bytes] = {
         **build_instruction_files(project, report, bom=complete_bom),
+        "physical-assembly.json": assembly_json(project),
         "preparation.csv": build_preparation_csv(project),
         "automation/preview.py": build_preview_source(project),
         "README.md": build_readme(project),

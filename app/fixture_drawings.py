@@ -789,6 +789,7 @@ def build_fixture_package_zip(
     from app.bom_engine import bom_to_csv, bom_to_json, build_complete_bom
     from app.hardware_compatibility import evaluate_hardware_compatibility
     from app.lab_profile import has_lab_profile_data, load_lab_profile
+    from app.project_assembly import assembly_json
 
     loaded_prof = load_lab_profile()
     active_prof = loaded_prof if has_lab_profile_data(loaded_prof) else None
@@ -797,6 +798,7 @@ def build_fixture_package_zip(
 
     bundle: dict[str, bytes] = {
         **cad_files,
+        "physical-assembly.json": assembly_json(project),
         "drawing.svg": render_fixture_drawing_svg(fixture, revision),
         "drawing.pdf": render_fixture_drawing_pdf(fixture, revision),
         "build-sheet.html": render_bench_build_sheet_html(fixture, project, revision),

@@ -140,6 +140,7 @@ def _safe_cell(value):
 def render_asset(
     design: dict, project_id: str, revision: int, asset: str, *,
     price_record: dict | None = None, purchasing_bom: dict | None = None,
+    assembly: bytes | None = None,
 ) -> tuple[bytes, str]:
     if asset == "project.json":
         data = {"project_id": project_id, "revision": revision, "design": design}
@@ -255,13 +256,16 @@ def render_asset(
         return concept_step(design, step_parts[asset]), "model/step"
     if asset == "package.zip":
         from app.bom_engine import bom_to_csv, bom_to_json, build_complete_bom
+        from app.project_assembly import assembly_json
 
+        project = {"id": project_id, "revision": revision, "concept_design": design}
         if purchasing_bom is None:
-            purchasing_bom = build_complete_bom({
-                "id": project_id, "revision": revision, "concept_design": design,
-            })
+            purchasing_bom = build_complete_bom(project)
+        if assembly is None:
+            assembly = assembly_json(project)
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("physical-assembly.json", assembly)
             archive.writestr("bom/purchasable-bom.json", bom_to_json(purchasing_bom))
             archive.writestr("bom/purchasable-bom.csv", bom_to_csv(purchasing_bom))
             for name in (

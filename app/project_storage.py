@@ -83,8 +83,13 @@ class HistoryEntry(StrictModel):
     content: Annotated[str, Field(min_length=1, max_length=12000)]
 
 
+class AssemblyBinding(StrictModel):
+    version: Literal[1]
+    geometry_sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+
+
 class Snapshot(StrictModel):
-    format: Literal["autolab-project"]
+    format: Literal["autolab-project", "museautolab-project"]
     schema_version: Annotated[int, Field(ge=1, le=1)]
     compiler_version: Literal["1", "2", "3", "4", "5", "6", "7", "8"]
     saved_at: Annotated[str, Field(min_length=10, max_length=50)]
@@ -101,6 +106,7 @@ class Snapshot(StrictModel):
     custom_assembly_v1: dict[str, JsonValue] | None = None
     standalone_fixture: dict[str, JsonValue] | None = None
     upstream_project: dict[str, JsonValue] | None = None
+    physical_assembly: AssemblyBinding | None = None
     budget_allowances: Annotated[dict[str, SavedBudget], Field(max_length=512)] | None = None
     part_choices: Annotated[dict[str, PartChoice], Field(max_length=512)] | None = None
     build_logs: list[dict[str, JsonValue]] | None = None
@@ -153,6 +159,8 @@ def decode_snapshot(raw: bytes) -> dict:
 
 
 def make_snapshot(project: dict, history: list[dict]) -> dict:
+    from app.project_assembly import assembly_binding
+
     extension = project.get("inspection_extension")
     payload = {
         "format": "autolab-project",
@@ -168,6 +176,7 @@ def make_snapshot(project: dict, history: list[dict]) -> dict:
         "saved_at": datetime.now(timezone.utc).isoformat(),
         "project_id": project.get("lineage_id", project["id"]),
         "revision": project["revision"],
+        "physical_assembly": assembly_binding(project),
         "status": project["status"],
         "machine_approval": deepcopy(project.get("machine_approval")),
         "generic_sample_capacity": project.get("generic_sample_capacity"),
@@ -488,7 +497,15 @@ def restore_snapshot(snapshot: object) -> tuple[dict, list[dict]]:
             raise ValueError("Unsupported saved cold-transfer extension.")
         from app.cold_transfer import apply_cold_transfer
         project = apply_cold_transfer(project, bump=False)
-    if saved.status == "confirmed" and not upgraded and not clearance_upgrade:
+    geometry_changed = False
+    if saved.physical_assembly and not (upgraded or clearance_upgrade):
+        from app.project_assembly import assembly_binding
+
+        geometry_changed = (
+            assembly_binding(project)["geometry_sha256"] != saved.physical_assembly.geometry_sha256
+        )
+    requires_review = upgraded or clearance_upgrade or geometry_changed
+    if saved.status == "confirmed" and not requires_review:
         if (project["workflow"]["kind"] == "liquid_preparation"
                 and project.get("plan", {}).get("status") != "ready"):
             raise ValueError("A confirmed preparation requires a ready recipe.")
@@ -498,8 +515,8 @@ def restore_snapshot(snapshot: object) -> tuple[dict, list[dict]]:
             project = approve_machine(project)
         else:
             project = confirm_project(project)
-    project["revision"] = saved.revision + int(upgraded or clearance_upgrade)
-    project["status"] = "draft" if upgraded or clearance_upgrade else saved.status
+    project["revision"] = saved.revision + int(requires_review)
+    project["status"] = "draft" if requires_review else saved.status
     project["lineage_id"] = saved.project_id
     project["restored_from"] = {
         "project_id": saved.project_id,
@@ -520,6 +537,11 @@ def restore_snapshot(snapshot: object) -> tuple[dict, list[dict]]:
             "to leave at least 10 mm above deck components in this model. Review and "
             "confirm the updated design. Physical travel and mounting are unverified."
         )
+    elif geometry_changed:
+        project["rebuild_notice"] = (
+            "The rebuilt assembly differs from the saved geometry. Review the new "
+            "revision and approve the machine again."
+        )
     from app.platform_profiles import engineering_guidance
 
     project["engineering_guidance"] = engineering_guidance(project)
@@ -527,7 +549,7 @@ def restore_snapshot(snapshot: object) -> tuple[dict, list[dict]]:
         project["project_notes"] = inputs.project_notes
     from app.design_workflow import refresh_workflow
 
-    if saved.machine_approval and not upgraded and not clearance_upgrade:
+    if saved.machine_approval and not requires_review:
         project["machine_approval"] = saved.machine_approval
     if saved.part_choices:
         from app.bom_engine import reconcile_part_choices
