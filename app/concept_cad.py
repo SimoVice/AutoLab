@@ -343,6 +343,28 @@ def _primitive_solid(primitive: dict, offset: list[float]):
     return Pos(x, y, z) * solid
 
 
+def _component_body(component, world_coordinates):
+    from build123d import Compound
+
+    parts = []
+    offset = component['position_mm'] if world_coordinates else [0, 0, 0]
+    for primitive in component['primitives']:
+        parts.append(_primitive_solid(primitive, offset))
+    # Each component remains a named item. Fuse its intersecting/touching
+    # solids when possible; leave disconnected shapes together as a compound.
+    if len(parts) == 1:
+        body = parts[0]
+    else:
+        try:
+            body = parts[0].fuse(*parts[1:])
+            if body is None or not body.is_valid or not body.solids():
+                raise ValueError('Invalid boolean result')
+        except Exception:
+            body = Compound(children=parts)
+    body.label = component['name']
+    return body
+
+
 def _write_step(encoded: str, world_coordinates: bool) -> bytes:
     try:
         from build123d import Compound, Unit, export_step
@@ -350,25 +372,7 @@ def _write_step(encoded: str, world_coordinates: bool) -> bytes:
         raise ConceptCADUnavailable('STEP export requires the optional CAD installation.') from exc
 
     components = json.loads(encoded)
-    groups = []
-    for component in components:
-        parts = []
-        offset = component['position_mm'] if world_coordinates else [0, 0, 0]
-        for primitive in component['primitives']:
-            parts.append(_primitive_solid(primitive, offset))
-        # Each component remains a named item. Fuse its intersecting/touching
-        # solids when possible; leave disconnected shapes together as a compound.
-        if len(parts) == 1:
-            body = parts[0]
-        else:
-            try:
-                body = parts[0].fuse(*parts[1:])
-                if body is None or not body.is_valid or not body.solids():
-                    raise ValueError('Invalid boolean result')
-            except Exception:
-                body = Compound(children=parts)
-        body.label = component['name']
-        groups.append(body)
+    groups = [_component_body(component, world_coordinates) for component in components]
     assembly = Compound(children=groups, label='AutoLab concept')
     with TemporaryDirectory(prefix='autolab-concept-step-') as temporary:
         path = Path(temporary) / 'concept.step'

@@ -371,7 +371,9 @@ def physical_assembly(project: dict) -> dict:
             "evidence": list(graph.evidence.values())}
     if records := project.get("cad_instances"):
         result["cad_exports"] = {
-            "host_geometry_scope": "Host STEP/STL files contain the native host design.",
+            "host_geometry_scope": "Dedicated host exports describe the native host design.",
+            "mixed_geometry_scope": "Handoff STEP and STL contain every placed instance in "
+                                    "the project rest frame (millimetres, Y up).",
             "instances": {
                 name: {
                     **_fields(item, "provenance", "source_units", "source_up_axis", "placement",

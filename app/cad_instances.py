@@ -51,6 +51,16 @@ def _validate_geometry(geom):
         raise ValueError("Source bounds and dimensions must agree.")
 
 
+class MatingChange(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    instance: Name
+    revision: Annotated[int, Field(ge=1, strict=True)]
+    previous_spec: MatingAdaptationSpec | None
+    current_spec: MatingAdaptationSpec
+    previous_step_sha256: Digest | None
+    current_step_sha256: Digest
+
+
 class CadInstance(BaseModel):
     """Portable project data. Only digests from the named artifact store can be resolved."""
 
@@ -66,7 +76,8 @@ class CadInstance(BaseModel):
     bom: list[dict[str, JsonValue]]
     artifact_hashes: dict[
         Literal[
-            "original", "normalized", "preview", "adapter-step", "adapter-stl", "adapter-preview"
+            "original", "normalized", "preview", "adapter-step", "adapter-stl", "adapter-preview",
+            "license-text"
         ],
         Digest,
     ]
@@ -163,6 +174,7 @@ def validate_pin(host, repo, commit, path, raw=None, repo_url=None):
 # All file extensions come from this map. Snapshots never supply a local path.
 _ARTIFACTS = {
     "original": ("source_path", None),
+    "license-text": ("license_text_path", ".txt"),
     "normalized": ("normalized_step_path", ".step"),
     "preview": ("preview_glb_path", ".glb"),
     "adapter-step": ("custom_step_path", ".step"),
@@ -322,4 +334,11 @@ async def adapt_instance(project, name, spec, lab_profile):
     target = updated["cad_instances"][name]
     target["artifact_hashes"].update(files)
     target["adaptation"] = adaptation
+    updated["mating_change"] = MatingChange(
+        instance=name, revision=project["revision"] + 1,
+        previous_spec=(instance.get("adaptation") or {}).get("spec"),
+        current_spec=mating,
+        previous_step_sha256=instance["artifact_hashes"].get("adapter-step"),
+        current_step_sha256=files["adapter-step"],
+    ).model_dump()
     return _finish(updated, lab_profile)

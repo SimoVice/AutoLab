@@ -573,7 +573,10 @@ def build_provenance_record(
     }
 
 
-def render_third_party_notices(upstream_project: dict[str, Any]) -> str:
+def render_third_party_notices(
+    upstream_project: dict[str, Any], *, original_path: str = "upstream/source/",
+    adaptation_path: str = "custom/",
+) -> str:
     """Render THIRD_PARTY_NOTICES.md separating upstream source from AutoLab adaptations."""
     prov = upstream_project.get("provenance") or {}
     gate = upstream_project.get("license_gate") or {}
@@ -622,7 +625,7 @@ def render_third_party_notices(upstream_project: dict[str, Any]) -> str:
             "",
             "## Boundary Between Unmodified Source and AutoLab Adaptations",
             "",
-            "- **Unmodified upstream source:** Saved in `upstream/source/` with matching SHA-256.",
+            f"- **Unmodified upstream source:** Saved in `{original_path}` with matching SHA-256.",
         ]
     )
     if adaptation:
@@ -630,7 +633,8 @@ def render_third_party_notices(upstream_project: dict[str, Any]) -> str:
         lines.extend(
             [
                 f"- **AutoLab adaptation mode:** `{mode}`",
-                "- **Custom artifacts:** Stored separately under `custom/` (non-destructive",
+                f"- **Custom artifacts:** Stored separately under `{adaptation_path}` "
+                "(non-destructive",
                 "  mating parts or explicit parameter overrides from the pinned revision).",
                 "- **Verification scope:** Modeled digital clearance/interference check only;",
                 "  physical fit, load capacity, wiring, and hardware operation remain unverified.",

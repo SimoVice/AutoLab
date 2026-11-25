@@ -171,7 +171,30 @@ adapter uses solid intersection. The whole assembly and specified access spaces
 use conservative bounding boxes at the rest pose. A printer build volume is
 needed for the adapter fit check. Physical fit and access require bench testing.
 
-The project file preserves the pins, measurements and geometry fingerprint.
-Original, preview and adapter files are available from the local CAD cache.
-Host geometry downloads cover the native design. The assembly JSON identifies
-the separate source and adapter artifacts for each named instance.
+### Revise and hand off an assembly
+
+Ask, for example, “Change only the lamp holder's adapter plate thickness to 8 mm.”
+The assistant carries forward the existing hole pattern, clearance and placement.
+The revision records the changed dimensions, which adapter to reprint and which
+mounting datums to recalibrate after installation.
+
+For a design with attached CAD, **Save project** downloads a ZIP. **Open project**
+on a second installation reads it offline. The package contains the original pinned
+assets and their notices, normalized geometry, previews and generated mating parts.
+The manifest identifies the project, revision and assembly fingerprint and lists
+each file's size and SHA-256. The receiving workspace checks these records before
+installing the CAD assets. The lightweight JSON snapshot remains available through
+the snapshot API and references assets by digest.
+
+The assembly STEP and STL use the 3D scene's rest pose, in millimetres with +Y up.
+STEP sources retain boundary geometry. STL sources contribute triangle faces
+(up to 75,000 per source). The CAD index names placed parts and marks commercial
+proxies and planning envelopes. It also lists unplaced fabrication parts.
+The purchasing files preserve the issued documented prices, budget allowances and
+printed-material estimates. The guide and device assignments identify the mounts
+and interfaces that require installation checks. The custom-equipment package
+includes the offline controller and its configuration. A workstation package
+includes the preparation table and logical preview. A reported rest-pose overlap
+identifies a pair to measure before fabrication. Imported geometry carries no
+device driver. The ZIP limit is 128 MiB. Redistribution requires an accepted
+source license. Physical calibration and build verification take place on the bench.

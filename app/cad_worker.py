@@ -443,7 +443,11 @@ def main(arguments: list[str]) -> int:
         payload = json.loads(source.read_bytes())
         if not isinstance(payload, dict):
             raise CadWorkerError("A project object is required.")
-        if "_part_request" in payload:
+        if "_mixed_assembly" in payload:
+            from app.mixed_geometry import build_mixed_cad
+
+            files = build_mixed_cad(payload["_mixed_assembly"])
+        elif "_part_request" in payload:
             from app.cad_exports import export_single_part
 
             req = payload["_part_request"]

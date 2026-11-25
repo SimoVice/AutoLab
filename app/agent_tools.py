@@ -2282,15 +2282,18 @@ async def _tool_adapt_open_hardware_project(
     mating_spec = None
     overrides = None
     if args.mode == "mating":
-        if not args.mating_kind:
+        named_source = (ctx.project.get("cad_instances") or {}).get(args.instance_id) or {}
+        previous = (named_source.get("adaptation") or {}).get("spec") or {}
+        kind = args.mating_kind or previous.get("kind")
+        if not kind:
             return _fail(
                 "adapt_open_hardware_project",
                 "assembling",
                 "mating_kind is required when mode='mating'.",
             )
         spec_fields = {
-            "kind": args.mating_kind,
-            "placement": args.placement or "below",
+            "kind": kind,
+            "placement": args.placement,
             "clearance_mm": args.clearance_mm,
             "plate_thickness_mm": args.plate_thickness_mm,
             "riser_height_mm": args.riser_height_mm,
@@ -2302,7 +2305,8 @@ async def _tool_adapt_open_hardware_project(
             "cutout_width_mm": args.cutout_width_mm,
             "cutout_depth_mm": args.cutout_depth_mm,
         }
-        mating_spec = {k: v for k, v in spec_fields.items() if v is not None}
+        mating_spec = dict(previous) if kind == previous.get("kind") else {}
+        mating_spec.update({k: v for k, v in spec_fields.items() if v is not None})
     else:
         if not args.param_overrides:
             return _fail(
@@ -2336,6 +2340,16 @@ async def _tool_adapt_open_hardware_project(
         f"min_clearance={inter.get('min_clearance_mm')} mm) "
         f"at revision {updated['revision']}."
     )
+    impact = None
+    change = updated.get("mating_change") or {}
+    if args.instance_id and change.get("instance") == args.instance_id:
+        from app.mixed_revision import change_impact
+        from app.project_assembly import physical_assembly
+
+        impact = change_impact(updated, physical_assembly(updated))
+        msg += f" Reprint the adapter for {args.instance_id} and recalibrate its mounting datum."
+        if impact["rest_pose_overlap_review"]:
+            msg += " Check the reported rest-pose envelope overlap before fabrication."
     run = {"kind": "adapt_open_hardware_project", "status": "accepted", "message": msg}
     ctx.action_runs.append(run)
     return ToolResult(
@@ -2347,6 +2361,7 @@ async def _tool_adapt_open_hardware_project(
         data={
             "mode": adapt["mode"],
             "part_id": adapt["part_id"],
+            "mating_change": impact,
             "interference": inter,
             "printer_fit": pfit,
             "parameter_diffs": adapt.get("parameter_diffs") or [],

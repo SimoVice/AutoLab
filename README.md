@@ -77,7 +77,10 @@ its interfaces. Each instance keeps its identity when the project is reopened.
 To add external CAD to a design already open, give the assistant the pinned STEP
 or STL, an instance name and its measured position relative to an existing part.
 The 3D view shows the parts together. Open **Attached CAD** for the source,
-placement, checks and individual files. [Place external CAD](docs/platform.md#place-external-cad-in-an-existing-design).
+placement and individual files. Ask to change a named adapter's thickness and use
+**Save project** to download the revised assembly as a ZIP. **Open project**
+restores its geometry, purchasing list and installation records on another machine.
+[Place and revise external CAD](docs/platform.md#place-external-cad-in-an-existing-design).
 
 For a new piece of equipment, the **custom-equipment path** can propose an original
 assembly with named parts, attached subassemblies, dimensions and an ordered

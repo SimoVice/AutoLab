@@ -168,6 +168,10 @@ async def read_upstream_source(
         "adaptation": None,
     }
 
+    if artifact_dir is not None and eff_lic_text:
+        notice = artifact_dir / "original-license.txt"
+        notice.write_text(eff_lic_text, encoding="utf-8")
+        up_state["artifacts"]["license_text_path"] = str(notice)
     return up_state
 
 

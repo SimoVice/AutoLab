@@ -28,6 +28,7 @@ class ProjectSession:
     cost_estimate: dict | None = None
     estimate_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     functional_plan: dict | None = None
+    issued_handoff: dict | None = None
 
     @asynccontextmanager
     async def model_lock(self):
@@ -54,6 +55,7 @@ def persist_session(session: ProjectSession, *, title: str | None = None) -> dic
             "procurement_report": session.procurement_report,
             "cost_estimate": session.cost_estimate,
             "functional_plan": session.functional_plan,
+            **({"issued_handoff": session.issued_handoff} if session.issued_handoff else {}),
         },
         title=title,
     )

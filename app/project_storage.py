@@ -11,7 +11,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 
 from app.budget_allowances import SavedBudget
-from app.cad_instances import CadInstance, Name
+from app.cad_instances import CadInstance, MatingChange, Name
 from app.commercial_design import CommercialProposal, adopt_commercial
 from app.conversation_history import DISPLAY_HISTORY_LIMIT
 from app.design_spec import FoundationLayoutProposal, LayoutProposal, apply_candidate
@@ -108,6 +108,7 @@ class Snapshot(StrictModel):
     standalone_fixture: dict[str, JsonValue] | None = None
     upstream_project: dict[str, JsonValue] | None = None
     cad_instances: dict[Name, CadInstance] | None = None
+    mating_change: MatingChange | None = None
     physical_assembly: AssemblyBinding | None = None
     budget_allowances: Annotated[dict[str, SavedBudget], Field(max_length=512)] | None = None
     part_choices: Annotated[dict[str, PartChoice], Field(max_length=512)] | None = None
@@ -200,6 +201,8 @@ def make_snapshot(project: dict, history: list[dict]) -> dict:
            if project.get("concept_design") else {}),
         **({"standalone_fixture": deepcopy(project["standalone_fixture"]["spec"])}
            if project.get("standalone_fixture") else {}),
+        **({"mating_change": deepcopy(project["mating_change"])}
+           if project.get("mating_change") else {}),
         **({"cad_instances": deepcopy(project["cad_instances"])}
            if project.get("cad_instances") else {}),
         **({"upstream_project": deepcopy(project["upstream_project"])}
@@ -510,6 +513,15 @@ def restore_snapshot(
             key: value.model_dump() for key, value in saved.cad_instances.items()
         }
         refresh_spatial_fit(project, lab_profile=lab_profile)
+    if change := saved.mating_change:
+        target = (project.get("cad_instances") or {}).get(change.instance) or {}
+        adapted = target.get("adaptation") or {}
+        current_hash = target.get("artifact_hashes", {}).get("adapter-step")
+        if (change.revision > saved.revision
+                or change.current_step_sha256 != current_hash
+                or change.current_spec.model_dump() != adapted.get("spec")):
+            raise ValueError("The mating change does not identify the saved adapter.")
+        project["mating_change"] = change.model_dump()
     geometry_changed = False
     if saved.physical_assembly and not (upgraded or clearance_upgrade):
         from app.project_assembly import assembly_binding

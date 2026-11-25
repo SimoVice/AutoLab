@@ -275,21 +275,41 @@ async def save_project(project_id: str, revision: int) -> Response:
     )
 
 
+@router.get("/api/projects/{project_id}/handoff/{asset:path}")
+async def download_handoff(project_id: str, asset: str, revision: int) -> Response:
+    from app.routers.handoff import issue
+
+    return await issue(api_hook("session_for", session_for)(project_id), asset, revision)
+
+
 @router.post("/api/projects/open", status_code=201)
 async def open_project(request: Request) -> dict:
+    from starlette.concurrency import run_in_threadpool
+
+    from app.mixed_handoff import MAX_PACKAGE_BYTES, keep_package, open_package, snapshot_key
+
     content = bytearray()
+    packaged = False
     async for chunk in request.stream():
-        content.extend(chunk)
-        if len(content) > MAX_SNAPSHOT_BYTES:
+        if len(content) < 4:
+            packaged = (bytes(content) + chunk[:4]).startswith(b"PK\x03\x04")
+        if len(content) + len(chunk) > (MAX_PACKAGE_BYTES if packaged else MAX_SNAPSHOT_BYTES):
+            if packaged:
+                raise HTTPException(413, "The assembly package exceeds 128 MiB.")
             raise HTTPException(
                 status_code=413, detail="The project file exceeds the 256 KB limit."
             )
+        content.extend(chunk)
     try:
         from app.routers.procurement import _active_lab_profile
 
-        snapshot = decode_snapshot(bytes(content))
-        profile = _active_lab_profile() if snapshot.get("cad_instances") else None
-        project, history = restore_snapshot(snapshot, lab_profile=profile)
+        if packaged:
+            profile = _active_lab_profile()
+            project, history = await run_in_threadpool(open_package, bytes(content), profile)
+        else:
+            snapshot = decode_snapshot(bytes(content))
+            profile = _active_lab_profile() if snapshot.get("cad_instances") else None
+            project, history = restore_snapshot(snapshot, lab_profile=profile)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
     session = ProjectSession(project=project, history=history)
@@ -314,12 +334,21 @@ async def open_project(request: Request) -> dict:
                 session.procurement_report = candidate.procurement_report
                 session.cost_estimate = candidate.cost_estimate
                 break
+    if packaged:
+        from app.procurement import report_for_project
+
+        report = report_for_project(project, session.procurement_report)
+        key = snapshot_key(make_snapshot(project, history), profile, report)
+        session.issued_handoff = await run_in_threadpool(keep_package, bytes(content), key)
     _sessions[project["id"]] = session
     api_hook("_persist_session", persist_session)(session)
     return {
         "project": deepcopy(project),
         "conversation": deepcopy(history),
-        "assistant_message": "Project reopened. Geometry was rebuilt from saved inputs.",
+        "assistant_message": (
+            "Assembly package reopened. CAD and revision records verified." if packaged
+            else "Project reopened. Geometry was rebuilt from saved inputs."
+        ),
     }
 
 
@@ -484,10 +513,13 @@ async def download_custom_asset(project_id: str, asset: str, revision: int) -> R
         design = session.project.get("concept_design")
         if design is None:
             raise HTTPException(404, "Generate a custom assembly first.")
+        mixed_assets = {"machine.step": "cad/assembly.step", "machine.stl": "cad/assembly.stl",
+                        "parts.csv": "purchasing/bom.csv"}
+        mixed = mixed_assets.get(asset) if session.project.get("cad_instances") else None
         price_record = None
         purchasing_bom = None
         assembly = assembly_json(session.project) if asset == "package.zip" else None
-        if asset in ("package.zip", "parts.csv"):
+        if not mixed and asset in ("package.zip", "parts.csv"):
             purchasing_bom = build_complete_bom(
                 session.project, lab_profile=_active_lab_profile(),
                 procurement_report=report_for_project(session.project, session.procurement_report),
@@ -495,6 +527,8 @@ async def download_custom_asset(project_id: str, asset: str, revision: int) -> R
             price_record = price_record_for_project(
                 session.project, session.procurement_report, bom=purchasing_bom
             )
+    if mixed:
+        return await download_handoff(project_id, mixed, revision)
     try:
         data, mime = await run_in_threadpool(
             render_asset, design, project_id, revision, asset,

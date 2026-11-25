@@ -166,7 +166,8 @@ async def get_instance_asset(project_id: str, name: str, role: str, revision: in
         path = instance_file(instance, role) if instance else None
         if path is None:
             raise HTTPException(status_code=404, detail="CAD artifact unavailable in this cache.")
-        mime = {".glb": "model/gltf-binary", ".stl": "model/stl", ".step": "model/step"}
+        mime = {".glb": "model/gltf-binary", ".stl": "model/stl", ".step": "model/step",
+                ".txt": "text/plain"}
         return Response(content=path.read_bytes(), media_type=mime[path.suffix],
                         headers={"Cache-Control": "no-store", "Content-Disposition":
                                  f'inline; filename="{name}-{role}{path.suffix}"'})

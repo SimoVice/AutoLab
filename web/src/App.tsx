@@ -459,13 +459,18 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
     setStorageBusy(true);
     setError(null);
     try {
-      const response = await fetch(`/api/projects/${encodeURIComponent(project.id)}/snapshot?revision=${project.revision}`);
-      if (!response.ok) throw new Error('The project could not be saved. Try again.');
+      const mixed = Object.keys(project.cad_instances ?? {}).length > 0;
+      const asset = mixed ? 'handoff/package.zip' : 'snapshot';
+      const response = await fetch(`/api/projects/${encodeURIComponent(project.id)}/${asset}?revision=${project.revision}`);
+      if (!response.ok) {
+        const detail = await response.json().catch(() => ({}));
+        throw new Error(detail.detail ?? 'The project could not be saved. Try again.');
+      }
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `autolab-r${project.revision}.json`;
+      link.download = `autolab-r${project.revision}.${mixed ? 'zip' : 'json'}`;
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       setStorageNotice('Project saved to file, including the latest design and conversation.');
@@ -480,10 +485,12 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
     setStorageBusy(true);
     setError(null);
     try {
-      if (file.size > 256 * 1024) throw new Error('Choose a project file smaller than 256 KB.');
-      const raw = await file.text();
+      const packaged = (await file.slice(0, 4).text()) === 'PK\x03\x04';
+      if (file.size > (packaged ? 128 * 1024 * 1024 : 256 * 1024)) {
+        throw new Error(packaged ? 'Choose an assembly package under 128 MiB.' : 'Choose a project file smaller than 256 KB.');
+      }
       const response = await fetch('/api/projects/open', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: raw,
+        method: 'POST', headers: { 'Content-Type': packaged ? 'application/zip' : 'application/json' }, body: file,
       });
       const data = await response.json() as OpenedProject & { detail?: string };
       if (!response.ok || !data.project) throw new Error(data.detail ?? 'Choose a valid AutoLab project file.');
@@ -497,7 +504,8 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
       setSelectedId(null);
       setInput('');
       setPlaying(false);
-      setStorageNotice(data.project.rebuild_notice ?? 'Project reopened. Geometry was rebuilt; previous runs are ready to regenerate.');
+      setStorageNotice(packaged ? 'Assembly package reopened. CAD and revision records verified.' :
+        data.project.rebuild_notice ?? 'Project reopened. Geometry was rebuilt; previous runs are ready to regenerate.');
       field.current?.focus({ preventScroll: true });
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'The project could not be opened.'); }
     finally { setStorageBusy(false); if (projectFile.current) projectFile.current.value = ''; }
@@ -863,7 +871,7 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
         </a>
         <div className="topbar-center"><span className="topbar-divider" /> Workspace <span className="topbar-slash">/</span> <strong>{savedTitle || headerLabel}</strong></div>
         <div className="topbar-end">
-          <input ref={projectFile} tabIndex={-1} type="file" accept=".json,application/json" className="sr-only" aria-label="Open saved project" onChange={(event) => { const file = event.target.files?.[0]; if (file) void openProject(file); }} />
+          <input ref={projectFile} tabIndex={-1} type="file" accept=".json,.zip,application/json,application/zip" className="sr-only" aria-label="Open saved project" onChange={(event) => { const file = event.target.files?.[0]; if (file) void openProject(file); }} />
           {hosted && <ProjectLibrary projectId={project?.id} revision={project?.revision} title={savedTitle} disabled={uiBusy || initializing} onBusy={setStorageBusy} onOpen={acceptLibraryProject} onSaved={acceptSavedProject} onSignOut={onSignOut} hasUnsaved={Boolean(input.trim() || (!savedTitle && messages.length > 1))} />}
           <button type="button" className="new-project-button" onClick={() => setLabProfileOpen(true)} disabled={uiBusy || initializing}>Lab profile</button>
           <button type="button" className="new-project-button" onClick={() => projectFile.current?.click()} disabled={uiBusy || initializing}>{hosted ? 'Import file' : 'Open project'}</button>

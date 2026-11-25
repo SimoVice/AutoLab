@@ -86,6 +86,10 @@ export function AttachedCadModels({ project, scale, origin = [0, 0, 0], host }: 
   </group>;
 }
 
+function handoffUrl(project: Project, asset: string) {
+  return `/api/projects/${encodeURIComponent(project.id)}/handoff/${asset}?revision=${project.revision}`;
+}
+
 export function CadInstanceDetails({ project }: { project: Project }) {
   const fit = project.design.spatial_fit?.cad_assembly;
   if (!fit || !project.cad_instances) return null;
@@ -106,9 +110,15 @@ export function CadInstanceDetails({ project }: { project: Project }) {
         {source.adaptation && <> · <a download href={assetUrl(project, check.name, 'adapter-step')}>Adapter STEP</a> · <a download href={assetUrl(project, check.name, 'adapter-stl')}>Adapter STL</a></>}
       </section>;
     })}
-    <p>Host STEP and STL downloads contain the native design. Download each attached part above.</p>
+    {project.mating_change && <p>Revision {project.mating_change.revision} · Reprint the adapter for {project.mating_change.instance} and check its mounting datum.</p>}
     <p>Rest-pose envelope overlaps · {fit.possible_overlaps.length ? fit.possible_overlaps.map(pair => pair.join(' / ')).join(', ') : 'None detected among placed parts'}</p>
     {fit.unplaced_parts.length > 0 && <p>Parts without a checked placement · {fit.unplaced_parts.join(', ')}</p>}
-    <p>Host CAD downloads cover the host model. Each attached part has its own files above.</p>
+    <nav aria-label="Assembly downloads">
+      <a href={handoffUrl(project, 'package.zip')} download>Complete assembly package (ZIP)</a>
+      {' · '}<a href={handoffUrl(project, 'cad/assembly.step')} download>Assembly STEP</a>
+      {' · '}<a href={handoffUrl(project, 'cad/assembly.stl')} download>Assembly STL</a>
+      {' · '}<a href={handoffUrl(project, 'purchasing/bom.csv')} download>Purchasing list</a>
+      {' · '}<a href={handoffUrl(project, 'assembly/guide.md')} download>Installation guide</a>
+    </nav>
   </details>;
 }

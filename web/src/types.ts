@@ -265,6 +265,7 @@ export type Project = {
   standalone_fixture?: StandaloneFixture | null;
   upstream_project?: UpstreamProjectState | null;
   cad_instances?: Record<string, CadInstance>;
+  mating_change?: { instance: string; revision: number };
   build_logs?: BuildLogEntry[];
   build_feedback?: BuildFeedbackSummary | null;
   labware_brief?: LabwareBrief | null;
