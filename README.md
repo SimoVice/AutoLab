@@ -74,6 +74,11 @@ purchase line supports, how each part is positioned and what evidence describes
 its interfaces. Each instance keeps its identity when the project is reopened.
 [Inspect the parts in a project](docs/platform.md#inspect-the-parts-in-a-project).
 
+To add external CAD to a design already open, give the assistant the pinned STEP
+or STL, an instance name and its measured position relative to an existing part.
+The 3D view shows the parts together. Open **Attached CAD** for the source,
+placement, checks and individual files. [Place external CAD](docs/platform.md#place-external-cad-in-an-existing-design).
+
 For a new piece of equipment, the **custom-equipment path** can propose an original
 assembly with named parts, attached subassemblies, dimensions and an ordered
 operating sequence. Its 3D view, component models, parts list, assembly guide and

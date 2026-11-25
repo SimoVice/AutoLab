@@ -10,6 +10,7 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from app.cad_instances import CadPlacement, Digest, Name, instance_file, selected_source
 from app.lab_profile import has_lab_profile_data, load_lab_profile
 from app.open_hardware_discovery import DEFAULT_SOURCES, discover_open_hardware
 from app.open_hardware_license import render_third_party_notices
@@ -43,6 +44,9 @@ class IngestRequest(BaseModel):
     repo_full_name: Annotated[str, Field(min_length=3, max_length=200)]
     commit_sha: Annotated[str, Field(min_length=2, max_length=64)]
     cad_file_path: Annotated[str, Field(min_length=3, max_length=400)]
+    instance_id: Name | None = None
+    placement: CadPlacement | None = None
+    expected_sha256: Digest | None = None
     repo_url: Annotated[str | None, Field(max_length=500)] = None
     raw_url: Annotated[str | None, Field(max_length=500)] = None
     spdx_hint: Annotated[str | None, Field(max_length=64)] = None
@@ -57,6 +61,7 @@ class AdaptRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     project_revision: Annotated[int, Field(strict=True, ge=0)]
     mode: Literal["mating", "parametric"]
+    instance_id: Name | None = None
     mating_spec: MatingAdaptationSpec | None = None
     param_overrides: list[ParamOverride] | None = None
 
@@ -87,7 +92,8 @@ async def ingest_upstream_project_route(project_id: str, request: IngestRequest)
         try:
             updated = await attach_upstream_project(
                 session.project,
-                source_host=request.source_host,
+                instance_id=request.instance_id, placement=request.placement,
+                expected_sha256=request.expected_sha256, source_host=request.source_host,
                 repo_full_name=request.repo_full_name,
                 repo_url=request.repo_url,
                 raw_url=request.raw_url,
@@ -105,8 +111,10 @@ async def ingest_upstream_project_route(project_id: str, request: IngestRequest)
             raise HTTPException(status_code=403, detail=str(exc)) from None
         except (ValidationError, ValueError, UpstreamCadError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
-        accept_fn(session, updated)
-        prov = updated["upstream_project"]["provenance"]
+        if updated is not session.project:
+            accept_fn(session, updated)
+        source = selected_source(updated, request.instance_id)
+        prov = source["provenance"]
         return {
             "project": deepcopy(updated),
             "assistant_message": (
@@ -128,15 +136,17 @@ async def adapt_upstream_project_route(project_id: str, request: AdaptRequest) -
         try:
             updated = await apply_upstream_adaptation(
                 session.project,
-                mode=request.mode,
+                mode=request.mode, instance_id=request.instance_id,
                 mating_spec=request.mating_spec,
                 param_overrides=request.param_overrides,
                 lab_profile=lab_profile,
             )
         except (ValidationError, ValueError, UpstreamCadError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
-        accept_fn(session, updated)
-        adapt = updated["upstream_project"]["adaptation"]
+        if updated is not session.project:
+            accept_fn(session, updated)
+        source = selected_source(updated, request.instance_id)
+        adapt = source["adaptation"]
         return {
             "project": deepcopy(updated),
             "assistant_message": (
@@ -145,6 +155,21 @@ async def adapt_upstream_project_route(project_id: str, request: AdaptRequest) -
                 f"{updated['revision']}."
             ),
         }
+
+
+@router.get("/api/projects/{project_id}/upstream/instances/{name}/{role}")
+async def get_instance_asset(project_id: str, name: str, role: str, revision: int) -> Response:
+    session = api_hook("session_for", session_for)(project_id)
+    async with session.model_lock():
+        check_revision(session.project, revision)
+        instance = (session.project.get("cad_instances") or {}).get(name)
+        path = instance_file(instance, role) if instance else None
+        if path is None:
+            raise HTTPException(status_code=404, detail="CAD artifact unavailable in this cache.")
+        mime = {".glb": "model/gltf-binary", ".stl": "model/stl", ".step": "model/step"}
+        return Response(content=path.read_bytes(), media_type=mime[path.suffix],
+                        headers={"Cache-Control": "no-store", "Content-Disposition":
+                                 f'inline; filename="{name}-{role}{path.suffix}"'})
 
 
 @router.get("/api/projects/{project_id}/upstream/preview/{kind}.glb")

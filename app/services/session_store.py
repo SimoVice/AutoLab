@@ -119,6 +119,17 @@ def accept_project(
     # Some design compilers rebuild the project rather than copying optional records.
     if "budget_allowances" not in updated and before.get("budget_allowances"):
         updated["budget_allowances"] = deepcopy(before["budget_allowances"])
+    if before.get("cad_instances"):
+        from app.lab_profile import load_lab_profile
+        from app.spatial_fit import refresh_spatial_fit
+
+        updated["cad_instances"] = {
+            **deepcopy(before["cad_instances"]), **(updated.get("cad_instances") or {}),
+        }
+        try:
+            refresh_spatial_fit(updated, lab_profile=load_lab_profile())
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
     reconcile_part_choices(updated)
     reconcile_budgets(updated)
     report = rebind_report(before, updated, session.procurement_report)

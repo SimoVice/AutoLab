@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -30,7 +31,8 @@ def _ensure_upstream_allowed(project: dict[str, Any]) -> dict[str, Any]:
     wf_kind = (project.get("workflow") or {}).get("kind")
     design = project.get("design") or {}
     if (
-        project.get("engineering_design")
+        project.get("cad_instances")
+        or project.get("engineering_design")
         or design.get("foundation")
         or design.get("platform")
         or project.get("concept_design")
@@ -46,8 +48,7 @@ def _ensure_upstream_allowed(project: dict[str, Any]) -> dict[str, Any]:
     return deepcopy(project)
 
 
-async def attach_upstream_project(
-    project: dict[str, Any],
+async def read_upstream_source(
     *,
     source_host: str,
     repo_full_name: str,
@@ -70,11 +71,10 @@ async def attach_upstream_project(
     license_files: list[str] | None = None,
     doc_texts_override: dict[str, str] | None = None,
     authors: str | None = None,
-    lab_profile: dict[str, Any] | None = None,
+    artifact_dir: Path | None = None,
     client: httpx.AsyncClient | None = None,
 ) -> dict[str, Any]:
     """Ingest verified commit-pinned upstream CAD, docs, BOM, and software refs into project."""
-    updated = _ensure_upstream_allowed(project)
     cached = lookup_discovered_candidate(source_host, repo_full_name, commit_sha) or {}
 
     eff_repo_url = repo_url or cached.get("repo_url") or (
@@ -121,6 +121,7 @@ async def attach_upstream_project(
                 break
 
     ingested = await ingest_upstream_cad(
+        artifact_dir=artifact_dir,
         source_host=source_host,
         repo_full_name=repo_full_name,
         repo_url=eff_repo_url,
@@ -167,7 +168,22 @@ async def attach_upstream_project(
         "adaptation": None,
     }
 
-    app_size = ingested["geometry"]["app_size_mm"]
+    return up_state
+
+
+async def attach_upstream_project(
+    project: dict[str, Any], *, instance_id: str | None = None, placement=None,
+    lab_profile: dict[str, Any] | None = None, **source,
+) -> dict[str, Any]:
+    """Open a standalone source or place a named file inside the current assembly."""
+    if instance_id is not None:
+        from app.cad_instances import attach_instance
+        return await attach_instance(project, instance_id, placement, source, lab_profile)
+    if placement is not None:
+        raise ValueError("Supply an instance_id with the measured placement.")
+    updated = _ensure_upstream_allowed(project)
+    up_state = await read_upstream_source(**source)
+    app_size = up_state["geometry"]["app_size_mm"]
     updated["upstream_project"] = up_state
     updated["revision"] = int(updated.get("revision") or 0) + 1
     updated["design"]["footprint"] = {
@@ -187,11 +203,17 @@ async def apply_upstream_adaptation(
     project: dict[str, Any],
     *,
     mode: str,
+    instance_id: str | None = None,
     mating_spec: MatingAdaptationSpec | dict[str, Any] | None = None,
     param_overrides: list[ParamOverride] | list[dict[str, Any]] | dict[str, Any] | None = None,
     lab_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Generate a mating part or parametric revision for project['upstream_project']."""
+    if instance_id is not None:
+        from app.cad_instances import adapt_instance
+        if mode != "mating" or mating_spec is None:
+            raise ValueError("A named STEP or STL instance needs a mating specification.")
+        return await adapt_instance(project, instance_id, mating_spec, lab_profile)
     up = project.get("upstream_project")
     if not isinstance(up, dict):
         raise ValueError("No upstream open-source project is ingested in this project.")

@@ -1,3 +1,4 @@
+import { AttachedCadModels } from './AttachedCad';
 import { Bounds, OrbitControls, useBounds } from '@react-three/drei';
 import { Canvas, useThree } from '@react-three/fiber';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -191,6 +192,7 @@ export default function FixturePanel({
             <directionalLight position={[-3, 2, -2]} intensity={1.1} />
             <Bounds fit clip observe margin={1.15} maxDuration={0}>
               <group rotation={[0, (turn * Math.PI) / 4, 0]}>
+                <AttachedCadModels project={project} scale={1 / SCALE} />
                 {fixture.components.map((comp) => (
                   <GeometryPart
                     key={comp.id}

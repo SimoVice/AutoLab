@@ -1,3 +1,4 @@
+import { AttachedCadModels } from './AttachedCad';
 import { OrbitControls } from '@react-three/drei';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import type { ThreeEvent } from '@react-three/fiber';
@@ -774,10 +775,17 @@ export default function Scene({ project, selectedId, onSelect, operation, inspec
     isolatedRevision.current = revision;
     isolationContext.current = { projectId: project.id, layoutKey };
   }, [isolation, selectedId, project.id, project.revision, project.labware_plate, project.labware_rack, project.tip_rack, layoutKey]);
+  const attachedBounds = project.design.spatial_fit?.cad_assembly?.bounds_mm;
   const bounds = useMemo(() => {
     if (!components.length) return { center: [0, 0, 0] as [number, number, number], height: 0 };
     const min = [0, 1, 2].map((axis) => Math.min(...components.map((part) => part.position[axis] - part.size[axis] / 2), extension?.bounds.min_mm[axis] ?? Infinity));
     const max = [0, 1, 2].map((axis) => Math.max(...components.map((part) => part.position[axis] + part.size[axis] / 2), extension?.bounds.max_mm[axis] ?? -Infinity));
+    if (attachedBounds) {
+      for (let axis = 0; axis < 3; axis++) {
+        min[axis] = Math.min(min[axis], attachedBounds[0][axis]);
+        max[axis] = Math.max(max[axis], attachedBounds[1][axis]);
+      }
+    }
     // Include the complete lid swing, even when playback is paused or sought.
     const lid = cold?.components.find((part) => part.id === 'cold-transfer-lid');
     if (lid && cold && Number.isFinite(cold.lid_open_angle_deg)) {
@@ -793,7 +801,7 @@ export default function Scene({ project, selectedId, onSelect, operation, inspec
       }
     }
     return { center: [(min[0] + max[0]) / 2, min[1], (min[2] + max[2]) / 2] as [number, number, number], width: max[0] - min[0], height: max[1] - min[1], depth: max[2] - min[2] };
-  }, [designComponents, extension, cold]);
+  }, [designComponents, extension, cold, attachedBounds]);
   const target: [number, number, number] = [0, bounds.height / SCALE / 2, 0];
 
   const lastColdFocusKey = useRef(0);
@@ -962,6 +970,7 @@ export default function Scene({ project, selectedId, onSelect, operation, inspec
         <FitCamera enabled={!isolated && !coldFocus} width={Math.max(footprint.width_mm, bounds.width ?? 0)} height={Math.max(footprint.height_mm, bounds.height)} depth={Math.max(footprint.depth_mm, bounds.depth ?? 0)} />
         <FocusCamera request={coldFocus ?? (isolated?.mode === 'arm' ? isolation : isolated)} focusKey={isolated?.mode === 'part' && isolated.id === 'tip-rack' ? `${project.id}:tip-rack` : null} />
         <group>
+          {!isolated && !operation?.playing && !(showTimeline && operation?.time_s) && <AttachedCadModels project={project} scale={1 / SCALE} origin={bounds.center} />}
           {(isolated && !showTimeline && !showCold ? components : staticParts).filter((part) => part.kind !== 'upstream-cad' && !BED_PART_IDS.has(part.id) && (!showColdHardware || !coldIds.has(part.id)) && (!(smoothInspection || showCold) || !extension?.component_ids.includes(part.id)) && (!isolated || isolated.ids.includes(part.id))).map((part) => <GeometryPart key={part.id} part={part}
             position={[(part.position[0] - bounds.center[0]) / SCALE, (part.position[1] - bounds.center[1]) / SCALE, (part.position[2] - bounds.center[2]) / SCALE]}
             selected={part.id === selectedId} onSelect={onSelect} />)}

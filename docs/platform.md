@@ -147,3 +147,31 @@ This is the extension approach for the codebase. The shared concept path can
 generate new proposed arrangements within its geometry and motion vocabulary;
 there is no automatic plugin installer, unrestricted CAD generator or automatic
 hardware commissioning.
+
+## Place external CAD in an existing design
+
+In chat, identify the repository, full commit, file and instance name. Give the
+mounting datum, translation in millimetres and any rotation relative to the
+project frame or a placed part. A second instance can use the first as its
+parent. STEP carries source units. For STL, supply the units used by the
+designer. An optional access check takes a face in the instance's local Y-up
+axes and a required clearance in millimetres.
+
+For example, after selecting a source, ask to place the lamp holder 80 mm to
+the right of the base origin, with its lower face 16.4 mm above that origin.
+To reserve access from above, specify the distance along local +Y. The assistant
+can then generate a mating plate for that named solid STEP instance. Repeating
+the same import or adaptation at the current revision preserves its identity and
+revision. A conflicting name, failed inspection or stale revision leaves the
+previous assembly available.
+
+**Attached CAD** shows the original repository, commit, file checksum, units,
+license and placement. Interference between a STEP source and its generated
+adapter uses solid intersection. The whole assembly and specified access spaces
+use conservative bounding boxes at the rest pose. A printer build volume is
+needed for the adapter fit check. Physical fit and access require bench testing.
+
+The project file preserves the pins, measurements and geometry fingerprint.
+Original, preview and adapter files are available from the local CAD cache.
+Host geometry downloads cover the native design. The assembly JSON identifies
+the separate source and adapter artifacts for each named instance.

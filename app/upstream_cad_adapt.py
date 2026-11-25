@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -102,6 +103,7 @@ async def adapt_upstream_mating(
     *,
     lab_profile: dict[str, Any] | None = None,
     test_overlap_mm: float = 0.0,
+    artifact_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Generate a non-destructive custom mating part and verify zero modeled interference."""
     validated = (
@@ -121,7 +123,8 @@ async def adapt_upstream_mating(
             "overlap": test_overlap_mm,
         }
     )
-    out_dir = upstream_cache_dir() / "adapted" / f"{prov['file_sha256'][:12]}-{cache_id}"
+    folder = f"{prov['file_sha256'][:12]}-{cache_id}"
+    out_dir = artifact_dir or upstream_cache_dir() / "adapted" / folder
 
     worker_res = await run_upstream_worker(
         "adapt_mating",

@@ -451,6 +451,15 @@ def evaluate_spatial_fit(
     subject, body_wdh, clearance_specs = _resolve_subject_and_body(
         project, platform_id=platform_id, candidate_footprint=candidate_footprint
     )
+    mixed = None
+    adapter_prints = []
+    if project.get("cad_instances") and candidate_footprint is None and platform_id is None:
+        from app.cad_placement import check_assembly
+        from app.project_assembly import _geometry
+
+        mixed, adapter_prints = check_assembly(project, _geometry(project), lab_profile)
+        low, high = mixed["bounds_mm"]
+        body_wdh = [max(native, high[i] - low[i]) for native, i in zip(body_wdh, (0, 2, 1))]
     clearances_by_axis, clearance_items = _clearance_totals(clearance_specs)
     summary = project.get("summary") or {}
     limits = {
@@ -514,6 +523,9 @@ def evaluate_spatial_fit(
         "printable_checks": printable_checks,
         "violations": violations,
     }
+    if mixed:
+        result["cad_assembly"] = mixed
+        result["printable_checks"].extend(adapter_prints)
     if candidate_footprint is None and subject in (
         "jubilee",
         "opentrons-ot2",

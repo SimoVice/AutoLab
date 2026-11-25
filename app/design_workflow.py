@@ -48,6 +48,9 @@ def machine_signature(project: dict) -> str:
                      if item.get("selection_cleared"))
     if cleared:
         payload["cleared_part_selections"] = cleared
+    if project.get("cad_instances"):
+        from app.project_assembly import assembly_binding
+        payload["cad_instances"] = assembly_binding(project)
     if project.get("upstream_project"):
         up = project["upstream_project"]
         payload["upstream_project"] = {

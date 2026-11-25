@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
@@ -58,9 +59,14 @@ def _safe_filename(name: str) -> str:
 
 def _atomic_write(target: Path, data: bytes) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
-    tmp.write_bytes(data)
-    os.replace(tmp, target)
+    staged = tempfile.NamedTemporaryFile(dir=target.parent, delete=False)
+    tmp = Path(staged.name)
+    try:
+        with staged:
+            staged.write(data)
+        os.replace(tmp, target)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def cache_source_bytes(filename: str, raw: bytes) -> dict[str, Any]:
@@ -245,6 +251,7 @@ def resolve_raw_file_url(
 
 async def ingest_upstream_cad(
     *,
+    artifact_dir: Path | None = None,
     source_host: str,
     repo_full_name: str,
     repo_url: str,
@@ -297,7 +304,7 @@ async def ingest_upstream_cad(
             client=client,
         )
 
-    artifact_dir = upstream_cache_dir() / "inspected" / dl["file_sha256"]
+    artifact_dir = artifact_dir or upstream_cache_dir() / "inspected" / dl["file_sha256"]
     worker_out = await run_upstream_worker(
         "inspect",
         {

@@ -1,3 +1,4 @@
+import { AttachedCadModels } from './AttachedCad';
 import { useEffect, useRef, useState } from 'react';
 import { OrthographicCamera } from 'three';
 import { Canvas, useThree } from '@react-three/fiber';
@@ -74,7 +75,7 @@ function KeyboardZoom({ zoom }: { zoom: number }) {
   return null;
 }
 
-function StationScene({ station, turn, zoom, selectedId }: { selectedId?: string | null; station: BenchStation; turn: number; zoom: number }) {
+function StationScene({ project, station, turn, zoom, selectedId }: { project: Project; selectedId?: string | null; station: BenchStation; turn: number; zoom: number }) {
   const scale = 1 / Math.max(...station.footprint_mm, 1);
   const [width, depth] = station.footprint_mm.map((n) => n * scale);
   const height = Math.max(...station.modules.map((module) => module.position_mm[1] + module.size_mm[1] / 2), 0) * scale;
@@ -86,6 +87,7 @@ function StationScene({ station, turn, zoom, selectedId }: { selectedId?: string
     <Bounds fit clip observe margin={1.1} maxDuration={0}>
       <group rotation={[0, turn * Math.PI / 4, 0]}>
         <group position={[-width / 2, -height / 2, -depth / 2]}>
+        <AttachedCadModels project={project} scale={scale} />
         <Box size={[width, .025, depth]} position={[width / 2, -.015, depth / 2]} color={colors.frame} metalness={.55} />
         <Box size={[width * .98, .008, depth * .98]} position={[width / 2, .002, depth / 2]} color="#f6f9f7" />
         {station.modules.map((module) => module.functional_surface_mm && <Box key={`surface-${module.id}`} size={[module.functional_surface_mm[2] * scale, .004, module.functional_surface_mm[3] * scale]} position={[(module.functional_surface_mm[0] + module.functional_surface_mm[2] / 2) * scale, .009, (module.functional_surface_mm[1] + module.functional_surface_mm[3] / 2) * scale]} color="#e1eeea" />)}
@@ -99,7 +101,7 @@ function StationScene({ station, turn, zoom, selectedId }: { selectedId?: string
   </Canvas>;
 }
 
-export default function BenchStationPanel({ station, projectId, revision, panel, selectedId = null }: { station: BenchStation; project: Project; projectId: string; revision: number; panel: 'design' | 'parts' | 'instructions' | 'software'; selectedId?: string | null }) {
+export default function BenchStationPanel({ project, station, projectId, revision, panel, selectedId = null }: { station: BenchStation; project: Project; projectId: string; revision: number; panel: 'design' | 'parts' | 'instructions' | 'software'; selectedId?: string | null }) {
   const [turn, setTurn] = useState(0);
   const [zoom, setZoom] = useState(0);
   const [viewKey, setViewKey] = useState(0);
@@ -108,7 +110,7 @@ export default function BenchStationPanel({ station, projectId, revision, panel,
     <div className="bench-station-design-stage" hidden={panel !== 'design' && panel !== 'software'}>
     <div className="bench-station-heading"><div><h2>Modular bench station</h2><p>Concept layout · revision {revision}</p></div><span>Schematic</span></div>
     <div className="bench-station-view">
-      <StationScene key={viewKey} station={station} turn={turn} zoom={zoom} selectedId={selectedId} />
+      <StationScene project={project} key={viewKey} station={station} turn={turn} zoom={zoom} selectedId={selectedId} />
       <div className="bench-station-controls" aria-label="Schematic view controls">
         <button type="button" onClick={() => setTurn((v) => v - 1)} aria-label="Rotate station left">↶</button>
         <button type="button" onClick={() => setTurn((v) => v + 1)} aria-label="Rotate station right">↷</button>

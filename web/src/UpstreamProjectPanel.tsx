@@ -1,3 +1,4 @@
+import { AttachedCadModels } from './AttachedCad';
 import { Bounds, OrbitControls, useBounds } from '@react-three/drei';
 import { Canvas, useThree } from '@react-three/fiber';
 import { Component as ReactComponent, Suspense, type ReactNode, useEffect, useState } from 'react';
@@ -190,7 +191,8 @@ export default function UpstreamProjectPanel({
             <GlbErrorBoundary fallback={fallbackBox}>
               <Suspense fallback={fallbackBox}>
                 <Bounds fit clip observe margin={1.2} maxDuration={0}>
-                  <group rotation={[-Math.PI / 2, 0, 0]} scale={[10, 10, 10]}>
+                  <AttachedCadModels project={project} scale={0.01} />
+                  <group scale={[10, 10, 10]}>
                     <LoadedGlb
                       url={upstreamGlbUrl}
                       color="#64748b"

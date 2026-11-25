@@ -253,12 +253,30 @@ def _normalize_shape(shape, *, source_units: str = "auto", source_up_axis: str =
     }
 
 
-def _export_preview_glb(shape, glb_path: Path) -> int:
-    from build123d import Unit, export_gltf
+def _load_normalized_stl(path, source_units, source_up_axis):
+    from build123d import Unit, import_stl
 
+    # STL is a triangulated face. Scale its vertices during import so the
+    # geometry, its measured bounds and the exported preview use the same units.
+    unit = Unit.IN if source_units == "in" else Unit.MM
+    shape = import_stl(path, model_unit=unit)
+    normalized, transform = _normalize_shape(shape, source_up_axis=source_up_axis)
+    transform["source_units_applied"] = source_units
+    if unit == Unit.IN:
+        transform["scale_factor"] = 25.4
+        transform["steps"].insert(0, "scale(25.4)")
+    return normalized, transform
+
+
+def _export_preview_glb(shape, glb_path: Path) -> int:
+    from build123d import Compound, Unit, export_gltf
+
+    # The glTF exporter rotates its root from CAD Z-up to Y-up. A neutral root
+    # also rotates each child's pre-existing placement about the project datum.
+    scene = Compound(children=[shape], label="normalized-cad")
     for lin_def, ang_def in ((0.08, 0.2), (0.25, 0.35), (0.6, 0.5)):
         export_gltf(
-            shape,
+            scene,
             glb_path,
             unit=Unit.MM,
             binary=True,
@@ -351,9 +369,12 @@ def _inspect_handler(payload: dict[str, Any]) -> dict[str, Any]:
         shape = import_step(source_path)
         if shape is None or not shape.is_valid or len(shape.solids()) == 0:
             raise ValueError("Imported STEP file contains no valid solid bodies.")
+        # OCCT already converted a STEP with declared inch units to millimetres.
+        override = "auto" if source_units == detected_units else source_units
         norm_shape, transform = _normalize_shape(
-            shape, source_units=source_units, source_up_axis=source_up_axis
+            shape, source_units=override, source_up_axis=source_up_axis
         )
+        transform["source_units_applied"] = source_units
         bb = norm_shape.bounding_box()
         bounds = _cad_to_app_bbox((bb.min.X, bb.min.Y, bb.min.Z), (bb.max.X, bb.max.Y, bb.max.Z))
         planes, holes = _extract_brep_features(norm_shape)
@@ -384,13 +405,8 @@ def _inspect_handler(payload: dict[str, Any]) -> dict[str, Any]:
         }
 
     if ext == ".stl":
-        from build123d import import_stl
-
         stl_stats = _analyze_stl_file(source_path)
-        shape = import_stl(source_path)
-        norm_shape, transform = _normalize_shape(
-            shape, source_units=source_units, source_up_axis=source_up_axis
-        )
+        norm_shape, transform = _load_normalized_stl(source_path, source_units, source_up_axis)
         scale = float(transform["scale_factor"])
         bb = norm_shape.bounding_box()
         bounds = _cad_to_app_bbox((bb.min.X, bb.min.Y, bb.min.Z), (bb.max.X, bb.max.Y, bb.max.Z))
@@ -580,17 +596,16 @@ def _build_mating_solid(geom: dict[str, Any], spec: dict[str, Any], overlap_mm: 
 
 
 def _load_normalized_upstream_shape(payload: dict[str, Any]):
-    from build123d import import_step, import_stl
+    from build123d import import_step
 
     norm_step = payload.get("normalized_step_path")
     if norm_step and Path(norm_step).is_file():
         return import_step(norm_step), True
     source_path = Path(payload["source_path"])
-    raw_shape = import_stl(source_path)
     geom = payload["geometry"]
     tf = geom.get("normalization_transform") or {}
-    norm_shape, _ = _normalize_shape(
-        raw_shape,
+    norm_shape, _ = _load_normalized_stl(
+        source_path,
         source_units=tf.get("source_units_applied", "auto"),
         source_up_axis=tf.get("source_up_axis", "z"),
     )
@@ -629,8 +644,8 @@ def _adapt_mating_handler(payload: dict[str, Any]) -> dict[str, Any]:
                 interference_mm3 = round(
                     sum(float(s.volume) for s in inter.solids() if float(s.volume) > 0), 4
                 )
-        except Exception:
-            interference_mm3 = 0.0
+        except Exception as exc:
+            raise ValueError("The solid interference check could not be completed.") from exc
         interference_passed = interference_mm3 <= 0.01
         u_min = geom["cad_min_mm"]
         u_max = geom["cad_max_mm"]

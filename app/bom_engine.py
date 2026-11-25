@@ -1437,6 +1437,28 @@ def build_complete_bom(
             catalog_items=catalog_items, lab_profile=lab_profile,
         )
 
+    for name, instance in sorted((project.get("cad_instances") or {}).items()):
+        prefix = "cad:" + name
+        prov = instance["provenance"]
+        source = instance
+        if not instance.get("bom"):
+            source = {**instance, "bom": [{
+                "id": "source", "name": name, "source_file": prov["file_path"],
+                "source_url": prov["raw_url"],
+                "notes": "Pinned CAD. Supply and price need evidence.",
+            }]}
+        for line in _upstream_bom_lines(
+            {"upstream_project": source}, currency=curr, fx_rates=eff_fx, live_rows=live_rows,
+            catalog_items=catalog_items, lab_profile=lab_profile,
+        ):
+            printed = line["group_id"] == "upstream-custom-adaptation"
+            binding = instance["adaptation"]["spec"] if printed else line.get("design_binding")
+            line["component_ids"] = [prefix + ":adapter" if printed else prefix]
+            line["line_id"] = prefix + ":" + line["line_id"]
+            line["group_id"] = prefix + ":" + line["group_id"]
+            line["design_binding"] = [prov["commit_sha"], prov["file_sha256"], binding]
+            lines.append(line)
+
     if route_kind == "workstation":
         from app.procurement import initial_procurement_rows
 

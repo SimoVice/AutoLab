@@ -11,6 +11,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 
 from app.budget_allowances import SavedBudget
+from app.cad_instances import CadInstance, Name
 from app.commercial_design import CommercialProposal, adopt_commercial
 from app.conversation_history import DISPLAY_HISTORY_LIMIT
 from app.design_spec import FoundationLayoutProposal, LayoutProposal, apply_candidate
@@ -106,6 +107,7 @@ class Snapshot(StrictModel):
     custom_assembly_v1: dict[str, JsonValue] | None = None
     standalone_fixture: dict[str, JsonValue] | None = None
     upstream_project: dict[str, JsonValue] | None = None
+    cad_instances: dict[Name, CadInstance] | None = None
     physical_assembly: AssemblyBinding | None = None
     budget_allowances: Annotated[dict[str, SavedBudget], Field(max_length=512)] | None = None
     part_choices: Annotated[dict[str, PartChoice], Field(max_length=512)] | None = None
@@ -198,6 +200,8 @@ def make_snapshot(project: dict, history: list[dict]) -> dict:
            if project.get("concept_design") else {}),
         **({"standalone_fixture": deepcopy(project["standalone_fixture"]["spec"])}
            if project.get("standalone_fixture") else {}),
+        **({"cad_instances": deepcopy(project["cad_instances"])}
+           if project.get("cad_instances") else {}),
         **({"upstream_project": deepcopy(project["upstream_project"])}
            if project.get("upstream_project") else {}),
         **({"build_logs": deepcopy(project["build_logs"])}
@@ -254,7 +258,9 @@ def make_snapshot(project: dict, history: list[dict]) -> dict:
     return payload
 
 
-def restore_snapshot(snapshot: object) -> tuple[dict, list[dict]]:
+def restore_snapshot(
+    snapshot: object, *, lab_profile: dict | None = None
+) -> tuple[dict, list[dict]]:
     try:
         saved = Snapshot.model_validate(snapshot)
         UUID(saved.project_id)
@@ -497,6 +503,13 @@ def restore_snapshot(snapshot: object) -> tuple[dict, list[dict]]:
             raise ValueError("Unsupported saved cold-transfer extension.")
         from app.cold_transfer import apply_cold_transfer
         project = apply_cold_transfer(project, bump=False)
+    if saved.cad_instances:
+        from app.spatial_fit import refresh_spatial_fit
+
+        project["cad_instances"] = {
+            key: value.model_dump() for key, value in saved.cad_instances.items()
+        }
+        refresh_spatial_fit(project, lab_profile=lab_profile)
     geometry_changed = False
     if saved.physical_assembly and not (upgraded or clearance_upgrade):
         from app.project_assembly import assembly_binding
@@ -591,7 +604,7 @@ def restore_snapshot(snapshot: object) -> tuple[dict, list[dict]]:
     from app.spatial_fit import refresh_spatial_fit
 
     bound_before_fit = workflow_state(project)["machine_approved"]
-    refresh_spatial_fit(project)
+    refresh_spatial_fit(project, lab_profile=lab_profile if saved.cad_instances else None)
     # A portable approval can predate the derived spatial-fit display in older projects.
     if bound_before_fit and project["design"]["spatial_fit"]["status"] != "infeasible":
         project["machine_approval"]["machine_signature"] = machine_signature(project)

@@ -1,3 +1,5 @@
+import { AttachedCadFraming, AttachedCadModels } from './AttachedCad';
+import type { Project } from './types';
 import StepIllustration from './StepIllustration';
 import type { ImageCapability } from './ModelSelector';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
@@ -193,7 +195,7 @@ function AnimationClock({ playing, progress, onComplete, motionVersion, step, st
   return null;
 }
 
-function ComponentGroup({ component, step, progress, scale, footprint, pivot, selected }: { selected: boolean; component: ConceptComponent; step: ConceptStep | undefined; progress: RefObject<number>; scale: number; footprint: [number, number]; pivot: Vector3 }) {
+function ComponentGroup({ project, component, step, progress, scale, footprint, pivot, selected }: { project?: Project; selected: boolean; component: ConceptComponent; step: ConceptStep | undefined; progress: RefObject<number>; scale: number; footprint: [number, number]; pivot: Vector3 }) {
   const group = useRef<Group>(null);
   const scratch = useRef(new ThreeVector3());
   const axis = useRef(new ThreeVector3());
@@ -210,10 +212,10 @@ function ComponentGroup({ component, step, progress, scale, footprint, pivot, se
     scratch.current.set(rest[0] - pivot[0], rest[1] - pivot[1], rest[2] - pivot[2]).applyQuaternion(group.current.quaternion);
     group.current.position.set(pivot[0] + scratch.current.x + offset[0] * travel * scale, pivot[1] + scratch.current.y + offset[1] * travel * scale, pivot[2] + scratch.current.z + offset[2] * travel * scale);
   });
-  return <group ref={group} position={rest}>{selected && <mesh><boxGeometry args={component.size_mm.map(value => value * scale * 1.04) as Vector3} /><meshBasicMaterial color="#db7418" wireframe depthTest={false} /></mesh>}{component.primitives.map((primitive, index) => <ShapedPrimitive key={index} primitive={primitive} scale={scale} />)}</group>;
+  return <group ref={group} position={rest}><AttachedCadModels project={project} scale={scale} origin={component.position_mm} host={component.key} />{selected && <mesh><boxGeometry args={component.size_mm.map(value => value * scale * 1.04) as Vector3} /><meshBasicMaterial color="#db7418" wireframe depthTest={false} /></mesh>}{component.primitives.map((primitive, index) => <ShapedPrimitive key={index} primitive={primitive} scale={scale} />)}</group>;
 }
 
-function ConceptScene({ design, step, progress, turn, playing, onComplete, motionVersion, stepIndex, hiddenKeys, selectedId }: { selectedId?: string | null; design: ConceptDesign; step: ConceptStep | undefined; progress: RefObject<number>; turn: number; playing: boolean; onComplete: () => void; motionVersion: number; stepIndex: number; hiddenKeys: Set<string> }) {
+function ConceptScene({ project, design, step, progress, turn, playing, onComplete, motionVersion, stepIndex, hiddenKeys, selectedId }: { project?: Project; selectedId?: string | null; design: ConceptDesign; step: ConceptStep | undefined; progress: RefObject<number>; turn: number; playing: boolean; onComplete: () => void; motionVersion: number; stepIndex: number; hiddenKeys: Set<string> }) {
   const scale = 1 / Math.max(...design.footprint_mm, ...design.components.flatMap((c) => [c.size_mm[1]]), 1);
   const movingOrigin = design.components.find((component) => component.key === step?.moving_key)?.position_mm ?? [0, 0, 0];
   const localPivot = step?.pivot_mm ?? [0, 0, 0];
@@ -224,11 +226,13 @@ function ConceptScene({ design, step, progress, turn, playing, onComplete, motio
     <ambientLight intensity={1.35} />
     <directionalLight position={[3, 5, 4]} intensity={2.4} castShadow shadow-mapSize={[1024, 1024]} shadow-camera-left={-3} shadow-camera-right={3} shadow-camera-top={3} shadow-camera-bottom={-3} />
     <directionalLight position={[-3, 2, -2]} intensity={1.1} />
-    <Bounds fit clip observe margin={1.15} maxDuration={0}>
+    <Bounds fit={!project?.cad_instances} clip={!project?.cad_instances} observe={!project?.cad_instances} margin={1.15} maxDuration={0}>
       <group rotation={[0, turn * Math.PI / 4, 0]}>
         {design.bounds_mm && <mesh visible={false} position={[(design.bounds_mm.min[0] + design.bounds_mm.max[0] - design.footprint_mm[0]) * scale / 2, (design.bounds_mm.min[1] + design.bounds_mm.max[1]) * scale / 2, (design.bounds_mm.min[2] + design.bounds_mm.max[2] - design.footprint_mm[1]) * scale / 2]}><boxGeometry args={design.bounds_mm.max.map((value, i) => Math.max((value - design.bounds_mm!.min[i]) * scale, .001)) as Vector3} /><meshBasicMaterial /></mesh>}
-        {design.components.map((component) => <group key={component.key} visible={!hiddenKeys.has(component.key)}><ComponentGroup selected={component.key === selectedId} component={component} step={step} progress={progress} scale={scale} footprint={design.footprint_mm} pivot={pivot} /></group>)}
+        <AttachedCadModels project={project} scale={scale} origin={[design.footprint_mm[0] / 2, 0, design.footprint_mm[1] / 2]} host="project" />
+        {design.components.map((component) => <group key={component.key} visible={!hiddenKeys.has(component.key)}><ComponentGroup project={project} selected={component.key === selectedId} component={component} step={step} progress={progress} scale={scale} footprint={design.footprint_mm} pivot={pivot} /></group>)}
       </group>
+      <AttachedCadFraming project={project} scale={scale} origin={[design.footprint_mm[0] / 2, 0, design.footprint_mm[1] / 2]} turn={turn * Math.PI / 4} />
     </Bounds>
     <AnimationClock playing={playing} progress={progress} onComplete={onComplete} motionVersion={motionVersion} step={step} stepIndex={stepIndex} />
     <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[0, floor - .002, 0]}><planeGeometry args={[4, 4]} /><shadowMaterial opacity={.18} /></mesh>
@@ -269,7 +273,7 @@ function StepDownload({ url, filename, label, card = false }: { url: string; fil
   return <span className={card ? 'concept-step-download concept-step-card' : 'concept-step-download'}><button type="button" aria-label={label} disabled={working} onClick={() => void download()}>{working ? 'Preparing STEP…' : card ? <>Editable model <span>STEP</span></> : 'Editable model (STEP)'}</button>{issue && <small role="status">{issue}</small>}</span>;
 }
 
-export default function ConceptWorkspace({ projectId, revision, design, panel, selectedId = null, onHideSelected, imageCapability = null }: { projectId: string; revision: number; design: ConceptDesign; panel: 'design' | 'parts' | 'instructions' | 'software'; selectedId?: string | null; onHideSelected?: () => void; imageCapability?: ImageCapability | null }) {
+export default function ConceptWorkspace({ project, projectId, revision, design, panel, selectedId = null, onHideSelected, imageCapability = null }: { project?: Project; projectId: string; revision: number; design: ConceptDesign; panel: 'design' | 'parts' | 'instructions' | 'software'; selectedId?: string | null; onHideSelected?: () => void; imageCapability?: ImageCapability | null }) {
   const [stepIndex, setStepIndex] = useState(0);
   const progress = useRef(0);
   const [playing, setPlaying] = useState(false);
@@ -298,7 +302,7 @@ export default function ConceptWorkspace({ projectId, revision, design, panel, s
     <div className="concept-design-stage" hidden={panel !== 'design' && panel !== 'software'}>
     <header className="concept-heading"><div><p className="concept-kicker">Your proposed setup <span>Revision {revision}</span></p><h2>{design.title}</h2><p>{design.overview}</p></div><span className="concept-status">Concept design</span></header>
     <div className="concept-view">
-      <ConceptScene key={viewKey} design={design} step={step} progress={progress} turn={turn} playing={playing} onComplete={onComplete} motionVersion={motionVersion} stepIndex={stepIndex} hiddenKeys={hiddenKeys} selectedId={selectedId} />
+      <ConceptScene project={project} key={viewKey} design={design} step={step} progress={progress} turn={turn} playing={playing} onComplete={onComplete} motionVersion={motionVersion} stepIndex={stepIndex} hiddenKeys={hiddenKeys} selectedId={selectedId} />
       <div className="concept-view-label"><strong>{design.components.find(component => component.key === selectedId && !hiddenKeys.has(component.key))?.name ?? 'Explore the setup'}</strong><span>Drag to rotate · scroll to zoom</span></div>
 
       <div className="concept-view-controls"><button type="button" aria-label="Rotate model left" onClick={() => setTurn((value) => value - 1)}>↶</button><button type="button" aria-label="Rotate model right" onClick={() => setTurn((value) => value + 1)}>↷</button><button type="button" onClick={() => { setTurn(0); setViewKey((value) => value + 1); }}>Reset view</button></div>

@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from app.bench_station import MODULES as STATION_MODULES
 from app.bench_station import StationProposal, compile_station
 from app.budget_allowances import SetLineBudgetArgs
+from app.cad_instances import CadPlacement, Digest, Name, selected_source
 from app.design_sources import reference_library, resolve_reference
 from app.domain import apply_update
 from app.engineering import EngineeringUpdate, apply_engineering_update, state_for
@@ -331,6 +332,9 @@ class DiscoverOpenHardwareProjectsArgs(_StrictArgs):
 
 
 class IngestOpenHardwareProjectArgs(_StrictArgs):
+    instance_id: Name | None = None
+    placement: CadPlacement | None = None
+    expected_sha256: Digest | None = None
     source_host: Literal["github", "gitlab", "nih3d"]
     repo_full_name: Annotated[str, Field(min_length=3, max_length=200)]
     commit_sha: Annotated[str, Field(min_length=2, max_length=64)]
@@ -342,6 +346,7 @@ class IngestOpenHardwareProjectArgs(_StrictArgs):
 
 
 class AdaptOpenHardwareProjectArgs(_StrictArgs):
+    instance_id: Name | None = None
     mode: Literal["mating", "parametric"]
     mating_kind: Literal[
         "adapter_plate", "bracket", "riser", "enclosure", "cutout_mount"
@@ -361,6 +366,7 @@ class AdaptOpenHardwareProjectArgs(_StrictArgs):
 
 
 class InspectUpstreamProjectArgs(_StrictArgs):
+    instance_id: Name | None = None
     section: Literal[
         "all", "geometry", "license", "bom", "assembly", "software", "adaptation"
     ] = "all"
@@ -820,6 +826,16 @@ def _tool_check_spatial_fit(args: CheckSpatialFitArgs, ctx: ToolContext) -> Tool
         f"Spatial check ({fit['subject']}): status={fit['status']}. "
         + (format_spatial_violations(fit) if fit["violations"] else "No 3D violations.")
     )
+    if mixed := fit.get("cad_assembly"):
+        diagnostics.extend(f"Review envelope overlap: {a} / {b}."
+                           for a, b in mixed["possible_overlaps"])
+        for item in mixed["instances"]:
+            if item["access_blockers"]:
+                blockers = ", ".join(item["access_blockers"])
+                diagnostics.append(f"Review {item['name']} access against {blockers}.")
+            if item["printer_fit"] and not item["printer_fit"]["fits"]:
+                diagnostics.append(item["printer_fit"]["detail"])
+        msg = f"Workspace {fit['status']}. Checked {len(mixed['instances'])} CAD placements."
     if kin := fit.get("kinematics"):
         diagnostics.extend(kin.get("issues") or [])
         if kin.get("issues"):
@@ -2191,6 +2207,8 @@ async def _tool_ingest_open_hardware_project(
     try:
         updated = await attach_upstream_project(
             ctx.project,
+            instance_id=args.instance_id, placement=args.placement,
+            expected_sha256=args.expected_sha256,
             source_host=args.source_host,
             repo_full_name=args.repo_full_name,
             commit_sha=args.commit_sha,
@@ -2214,11 +2232,12 @@ async def _tool_ingest_open_hardware_project(
     except Exception as exc:
         return _fail("ingest_open_hardware_project", "researching", str(exc))
 
-    up = updated["upstream_project"]
+    up = selected_source(updated, args.instance_id)
     prov = up["provenance"]
     geom = up["geometry"]
+    changed = updated is not ctx.project
     ctx.project = updated
-    ctx.mutated = True
+    ctx.mutated |= changed
     msg = (
         f"Ingested {prov['repo_full_name']} ({prov['file_path']}, {prov['spdx_id']}, "
         f"size {geom['app_size_mm']} mm) at revision {updated['revision']}."
@@ -2229,7 +2248,7 @@ async def _tool_ingest_open_hardware_project(
         tool="ingest_open_hardware_project",
         ok=True,
         stage="researching",
-        mutated=True,
+        mutated=changed,
         summary=msg,
         data={
             "provenance": prov,
@@ -2253,7 +2272,7 @@ async def _tool_adapt_open_hardware_project(
 ) -> ToolResult:
     from app.upstream_service import apply_upstream_adaptation
 
-    if not ctx.project.get("upstream_project"):
+    if not args.instance_id and not ctx.project.get("upstream_project"):
         return _fail(
             "adapt_open_hardware_project",
             "assembling",
@@ -2296,7 +2315,7 @@ async def _tool_adapt_open_hardware_project(
     try:
         updated = await apply_upstream_adaptation(
             ctx.project,
-            mode=args.mode,
+            instance_id=args.instance_id, mode=args.mode,
             mating_spec=mating_spec,
             param_overrides=overrides,
             lab_profile=ctx.lab_profile,
@@ -2304,9 +2323,11 @@ async def _tool_adapt_open_hardware_project(
     except Exception as exc:
         return _fail("adapt_open_hardware_project", "assembling", str(exc))
 
-    adapt = updated["upstream_project"]["adaptation"]
+    source = selected_source(updated, args.instance_id)
+    adapt = source["adaptation"]
+    changed = updated is not ctx.project
     ctx.project = updated
-    ctx.mutated = True
+    ctx.mutated |= changed
     inter = adapt["interference"]
     pfit = adapt.get("printer_fit")
     msg = (
@@ -2321,7 +2342,7 @@ async def _tool_adapt_open_hardware_project(
         tool="adapt_open_hardware_project",
         ok=True,
         stage="assembling",
-        mutated=True,
+        mutated=changed,
         summary=msg,
         data={
             "mode": adapt["mode"],
@@ -2338,7 +2359,7 @@ async def _tool_adapt_open_hardware_project(
 def _tool_inspect_upstream_project(
     args: InspectUpstreamProjectArgs, ctx: ToolContext
 ) -> ToolResult:
-    up = ctx.project.get("upstream_project")
+    up = selected_source(ctx.project, args.instance_id)
     if not isinstance(up, dict):
         return _fail(
             "inspect_upstream_project",

@@ -1,3 +1,4 @@
+import { CadInstanceDetails } from './AttachedCad';
 import ProjectNotes from './ProjectNotes';
 import SoftwareWorkspace from './SoftwareWorkspace';
 import ProjectLibrary from './ProjectLibrary';
@@ -894,10 +895,11 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
           <div className={`design-content${hasEngineeringDesign ? ' design-content-engineering' : ''}${hasGeneralDesign && hardwareDestination === 'design' ? ' design-content-model' : ''}`}
             hidden={!hasGeneralDesign && hardwareDestination !== 'design'} tabIndex={0}
             ref={hasGeneralDesign ? resourceAnchor : undefined} aria-label="Design and project details">
+          {project?.cad_instances && <CadInstanceDetails project={project} />}
           {hasGeneralDesign && !hasFixtureDesign && !hasUpstreamDesign && resources}
           {!hasGeneralDesign && hasSelectedFoundation && <SelectedPlatformPreview />}
           {project?.concept_design ? (
-            <ConceptWorkspace imageCapability={imageCapability} key={`${project.id}:${project.revision}`} projectId={project.id}
+            <ConceptWorkspace project={project} imageCapability={imageCapability} key={`${project.id}:${project.revision}`} projectId={project.id}
               revision={project.revision} design={project.concept_design} panel={hardwareDestination}
               selectedId={selectedId} onHideSelected={() => setSelectedId(null)} />
           ) : project?.standalone_fixture ? (

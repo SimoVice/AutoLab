@@ -178,6 +178,14 @@ def _fixture(graph, fixture):
             graph.connect("fixture:" + child, kind, base, child, [basis])
 
 
+def _cad_interfaces(graph, key, geometry, frame_id, evidence):
+    for collection, kind in (("hole_features", "cylindrical_feature"),
+                             ("mounting_planes", "planar_face")):
+        for feature in geometry.get(collection, []):
+            graph.port(graph.instance_id(key), kind + ":" + _digest(feature), kind, evidence,
+                       {"frame_id": frame_id, **feature})
+
+
 def _upstream(graph, source):
     provenance = source.get("provenance") or {}
     geom = source.get("geometry") or {}
@@ -198,11 +206,7 @@ def _upstream(graph, source):
                signature if rendered else None, [0, 0, 0] if rendered else None,
                geom.get("app_size_mm") if rendered else None, evidence,
                anchor="normalized_origin", geometry_frame="normalized_cad")
-    for collection, kind in (("hole_features", "cylindrical_feature"),
-                             ("mounting_planes", "planar_face")):
-        for feature in geom.get(collection, []):
-            graph.port(graph.instance_id(imported), kind + ":" + _digest(feature), kind,
-                       evidence, {"frame_id": "normalized_cad", **feature})
+    _cad_interfaces(graph, imported, geom, "normalized_cad", evidence)
     adapt = source.get("adaptation") or {}
     if not adapt.get("part_id"):
         return
@@ -295,6 +299,9 @@ def _geometry(project):
             graph.part(key, module["label"], "planning_envelope", "bench_station.modules",
                        module.get("size_mm"), module.get("position_mm"), module.get("size_mm"),
                        [proof])
+    if records := project.get("cad_instances"):
+        from app.cad_placement import append_instances
+        append_instances(graph, records)
     return graph
 
 
@@ -354,7 +361,7 @@ def physical_assembly(project: dict) -> dict:
     """Resolve geometry, interfaces, purchasing links and evidence in one project namespace."""
     graph = _geometry(project)
     _purchasing(graph, project)
-    return {"schema_version": 1, "project_id": project.get("lineage_id") or project["id"],
+    result = {"schema_version": 1, "project_id": project.get("lineage_id") or project["id"],
             "revision": project["revision"], "route": graph.route, "frames": graph.frames,
             "geometry_sha256": _geometry_signature(graph),
             "instances": list(graph.instances.values()),
@@ -362,6 +369,19 @@ def physical_assembly(project: dict) -> dict:
             "connections": list(graph.connections.values()),
             "requirements": list(graph.requirements.values()),
             "evidence": list(graph.evidence.values())}
+    if records := project.get("cad_instances"):
+        result["cad_exports"] = {
+            "host_geometry_scope": "Host STEP/STL files contain the native host design.",
+            "instances": {
+                name: {
+                    **_fields(item, "provenance", "source_units", "source_up_axis", "placement",
+                              "artifact_hashes"),
+                    "adapter_spec": (item.get("adaptation") or {}).get("spec"),
+                }
+                for name, item in sorted(records.items())
+            },
+        }
+    return result
 
 
 def assembly_json(project: dict) -> bytes:

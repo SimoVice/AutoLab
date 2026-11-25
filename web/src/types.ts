@@ -220,7 +220,27 @@ export type SpatialFitViolation = {
   overflow_mm: number;
 };
 
+export type CadVector = [number, number, number];
+export type CadBounds = { cad_min_mm: CadVector; cad_max_mm: CadVector; app_size_mm: CadVector };
+export type CadInstance = {
+  name: string;
+  provenance: UpstreamProjectState['provenance'];
+  geometry: CadBounds & { detected_units: string };
+  source_units: 'auto' | 'in' | 'mm';
+  placement: { parent: string; datum: string; translation_mm: CadVector; rotation_deg_xyz: CadVector };
+  adaptation?: { custom_geometry: CadBounds } | null;
+};
+export type CadPlacementCheck = {
+  name: string; host: string; world_translation_mm: CadVector; world_rotation_matrix: CadVector[];
+  access_status: 'clear' | 'review' | 'not_specified'; access_blockers: string[];
+  mating_interference: { passed: boolean; interference_volume_mm3: number } | null;
+  printer_fit: { fits: boolean; detail: string } | null;
+};
 export type SpatialFit = {
+  cad_assembly?: {
+    instances: CadPlacementCheck[]; possible_overlaps: [string, string][]; bounds_mm: [CadVector, CadVector];
+    unplaced_parts: string[];
+  };
   status: 'unconstrained' | 'fits' | 'infeasible';
   subject: string;
   axes: {
@@ -244,6 +264,7 @@ export type Project = {
   bench_station?: BenchStation | null;
   standalone_fixture?: StandaloneFixture | null;
   upstream_project?: UpstreamProjectState | null;
+  cad_instances?: Record<string, CadInstance>;
   build_logs?: BuildLogEntry[];
   build_feedback?: BuildFeedbackSummary | null;
   labware_brief?: LabwareBrief | null;

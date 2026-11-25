@@ -285,7 +285,11 @@ async def open_project(request: Request) -> dict:
                 status_code=413, detail="The project file exceeds the 256 KB limit."
             )
     try:
-        project, history = restore_snapshot(decode_snapshot(bytes(content)))
+        from app.routers.procurement import _active_lab_profile
+
+        snapshot = decode_snapshot(bytes(content))
+        profile = _active_lab_profile() if snapshot.get("cad_instances") else None
+        project, history = restore_snapshot(snapshot, lab_profile=profile)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
     session = ProjectSession(project=project, history=history)
