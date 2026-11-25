@@ -183,18 +183,27 @@ on a second installation reads it offline. The package contains the original pin
 assets and their notices, normalized geometry, previews and generated mating parts.
 The manifest identifies the project, revision and assembly fingerprint and lists
 each file's size and SHA-256. The receiving workspace checks these records before
-installing the CAD assets. The lightweight JSON snapshot remains available through
-the snapshot API and references assets by digest.
+installing the CAD assets. Its local cache keeps the issued archive for repeat
+downloads of that revision. **Attached CAD → Project inputs (JSON)** saves a
+lightweight snapshot even when the local CAD worker cannot build the full ZIP.
+It references external geometry by digest. The standalone snapshot API serves
+the same file.
 
 The assembly STEP and STL use the 3D scene's rest pose, in millimetres with +Y up.
 STEP sources retain boundary geometry. STL sources contribute triangle faces
 (up to 75,000 per source). The CAD index names placed parts and marks commercial
 proxies and planning envelopes. It also lists unplaced fabrication parts.
+For assemblies with more than 128 solids, the review STL is written in groups
+with 0.1 mm linear and 0.3 radian angular deflection. The index records the
+mesh settings for each exported assembly. The Jubilee foundation uses a shared
+STEP definition for each repeated component. The verified 809-solid foundation
+and its attached module produced a 91 MB ZIP.
 The purchasing files preserve the issued documented prices, budget allowances and
 printed-material estimates. The guide and device assignments identify the mounts
 and interfaces that require installation checks. The custom-equipment package
 includes the offline controller and its configuration. A workstation package
 includes the preparation table and logical preview. A reported rest-pose overlap
 identifies a pair to measure before fabrication. Imported geometry carries no
-device driver. The ZIP limit is 128 MiB. Redistribution requires an accepted
+device driver. The package limits are 128 MiB compressed and 384 MiB expanded,
+including the manifest. Redistribution requires an accepted
 source license. Physical calibration and build verification take place on the bench.

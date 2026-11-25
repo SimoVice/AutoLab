@@ -119,6 +119,7 @@ export function CadInstanceDetails({ project }: { project: Project }) {
       {' · '}<a href={handoffUrl(project, 'cad/assembly.stl')} download>Assembly STL</a>
       {' · '}<a href={handoffUrl(project, 'purchasing/bom.csv')} download>Purchasing list</a>
       {' · '}<a href={handoffUrl(project, 'assembly/guide.md')} download>Installation guide</a>
+      {' · '}<a href={`/api/projects/${encodeURIComponent(project.id)}/snapshot?revision=${project.revision}`} download>Project inputs (JSON)</a>
     </nav>
   </details>;
 }

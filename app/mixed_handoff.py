@@ -71,15 +71,17 @@ def read_issued(reference, key):
 
 
 def _pack(files, binding):
-    if len(files) + 1 > MAX_MEMBERS or sum(map(len, files.values())) > MAX_EXPANDED_BYTES:
+    if len(files) + 1 > MAX_MEMBERS:
         raise ValueError("The complete assembly exceeds the portable package limit.")
     entries = {
         name: {"sha256": digest(data), "bytes": len(data)} for name, data in sorted(files.items())
     }
-    manifest = {"format": FORMAT, "version": 1, **binding, "files": entries}
+    manifest = encode({"format": FORMAT, "version": 1, **binding, "files": entries})
+    if len(manifest) + sum(map(len, files.values())) > MAX_EXPANDED_BYTES:
+        raise ValueError("The complete assembly exceeds the portable package limit.")
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=3) as archive:
-        archive.writestr("manifest.json", encode(manifest))
+        archive.writestr("manifest.json", manifest)
         for name, data in sorted(files.items()):
             archive.writestr(name, data)
     if buf.tell() > MAX_PACKAGE_BYTES:
@@ -177,8 +179,14 @@ def open_package(raw, profile=None):
         software = host_software(project, assembly)
         if set(files) != OUTPUTS | members | software.keys():
             raise ValueError("Unexpected assets in the portable assembly.")
-        if any(files[name] != data for name, data in software.items()):
-            raise ValueError("The issued host software differs from the saved design.")
+        for name, expected in software.items():
+            issued = files[name]
+            if name.endswith(".json"):
+                matches = json.loads(issued) == json.loads(expected)
+            else:
+                matches = issued.replace(b"\r\n", b"\n") == expected.replace(b"\r\n", b"\n")
+            if not matches:
+                raise ValueError("The issued host software differs from the saved design.")
         binding = _binding(assembly)
         if (
             _binding(manifest) != binding

@@ -148,6 +148,14 @@ def test_incomplete_or_inconsistent_package_preserves_empty_workspace(
     assert not list(tmp_path.rglob("*.step"))
 
 
+def test_issuing_counts_the_manifest_toward_the_expanded_limit(monkeypatch):
+    from app import mixed_handoff
+
+    monkeypatch.setattr(mixed_handoff, "MAX_EXPANDED_BYTES", 128)
+    with pytest.raises(ValueError, match="portable package limit"):
+        _pack({"project.json": bytes(127)}, {})
+
+
 def test_corrupt_member_is_reported_before_install(issued):
     manifest, files = _unpack(issued[2])
     out = io.BytesIO()
@@ -184,3 +192,53 @@ def test_workstation_step_places_each_named_component_in_the_scene_frame(tmp_pat
     carriage = next(p for p in expected.values() if p["native_id"] == "carriage")
     measured = parts[carriage["id"]].bounding_box().center()
     assert list(measured) == pytest.approx(carriage["placement"]["world_translation_mm"])
+
+
+def test_large_review_mesh_retains_solid_instances_and_a_free_face(tmp_path):
+    import struct
+
+    from build123d import Compound, Face, Pos, import_stl
+
+    from app.mixed_geometry import _write_assembly_stl
+
+    block = Box(1, 1, 1)
+    blocks = Compound([Pos(x * 2, 0, 0) * block for x in range(129)])
+    sheet = Pos(0, 0, 9) * Face.make_rect(2, 3)
+    mixed = Compound([blocks, sheet])
+    path = tmp_path / "review.stl"
+    settings = _write_assembly_stl(mixed, [mixed], path)
+    assert settings == {"linear_deflection_mm": 0.1, "angular_deflection_rad": 0.3}
+    content = path.read_bytes()
+    (triangles,) = struct.unpack_from("<I", content, 80)
+    assert triangles == 129 * 12 + 2
+    assert len(content) == 84 + 50 * triangles
+    bounds = import_stl(path).bounding_box()
+    assert bounds.max.X == pytest.approx(256.5, abs=1e-5)
+    assert bounds.max.Z == pytest.approx(9, abs=1e-5)
+
+
+def test_reflected_assembly_retains_a_repeated_rotated_prototype(tmp_path):
+    from build123d import Compound, Pos, Rot, Shape, export_step, import_step
+    from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt, gp_Trsf
+
+    from app.mixed_geometry import _reflect_assembly
+
+    prototype = Box(2, 3, 5).wrapped
+    copies = [
+        Shape.cast(prototype.Moved(pose.wrapped))
+        for pose in (Pos(10, 20, -7), Pos(-4, 11, 13) * Rot(30, 0, 90))
+    ]
+    native = Pos(17, -6, 4) * Compound([Compound(copies)])
+    reflection = gp_Trsf()
+    reflection.SetMirror(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 1, -1)))
+    mirrored = _reflect_assembly(native.wrapped, reflection)
+    path = tmp_path / "repeated.step"
+    export_step(Compound(children=[mirrored]), path)
+    assert path.read_bytes().count(b"MANIFOLD_SOLID_BREP(") == 1
+    assert len(import_step(path).solids()) == 2
+    left, right = mirrored.solids()
+    assert left.wrapped.IsPartner(right.wrapped)
+    for original, converted in zip(native.solids(), (left, right)):
+        before, after = original.bounding_box(), converted.bounding_box()
+        assert list(after.min) == pytest.approx([before.min.X, before.min.Z, before.min.Y])
+        assert list(after.max) == pytest.approx([before.max.X, before.max.Z, before.max.Y])

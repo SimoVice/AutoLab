@@ -464,7 +464,8 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
       const response = await fetch(`/api/projects/${encodeURIComponent(project.id)}/${asset}?revision=${project.revision}`);
       if (!response.ok) {
         const detail = await response.json().catch(() => ({}));
-        throw new Error(detail.detail ?? 'The project could not be saved. Try again.');
+        const message = detail.detail ?? 'The project could not be saved. Try again.';
+        throw new Error(mixed ? `${message} You can save the project inputs as JSON under Attached CAD.` : message);
       }
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);

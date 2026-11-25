@@ -86,6 +86,17 @@ def _parts():
     return Compound([c for c in original.children if c.label != "build_plate_assembly"]), beds[0]
 
 
+def load_foundation_topology(bed_drop_mm):
+    """Detach the positioned topology for a one-shot mixed CAD worker."""
+    import gc
+
+    topology = load_foundation_cad(bed_drop_mm).wrapped
+    _parts.cache_clear()
+    _original_shape.cache_clear()
+    gc.collect()
+    return topology
+
+
 def load_foundation_cad(bed_drop_mm: float = 100.0):
     """Return STEP assembly in app's CAD coordinates, millimetres, Z-up.
 

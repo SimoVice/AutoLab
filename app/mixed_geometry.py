@@ -43,14 +43,49 @@ def _located(shape, pose):
     return Location(transform) * shape
 
 
-def _native_parts(project, graph):
-    from build123d import Box, Compound, Plane, Pos, Rot
+def _reflect_assembly(topology, reflection):
+    """Reflect each distinct native shape once, keeping its repeated placements in STEP."""
+    from build123d import Compound, Shape
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
+    from OCP.TopAbs import TopAbs_COMPOUND
+    from OCP.TopLoc import TopLoc_Location
+    from OCP.TopoDS import TopoDS_Iterator
 
-    def from_workstation_axes(shape):
-        # Native CAD uses (scene x, scene z, scene y). Mirror the actual compound
-        # topology. Its assembly children still describe the original coordinate frame.
-        topology = Compound.cast(shape.mirror(Plane.XZ).wrapped)
-        return Rot(-90, 0, 0) * topology
+    prototypes = {}
+
+    def placed_leaves(shape):
+        if shape.ShapeType() == TopAbs_COMPOUND:
+            # The iterator composes each child's orientation and placement with its parent.
+            children = TopoDS_Iterator(shape)
+            while children.More():
+                yield from placed_leaves(children.Value())
+                children.Next()
+            return
+        local = shape.Located(TopLoc_Location())
+        key = (Shape.cast(local), local.Orientation())
+        if key not in prototypes:
+            prototypes[key] = BRepBuilderAPI_Transform(local, reflection, False).Shape()
+        # F(L p) = (F L F)(F p). The conjugated placement is a proper rigid transform.
+        pose = reflection.Multiplied(shape.Location().Transformation()).Multiplied(reflection)
+        yield Shape.cast(prototypes[key].Moved(TopLoc_Location(pose)))
+
+    # STEP's assembly writer needs explicit children to emit shared product definitions.
+    return Compound(children=list(placed_leaves(topology)))
+
+
+def _native_parts(project, graph):
+    from build123d import Box, Compound, Pos
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
+    from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt, gp_Trsf
+
+    def from_workstation_axes(topology, *, repeated=False):
+        # Reflect across y=z in one pass. Transforming the topology directly avoids
+        # copying the full native assembly tree, whose child placements use CAD axes.
+        transform = gp_Trsf()
+        transform.SetMirror(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 1, -1)))
+        if repeated:
+            return _reflect_assembly(topology, transform)
+        return Compound.cast(BRepBuilderAPI_Transform(topology, transform, False).Shape())
 
     native = {k: p for k, p in graph.instances.items() if not k.startswith("cad:")}
     if graph.route == "concept_design":
@@ -60,12 +95,18 @@ def _native_parts(project, graph):
             yield comp["key"], _component_body(comp, True), "compiled_concept"
     elif graph.route == "workstation":
         from app.cad_exports import _build_solid, _components
-        from app.upstream_cad import load_foundation_cad
+        from app.upstream_cad import load_foundation_topology
 
         for comp in _components(project):
             imported = comp["kind"] == "upstream-cad"
-            shape = load_foundation_cad(comp["bed_drop_mm"]) if imported else _build_solid(comp)
-            yield comp["id"], from_workstation_axes(shape), native[comp["id"]]["origin"]
+            topology = (
+                load_foundation_topology(comp["bed_drop_mm"])
+                if imported
+                else _build_solid(comp).wrapped
+            )
+            body = from_workstation_axes(topology, repeated=imported)
+            del topology
+            yield comp["id"], body, native[comp["id"]]["origin"]
     elif graph.route == "upstream_project":
         from app.mixed_sources import legacy_files
 
@@ -87,7 +128,7 @@ def _native_parts(project, graph):
 
             solids = _world_positioned_assembly(project["standalone_fixture"]).children
             built = {
-                key: from_workstation_axes(s)
+                key: from_workstation_axes(s.wrapped)
                 for key, s in zip(("locating-base", "camera-mast", "camera-arm"), solids)
             }
         for key, part in native.items():
@@ -106,8 +147,73 @@ def _native_parts(project, graph):
                 raise ValueError(f"No solid compiler for placed part {key}.")
 
 
+def _mesh_groups(body, group_size):
+    from itertools import islice
+
+    from build123d import Compound, Shape
+    from OCP.TopAbs import TopAbs_FACE, TopAbs_SHAPE, TopAbs_SHELL, TopAbs_SOLID
+    from OCP.TopExp import TopExp_Explorer
+
+    # Include free shells and triangle faces alongside solids. Cumulated locations
+    # from the explorer keep repeating instances at their actual assembly positions.
+    def leaves():
+        for kind, avoid in (
+            (TopAbs_SOLID, TopAbs_SHAPE),
+            (TopAbs_SHELL, TopAbs_SOLID),
+            (TopAbs_FACE, TopAbs_SHELL),
+        ):
+            explorer = TopExp_Explorer(body.wrapped, kind, avoid)
+            while explorer.More():
+                yield Shape.cast(explorer.Current())
+                explorer.Next()
+
+    shapes = leaves()
+    while batch := list(islice(shapes, group_size)):
+        yield Compound(batch)
+
+
+def _write_assembly_stl(assembly, bodies, path):
+    import shutil
+    import struct
+
+    from build123d import export_stl
+    from OCP.BRepTools import BRepTools
+
+    counts = [len(body.solids()) for body in bodies]
+    if sum(counts) <= 128:
+        if not export_stl(assembly, path):
+            raise ValueError("The assembly STL could not be written.")
+        return {"linear_deflection_mm": 0.001, "angular_deflection_rad": 0.1}
+    from app.cad_worker import MAX_RESULT_BYTES
+
+    count = 0
+    chunk_path = path.with_name("mesh-group.stl")
+    with path.open("wb") as out:
+        out.write(bytes(84))
+        for body, solids in zip(bodies, counts):
+            groups = _mesh_groups(body, 16) if solids > 16 else (body,)
+            for group in groups:
+                if not export_stl(group, chunk_path, tolerance=0.1, angular_tolerance=0.3):
+                    raise ValueError("An assembly mesh group could not be written.")
+                with chunk_path.open("rb") as triangles:
+                    triangles.seek(80)
+                    (size,) = struct.unpack("<I", triangles.read(4))
+                    count += size
+                    if (
+                        not size
+                        or chunk_path.stat().st_size != 84 + 50 * size
+                        or 84 + 50 * count > MAX_RESULT_BYTES
+                    ):
+                        raise ValueError("The assembly STL exceeds its mesh budget.")
+                    shutil.copyfileobj(triangles, out)
+                BRepTools.Clean_s(group.wrapped)
+        out.seek(80)
+        out.write(struct.pack("<I", count))
+    return {"linear_deflection_mm": 0.1, "angular_deflection_rad": 0.3}
+
+
 def build_mixed_cad(project):
-    from build123d import Compound, Unit, export_step, export_stl
+    from build123d import Compound, Unit, export_step
 
     graph = _geometry(project)
     bodies, entries = [], []
@@ -144,8 +250,9 @@ def build_mixed_cad(project):
     assembly = Compound(children=bodies, label="AutoLab mixed assembly")
     with TemporaryDirectory(prefix="autolab-mixed-") as tmp:
         step, stl = (Path(tmp) / f"assembly.{ext}" for ext in ("step", "stl"))
-        if not export_step(assembly, step, unit=Unit.MM) or not export_stl(assembly, stl):
+        if not export_step(assembly, step, unit=Unit.MM):
             raise ValueError("The mixed assembly could not be written.")
+        meshing = _write_assembly_stl(assembly, bodies, stl)
         return {
             "cad/assembly.step": step.read_bytes(),
             "cad/assembly.stl": stl.read_bytes(),
@@ -153,6 +260,7 @@ def build_mixed_cad(project):
                 {
                     "unit": "mm",
                     "up_axis": "Y",
+                    "stl_meshing": meshing,
                     "parts": entries,
                     "unplaced_instance_ids": sorted(
                         p["id"] for p in graph.instances.values() if not p["placement"]
