@@ -1,6 +1,7 @@
 """A split stem clamp with an installed, detailed catalog screw. Dimensions in mm."""
 from __future__ import annotations
 
+from copy import deepcopy
 from functools import lru_cache
 from threading import RLock
 from typing import Literal
@@ -154,9 +155,10 @@ def _local_solid(spec, key):
 
 
 def component_body(recipe, key):
-    # Cached shapes stay in local coordinates. Each caller receives a located copy.
+    # Exporters can attach triangulation to OCCT topology shared by located copies.
+    # Keep those mutations away from the source used to cut a later mating part.
     with _CAD_LOCK:
-        return _local_solid(MountSpec.model_validate(recipe), key).translate((0, 0, 0))
+        return deepcopy(_local_solid(MountSpec.model_validate(recipe), key))
 
 
 def build_mount(spec):
@@ -167,7 +169,7 @@ def build_mount(spec):
 
 @lru_cache(maxsize=6)
 def _local_mesh(spec, key):
-    vertices, faces = _local_solid(spec, key).tessellate(0.015, 0.08)
+    vertices, faces = deepcopy(_local_solid(spec, key)).tessellate(0.015, 0.08)
     return [tuple(v) for v in vertices], faces
 
 

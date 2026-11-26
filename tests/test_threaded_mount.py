@@ -52,13 +52,15 @@ def test_exports_contain_installed_threaded_solids(tmp_path, diameter, pitch):
 
     spec = MountSpec(stem_diameter_mm=9, thread_diameter_mm=diameter, thread_pitch_mm=pitch)
     design = compile_concept(spec.proposal())
+    # A cold browser may request the screw mesh before the support exists.
+    screw_mesh = concept_stl(design, SCREW)
     path = tmp_path / "assembly.step"
     path.write_bytes(concept_step(design))
     assembly = import_step(path)
     support, screw = sorted(assembly.solids(), key=lambda s: -s.volume)
     assert support.is_valid and screw.is_valid
     for key in [None, SCREW, BODY]:
-        data = concept_stl(design, key)
+        data = screw_mesh if key == SCREW else concept_stl(design, key)
         count = struct.unpack_from("<I", data, 80)[0]
         assert count > 1000 and len(data) == 84 + 50 * count
     screw_bounds = screw.bounding_box()
