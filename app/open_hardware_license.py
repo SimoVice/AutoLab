@@ -390,6 +390,20 @@ _TEXT_PATTERNS: tuple[tuple[str, str], ...] = (
 )
 
 
+def scoped_license_path(paths: list[str], asset: str | None = None) -> str | None:
+    """Locate a single license in the asset's directory or an ancestor."""
+    directories = PurePosixPath(asset).parents if asset else (PurePosixPath("."),)
+    candidates = {
+        PurePosixPath(p) for p in paths
+        if re.fullmatch(r"(?:licen[sc]e|copying)(?:[._-].+)?", PurePosixPath(p).name, re.I)
+    }
+    for directory in directories:
+        matches = [p for p in candidates if p.parent == directory]
+        if matches:
+            return matches[0].as_posix() if len(matches) == 1 else None
+    return None
+
+
 def detect_spdx_license(spdx_hint: str | None = None, license_text: str | None = None) -> str:
     """Resolve an SPDX license identifier from repository metadata and license file text."""
     if isinstance(spdx_hint, str):

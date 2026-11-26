@@ -8,12 +8,13 @@ import json
 import httpx
 import pytest
 
-from app.open_hardware_discovery import discover_open_hardware
+from app.open_hardware_discovery import _classify_repo_paths, discover_open_hardware
 from app.open_hardware_license import (
     build_provenance_record,
     detect_spdx_license,
     evaluate_license_gate,
     render_third_party_notices,
+    scoped_license_path,
     sha256_bytes,
     validate_repo_file_path,
     validate_upstream_url,
@@ -133,6 +134,8 @@ def test_discovery_across_sources_ranks_pins_commit_and_filters_licenses():
     def handler(request: httpx.Request) -> httpx.Response:
         url = str(request.url)
         if url.startswith("https://api.github.com/search/repositories"):
+            assert request.url.params["q"] == "syringe pump in:name,description,topics,readme"
+            assert "sort" not in request.url.params
             return httpx.Response(
                 200,
                 json={
@@ -274,3 +277,20 @@ def test_discovery_across_sources_ranks_pins_commit_and_filters_licenses():
     assert "academic/nc-syringe-pump-stl" not in comm_names
     assert "openlab/precision-syringe-pump" in comm_names
     assert json.dumps(full)  # JSON-serializable cleanly
+
+
+def test_search_relevance_is_applied_before_the_cad_file_limit():
+    unrelated = [f"assembly/panel-{n}.step" for n in range(75)]
+    part = "attachments/indexingWheel.stl"
+    files = _classify_repo_paths([*unrelated, part], "indexing wheel")["cad_files"]
+    assert len(files) == 40
+    assert files[0] == part
+
+
+def test_license_scope_follows_the_asset_path():
+    paths = ["assets/fonts/LICENSE.txt", "NOTICE", "mechanics/LICENCE.md", "LICENSE"]
+    assert scoped_license_path(paths) == "LICENSE"
+    assert scoped_license_path(paths, "mechanics/parts/ring.step") == "mechanics/LICENCE.md"
+    assert scoped_license_path(paths, "electrical/board.stl") == "LICENSE"
+    assert scoped_license_path(paths[:2], "parts/base.step") is None
+    assert scoped_license_path(["COPYING-MIT", "COPYING-GPL"]) is None

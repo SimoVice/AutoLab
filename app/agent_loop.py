@@ -17,7 +17,6 @@ from app.conversation_history import MODEL_HISTORY_LIMIT
 from app.lab_profile import has_lab_profile_data, lab_profile_prompt_context, load_lab_profile
 from app.model_client import ModelClientError, ModelSettings, _safe_usage, recorded_model
 from app.openai_models import chat_parameters
-from app.spatial_fit import evaluate_spatial_fit
 
 LOGGER = logging.getLogger("autolab.agent_loop")
 
@@ -70,8 +69,9 @@ CORE PRINCIPLES
   Compare reusing existing equipment or open CAD, buying equipment and fabricating a design.
   Distinguish adapter capabilities, manufacturer candidates and measured suitability.
   Show benefits, tradeoffs and sources. Record a blocker for unresolved or infeasible routes.
-  Ask one specific measurement question when its answer changes the choice. Keep the comparison
-  in the project. Set measurement_key on its question. Record the answer, units and matching
+  Save the comparison before presenting it, including options with unresolved sources or fit.
+  Ask one specific measurement question when its answer changes the choice.
+  Set measurement_key on its question. Record the answer, units and matching
   key in measurements, using the actual fixture parameter name when applicable.
   A user's answer to a measurement question or choice continues the recorded comparison. Use its
   sources and options. For a chosen freestanding passive holder or locating base, immediately call
@@ -104,10 +104,10 @@ CORE PRINCIPLES
   (e.g., update_project_brief -> discover_open_hardware_projects / lookup_reviewed_references ->
   check_spatial_fit -> configure_standalone_fixture / ingest_open_hardware_project /
   select_platform / develop_bench_station -> check_spatial_fit).
-- 3D spatial rigor: always record stated width, depth, and height (converted cleanly to mm) via
-  update_project_brief and verify clearances via check_spatial_fit before adopting platforms or
-  presenting designs. Notice OT-2 requires 1030 x 970 x 810 mm (630x570x660 body + ventilation/door/
-  top service clearances); Jubilee requires frame span x +250 D x +100 H; bench stations and
+- 3D spatial rigor: record stated workspace dimensions in mm via update_project_brief. Check
+  clearances for a named platform or sized design. With no equipment geometry yet, leave fit
+  open and save the route comparison. OT-2 requires 1030 x 970 x 810 mm including ventilation,
+  door and top service clearances. Jubilee requires frame span x +250 D x +100 H. Bench stations and
   custom concepts require +100 mm front depth access; standalone fixtures require +50 D x +40 H.
 - Never force or adopt an infeasible platform. If select_platform or a layout check returns a
   recoverable 3D violation, explain the exact required mm, limit mm, and overflow mm cleanly, and
@@ -199,7 +199,6 @@ def _compact_initial_state(project: dict, lab_profile: dict | None) -> dict[str,
     summary_state["has_engineering_design"] = bool(project.get("engineering_design"))
     if project.get("project_notes"):
         summary_state["project_notes"] = project["project_notes"]
-    summary_state["spatial_fit"] = evaluate_spatial_fit(project, lab_profile=lab_profile)
     return summary_state
 
 

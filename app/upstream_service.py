@@ -10,6 +10,7 @@ import httpx
 
 from app.domain import apply_update
 from app.open_hardware_discovery import lookup_discovered_candidate
+from app.open_hardware_license import scoped_license_path
 from app.spatial_fit import refresh_spatial_fit
 from app.upstream_cad_adapt import (
     MatingAdaptationSpec,
@@ -93,11 +94,12 @@ async def read_upstream_source(
     eff_lic = list(
         license_files if license_files is not None else (cached.get("license_files") or [])
     )
+    license_path = scoped_license_path(eff_lic, cad_file_path)
 
     doc_texts: dict[str, str] = dict(doc_texts_override or {})
     if not doc_texts_override and source_host.lower().strip() in ("github", "gitlab"):
         paths_to_fetch = (
-            (eff_lic[:1] if not license_text else [])
+            ([license_path] if license_path and not license_text else [])
             + eff_bom[:3]
             + eff_asm[:3]
             + eff_sw[:5]
@@ -113,12 +115,10 @@ async def read_upstream_source(
         )
         doc_texts.update(fetched)
 
-    eff_lic_text = license_text
-    if not eff_lic_text:
-        for lp in eff_lic:
-            if lp in doc_texts:
-                eff_lic_text = doc_texts[lp]
-                break
+    eff_lic_text = license_text or doc_texts.get(license_path)
+    if license_path and "/" in license_path:
+        # The selected directory has its own terms. Repository metadata describes the root.
+        eff_spdx = None
 
     ingested = await ingest_upstream_cad(
         artifact_dir=artifact_dir,

@@ -56,6 +56,7 @@ from app.tip_racks import (
     update_tip_request,
 )
 from app.workflows import (
+    current_kind,
     describe_workflow,
     has_workstation_design_context,
     workstation_context_question,
@@ -739,6 +740,7 @@ def _compact_project_state(project: dict, lab_profile: dict | None) -> dict[str,
         )
         if project.get(name)
     ]
+    fit = evaluate_spatial_fit(project, lab_profile=lab_profile)
     compact: dict[str, Any] = {
         "revision": project.get("revision"),
         "status": project.get("status"),
@@ -747,10 +749,10 @@ def _compact_project_state(project: dict, lab_profile: dict | None) -> dict[str,
         "summary": project.get("summary"),
         "brief": project.get("brief"),
         "selected_platform_id": eng.get("selected_platform_id"),
-        "constraint_status": design.get("constraint_status"),
-        "footprint": design.get("footprint"),
-        "spatial_fit": design.get("spatial_fit") or evaluate_spatial_fit(project),
-        "plan": project.get("plan"),
+        "constraint_status": fit["status"],
+        "footprint": None if fit["subject"] == "unselected" else design.get("footprint"),
+        "spatial_fit": fit,
+        "plan": project.get("plan") if current_kind(project) == "liquid_preparation" else None,
         "active_modules": active_modules,
     }
     compact["design_capabilities"] = design_routes.CAPABILITIES
@@ -914,6 +916,8 @@ def _tool_check_spatial_fit(args: CheckSpatialFitArgs, ctx: ToolContext) -> Tool
         f"Spatial check ({fit['subject']}): status={fit['status']}. "
         + (format_spatial_violations(fit) if fit["violations"] else "No 3D violations.")
     )
+    if fit["status"] == "awaiting_geometry":
+        msg = "Equipment geometry is still open. Recorded workspace limits are available."
     if mixed := fit.get("cad_assembly"):
         diagnostics.extend(f"Review envelope overlap: {a} / {b}."
                            for a, b in mixed["possible_overlaps"])

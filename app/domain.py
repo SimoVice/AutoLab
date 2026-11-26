@@ -630,7 +630,14 @@ def _apply_update(project: dict, patch: dict) -> dict:
         result["workflow"] = describe_workflow(result)
         return refresh_spatial_fit(result)
 
-    from app.spatial_fit import evaluate_spatial_fit
+    from app.bom_engine import purchasing_route
+    from app.spatial_fit import evaluate_spatial_fit, refresh_spatial_fit
+
+    if new_kind == "general" and purchasing_route(result) == "unselected":
+        result["revision"] += 1
+        result["status"] = "draft"
+        result["workflow"] = describe_workflow(result)
+        return refresh_spatial_fit(result)
 
     candidate_design, _, _ = _finish_design(
         width, cooling_enabled=enabled, target=target, selections=stored_selections

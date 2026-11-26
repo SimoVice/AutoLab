@@ -11,6 +11,7 @@ import math
 from typing import Any
 
 from app.upstream_cad import foundation_metadata
+from app.workflows import current_kind
 
 # Axis clearances documented per machine architecture (all values in mm).
 OT2_BODY_MM = (630.0, 570.0, 660.0)  # width, depth, height
@@ -448,6 +449,27 @@ def evaluate_spatial_fit(
     platform_id: str | None = None,
 ) -> dict:
     """Evaluate 3D width/depth/height fit, perimeter clearances, and printer build volume."""
+    from app.bom_engine import purchasing_route
+
+    summary = project.get("summary") or {}
+    limits = {
+        axis: _valid_limit(summary.get("workspace_" + axis))
+        for axis in ("width_mm", "depth_mm", "height_mm")
+    }
+    if (
+        platform_id is None and candidate_footprint is None
+        and current_kind(project) != "liquid_preparation"
+        and purchasing_route(project) == "unselected"
+    ):
+        return {
+            "status": "awaiting_geometry", "subject": "unselected",
+            "axes": {
+                axis: dict(body_mm=None, clearance_mm=None, required_mm=None,
+                           limit_mm=limit, margin_mm=None, fits=None)
+                for axis, limit in limits.items()
+            },
+            "clearances": [], "printable_checks": [], "violations": [],
+        }
     subject, body_wdh, clearance_specs = _resolve_subject_and_body(
         project, platform_id=platform_id, candidate_footprint=candidate_footprint
     )
@@ -461,12 +483,6 @@ def evaluate_spatial_fit(
         low, high = mixed["bounds_mm"]
         body_wdh = [max(native, high[i] - low[i]) for native, i in zip(body_wdh, (0, 2, 1))]
     clearances_by_axis, clearance_items = _clearance_totals(clearance_specs)
-    summary = project.get("summary") or {}
-    limits = {
-        "width_mm": _valid_limit(summary.get("workspace_width_mm")),
-        "depth_mm": _valid_limit(summary.get("workspace_depth_mm")),
-        "height_mm": _valid_limit(summary.get("workspace_height_mm")),
-    }
     axis_labels = {
         "width_mm": "workspace width (X)",
         "depth_mm": "workspace depth (Z)",

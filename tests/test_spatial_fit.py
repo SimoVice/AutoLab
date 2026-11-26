@@ -30,6 +30,25 @@ def _source_with_limits(**limits):
     return apply_candidate(base, source_proposal(), {"model": "offline"})
 
 
+def test_general_brief_keeps_workspace_limits_until_geometry_exists():
+    project = apply_update(new_project(), {
+        "workflow_kind": "general", "brief_objective": "Position an instrument above a sample.",
+        "workspace_width_mm": 260, "workspace_height_mm": 150,
+    })
+    for state in (project, restore_snapshot(make_snapshot(project, []))[0]):
+        fit = state["design"]["spatial_fit"]
+        assert fit["subject"] == "unselected"
+        assert fit["status"] == state["design"]["constraint_status"] == "awaiting_geometry"
+        assert fit["axes"]["width_mm"]["limit_mm"] == 260
+        assert fit["axes"]["height_mm"]["limit_mm"] == 150
+        assert all(a["required_mm"] is None and a["fits"] is None for a in fit["axes"].values())
+        assert "kinematics" not in fit
+        assert not fit["violations"] and not fit["printable_checks"]
+    platform = evaluate_spatial_fit(project, platform_id="opentrons-ot2")
+    assert platform["subject"] == "opentrons-ot2"
+    assert platform["status"] == "infeasible"
+
+
 def test_ot2_3d_clearances_catch_depth_and_height_overflow():
     tight = apply_update(
         layout_project(),

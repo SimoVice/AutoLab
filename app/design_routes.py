@@ -480,7 +480,11 @@ def _validate_measurements(measurements, previous, ctx):
             _number(value.replace(",", ".")) == _number(m.value)
             for match in tuples for value in re.findall(number, match.group(1))
         ):
-            raise ValueError("Record the measured value and units from the user's statement.")
+            raise ValueError(
+                f"Record the measured value and units from the user's statement for {m.key}. "
+                "Keep an interface designation verbatim in the operation's interface field "
+                "when separate measurements are unavailable."
+            )
 
 
 def compare_routes(args, ctx):

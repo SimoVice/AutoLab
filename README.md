@@ -88,6 +88,9 @@ its interfaces. Each instance keeps its identity when the project is reopened.
 
 To add external CAD to a design already open, give the assistant the pinned STEP
 or STL, an instance name and its measured position relative to an existing part.
+You can also ask it to search for an open part by function. Inspect the candidate
+file and its license before attaching it. Workspace fit stays open until there
+is equipment geometry to compare with the recorded bench dimensions.
 The 3D view shows the parts together. Open **Attached CAD** for the source,
 placement and individual files. Ask to change a named adapter's thickness and use
 **Save project** to download the revised assembly as a ZIP. **Open project**

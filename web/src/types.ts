@@ -234,9 +234,9 @@ export type BenchStation = {
 };
 
 export type SpatialFitAxis = {
-  body_mm: number;
-  clearance_mm: number;
-  required_mm: number;
+  body_mm: number | null;
+  clearance_mm: number | null;
+  required_mm: number | null;
   limit_mm: number | null;
   margin_mm: number | null;
   fits: boolean | null;
@@ -272,7 +272,7 @@ export type SpatialFit = {
     instances: CadPlacementCheck[]; possible_overlaps: [string, string][]; bounds_mm: [CadVector, CadVector];
     unplaced_parts: string[];
   };
-  status: 'unconstrained' | 'fits' | 'infeasible';
+  status: 'awaiting_geometry' | 'unconstrained' | 'fits' | 'infeasible';
   subject: string;
   axes: {
     width_mm: SpatialFitAxis;
@@ -325,7 +325,7 @@ export type Project = {
   design: {
     footprint: { width_mm: number; depth_mm: number; height_mm: number };
     components: Component[];
-    constraint_status: 'unconstrained' | 'fits' | 'infeasible';
+    constraint_status: SpatialFit['status'];
     spatial_fit?: SpatialFit;
     estimated_cost: { amount: number | null; currency: string };
     cooling: DesignCooling;

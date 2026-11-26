@@ -17,6 +17,7 @@ from app.open_hardware_license import (
     ALLOWED_CAD_EXTENSIONS,
     FORBIDDEN_EXTENSIONS,
     evaluate_license_gate,
+    scoped_license_path,
     validate_repo_file_path,
     validate_upstream_url,
 )
@@ -155,7 +156,7 @@ def _is_parametric_cad_py(lower_path: str) -> bool:
     )
 
 
-def _classify_repo_paths(paths: list[str]) -> dict[str, list[str]]:
+def _classify_repo_paths(paths: list[str], query: str = "") -> dict[str, list[str]]:
     cad_files: list[str] = []
     bom_files: list[str] = []
     assembly_files: list[str] = []
@@ -198,7 +199,19 @@ def _classify_repo_paths(paths: list[str]) -> dict[str, list[str]]:
         ):
             software_files.append(safe)
 
-    cad_files.sort(key=lambda p: (_CAD_SORT_PRIORITY.get(f".{p.rsplit('.', 1)[-1].lower()}", 9), p))
+    terms = _tokens(query)
+
+    def cad_order(path: str) -> tuple[int, int, int, str]:
+        stem, ext = path.rsplit(".", 1)
+        return (
+            -len(terms & _tokens(stem.rsplit("/", 1)[-1])),
+            -len(terms & _tokens(stem)),
+            _CAD_SORT_PRIORITY.get("." + ext.lower(), 9),
+            path,
+        )
+
+    cad_files.sort(key=cad_order)
+    license_files.sort(key=lambda p: (p.count("/"), p))
     return {
         "cad_files": cad_files[:40],
         "bom_files": bom_files[:20],
@@ -209,6 +222,7 @@ def _classify_repo_paths(paths: list[str]) -> dict[str, list[str]]:
 
 
 def _tokens(text: str) -> set[str]:
+    text = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", text)
     return {
         tok
         for tok in re.findall(r"[a-z0-9]{2,}", text.lower())
@@ -309,7 +323,7 @@ def rank_discovery_candidates(query: str, candidates: list[dict[str, Any]]) -> l
 
 
 async def _inspect_github_repo(
-    client: httpx.AsyncClient, repo: dict[str, Any]
+    client: httpx.AsyncClient, repo: dict[str, Any], query: str
 ) -> dict[str, Any] | None:
     full_name = repo.get("full_name")
     branch = repo.get("default_branch") or "main"
@@ -338,13 +352,13 @@ async def _inspect_github_repo(
             for e in (tree_body.get("tree") or [])
             if isinstance(e, dict) and e.get("type") == "blob" and isinstance(e.get("path"), str)
         ]
-    classified = _classify_repo_paths(tree_paths)
+    classified = _classify_repo_paths(tree_paths, query)
 
     lic_meta = repo.get("license") or {}
     spdx_hint = lic_meta.get("spdx_id") if isinstance(lic_meta, dict) else None
     license_text = ""
-    if (not spdx_hint or str(spdx_hint).upper() == "NOASSERTION") and classified["license_files"]:
-        lic_path = classified["license_files"][0]
+    lic_path = scoped_license_path(classified["license_files"])
+    if lic_path and (not spdx_hint or str(spdx_hint).upper() == "NOASSERTION"):
         raw_lic_url = f"https://raw.githubusercontent.com/{full_name}/{commit_sha}/{lic_path}"
         l_status, l_text, _ = await _fetch_text_bounded(
             client, raw_lic_url, max_bytes=MAX_LICENSE_FETCH_BYTES, accept="text/plain"
@@ -382,10 +396,10 @@ async def search_github_open_hardware(
     warnings: list[str],
 ) -> list[dict[str, Any]]:
     """Search public GitHub repositories and inspect commit-pinned trees for CAD & BOMs."""
-    q = f"{query.strip()} open hardware OR step OR stl OR scad".strip()
+    q = f"{query.strip()} in:name,description,topics,readme"
     url = (
         f"https://api.github.com/search/repositories?q={quote(q)}"
-        f"&sort=stars&order=desc&per_page={min(max(max_candidates * 2, 5), 10)}"
+        f"&per_page={min(max(max_candidates * 2, 5), 10)}"
     )
     try:
         status, data = await _fetch_json_bounded(
@@ -403,7 +417,7 @@ async def search_github_open_hardware(
 
     items = [r for r in (data.get("items") or []) if isinstance(r, dict)][:max_candidates]
     results = await asyncio.gather(
-        *(_inspect_github_repo(client, repo) for repo in items), return_exceptions=True
+        *(_inspect_github_repo(client, repo, query) for repo in items), return_exceptions=True
     )
     out: list[dict[str, Any]] = []
     for res in results:
@@ -413,7 +427,7 @@ async def search_github_open_hardware(
 
 
 async def _inspect_gitlab_project(
-    client: httpx.AsyncClient, proj: dict[str, Any]
+    client: httpx.AsyncClient, proj: dict[str, Any], query: str
 ) -> dict[str, Any] | None:
     full_name = proj.get("path_with_namespace")
     proj_id = proj.get("id")
@@ -441,12 +455,13 @@ async def _inspect_gitlab_project(
             for e in tree_body
             if isinstance(e, dict) and e.get("type") == "blob" and isinstance(e.get("path"), str)
         ]
-    classified = _classify_repo_paths(tree_paths)
+    classified = _classify_repo_paths(tree_paths, query)
     license_obj = proj.get("license") or {}
     spdx_hint = license_obj.get("key") if isinstance(license_obj, dict) else None
     license_text = ""
-    if (not spdx_hint or str(spdx_hint).lower() == "other") and classified["license_files"]:
-        raw_lic = f"https://gitlab.com/{full_name}/-/raw/{commit_sha}/{classified['license_files'][0]}"
+    lic_path = scoped_license_path(classified["license_files"])
+    if lic_path and (not spdx_hint or str(spdx_hint).lower() == "other"):
+        raw_lic = f"https://gitlab.com/{full_name}/-/raw/{commit_sha}/{lic_path}"
         l_status, l_text, _ = await _fetch_text_bounded(
             client, raw_lic, max_bytes=MAX_LICENSE_FETCH_BYTES, accept="text/plain"
         )
@@ -497,7 +512,7 @@ async def search_gitlab_open_hardware(
         return []
     projects = [p for p in data if isinstance(p, dict)][:max_candidates]
     results = await asyncio.gather(
-        *(_inspect_gitlab_project(client, p) for p in projects), return_exceptions=True
+        *(_inspect_gitlab_project(client, p, query) for p in projects), return_exceptions=True
     )
     return [r for r in results if isinstance(r, dict)]
 

@@ -749,7 +749,7 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
       ? (spatialViolations.map((v) => v.message).join(' ') || 'Requested dimensions cannot fit this concept')
       : status === 'fits'
         ? 'Within 3D workspace envelope'
-        : 'No 3D workspace constraint yet';
+        : status === 'awaiting_geometry' ? 'Choose equipment to check workspace fit' : 'No 3D workspace constraint yet';
   const plan = supportedLiquid ? (project?.plan ?? null) : null;
   const fields = [
     { label: 'Stock', value: summary?.stock_concentration },
