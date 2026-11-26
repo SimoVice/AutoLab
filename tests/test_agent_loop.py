@@ -254,6 +254,9 @@ def test_budget_caps_and_atomic_rollback_on_unrecoverable_failure():
     def looping_handler(request):
         nonlocal calls
         calls += 1
+        payload = json.loads(request.content)
+        if calls == 2:
+            assert {"tools", "parallel_tool_calls", "tool_choice"}.isdisjoint(payload)
         return httpx.Response(
             200,
             json=_tool_reply([_tc(f"loop_{calls}", "inspect_project_state", {})]),

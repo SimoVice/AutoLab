@@ -11,7 +11,7 @@ from typing import Any
 
 import httpx
 
-from app.agent_tools import ToolContext, execute_tool, openai_tool_schemas
+from app.agent_tools import ToolContext, execute_tool, planning_tool_schemas
 from app.chat_activity import report_activity
 from app.conversation_history import MODEL_HISTORY_LIMIT
 from app.lab_profile import has_lab_profile_data, lab_profile_prompt_context, load_lab_profile
@@ -22,6 +22,7 @@ from app.spatial_fit import evaluate_spatial_fit
 LOGGER = logging.getLogger("autolab.agent_loop")
 
 _TOOL_STAGES = {
+    "load_tools": "inspecting",
     "inspect_project_state": "inspecting",
     "compare_design_routes": "designing",
     "choose_design_route": "designing",
@@ -56,6 +57,8 @@ _TOOL_STAGES = {
 
 AGENT_SYSTEM_PROMPT = """You are AutoLab's autonomous laboratory engineering assistant.
 Work like a practical, careful biomedical automation engineer using typed domain tools.
+Use load_tools to request any additional tools you need together. The implementation tool for
+the chosen design route becomes available automatically after the choice is recorded.
 
 CORE PRINCIPLES
 - General-purpose automation first: classify non-liquid work (jigs, fixtures, cameras, scales,
@@ -199,11 +202,9 @@ async def _call_openai_step(
     payload: dict[str, Any] = {
         **chat_parameters(settings.model, 2400),
         "messages": messages,
-        "tools": tools,
-        "tool_choice": "none" if force_text else "auto",
     }
     if not force_text:
-        payload["parallel_tool_calls"] = False
+        payload.update(tools=tools, tool_choice="auto", parallel_tool_calls=False)
 
     headers = {"Authorization": f"Bearer {settings.api_key}"}
     try:
@@ -283,7 +284,6 @@ async def run_agent_turn(
         procurement_report=procurement_report,
         cost_estimate=cost_estimate,
     )
-    tools = openai_tool_schemas(staged, lab_profile)
     state_snapshot = _compact_initial_state(staged, lab_profile)
 
     messages: list[dict[str, Any]] = [
@@ -342,7 +342,7 @@ async def run_agent_turn(
                 active_client,
                 resolved,
                 messages,
-                tools,
+                [] if force_text else planning_tool_schemas(ctx),
                 force_text=force_text,
             )
             total_usage["model"] = recorded_model(body, resolved.model)
@@ -371,7 +371,7 @@ async def run_agent_turn(
                 return
 
             if force_text:
-                # Defensive guard if a mock/provider ignores tool_choice="none".
+                # Discard unexpected calls on a text-only step.
                 assistant_text = (msg.get("content") or "").strip() or _fallback_summary(tool_trace)
                 return
 

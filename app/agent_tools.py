@@ -103,6 +103,7 @@ class ToolContext:
     recommendations: list[dict] = field(default_factory=list)
     action_runs: list[dict] = field(default_factory=list)
     mutated: bool = False
+    loaded_tools: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -147,6 +148,10 @@ class _StrictArgs(BaseModel):
 
 class InspectProjectStateArgs(_StrictArgs):
     include_components: bool = False
+
+
+class LoadToolsArgs(_StrictArgs):
+    names: list[str] = Field(min_length=1)
 
 
 class CheckSpatialFitArgs(_StrictArgs):
@@ -409,6 +414,8 @@ class BuildHardwareCommissioningPackArgs(_StrictArgs):
 
 
 _TOOL_SPECS: list[tuple[str, str, type[BaseModel]]] = [
+    ("load_tools", "Make the named tools available for subsequent steps of this turn. "
+     "Request all needed tools together. This does not change the project.", LoadToolsArgs),
     ("compare_design_routes",
      "Save the requested operations and compare reuse, buy and fabricate options. Map each "
      "operation to a capability from design_capabilities or manual. Use returned design_source_id "
@@ -617,10 +624,12 @@ _TOOL_SPECS: list[tuple[str, str, type[BaseModel]]] = [
 ]
 
 
-def openai_tool_schemas(project: dict, lab_profile: dict | None = None) -> list[dict[str, Any]]:
+def openai_tool_schemas(
+    project: dict, lab_profile: dict | None = None, *, names: set[str] | None = None
+) -> list[dict[str, Any]]:
     """Return strict OpenAI chat-completions function tool definitions."""
     _ = project, lab_profile
-    return [
+    schemas = [
         {
             "type": "function",
             "function": {
@@ -631,7 +640,39 @@ def openai_tool_schemas(project: dict, lab_profile: dict | None = None) -> list[
             },
         }
         for name, description, model in _TOOL_SPECS
+        if names is None or name in names
     ]
+    for entry in schemas:
+        if entry["function"]["name"] == "load_tools":
+            items = entry["function"]["parameters"]["properties"]["names"]["items"]
+            items["enum"] = [name for name, _, _ in _TOOL_SPECS if name != "load_tools"]
+    return schemas
+
+
+def planning_tool_schemas(ctx: ToolContext) -> list[dict[str, Any]]:
+    """Offer planning tools, the selected design adapter and any tools requested this turn."""
+    names = ctx.loaded_tools | {
+        "load_tools", "inspect_project_state", "update_project_brief", "check_spatial_fit",
+        "lookup_reviewed_references", "discover_open_hardware_projects", "compare_design_routes",
+    }
+    plan = ctx.project.get("design_plan") or {}
+    if plan.get("options"):
+        names.add("choose_design_route")
+        selected = (plan.get("decision") or {}).get("key")
+        names.update(option["adapter"] for option in plan["options"] if option["key"] == selected)
+    return openai_tool_schemas(ctx.project, ctx.lab_profile, names=names)
+
+
+def _tool_load_tools(args: LoadToolsArgs, ctx: ToolContext) -> ToolResult:
+    unknown = set(args.names) - _DISPATCH.keys()
+    if unknown:
+        message = "Unknown tool names: " + ", ".join(sorted(unknown))
+        return _fail("load_tools", "inspecting", message)
+    ctx.loaded_tools.update(args.names)
+    return ToolResult(
+        tool="load_tools", ok=True, stage="inspecting",
+        summary="Requested tools are available in the next step.",
+    )
 
 
 def _fail(
@@ -3027,6 +3068,7 @@ def _tool_build_hardware_commissioning_pack(
 
 
 _DISPATCH: dict[str, tuple[type[BaseModel], Any, bool]] = {
+    "load_tools": (LoadToolsArgs, _tool_load_tools, False),
     "inspect_project_state": (InspectProjectStateArgs, _tool_inspect_project_state, False),
     "check_spatial_fit": (CheckSpatialFitArgs, _tool_check_spatial_fit, False),
     "lookup_reviewed_references": (LookupReviewedReferencesArgs, _tool_lookup_references, False),

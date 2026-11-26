@@ -26,12 +26,50 @@ def _walk_schemas(node):
             yield from _walk_schemas(item)
 
 
+def test_tool_loading_is_turn_local_and_follows_the_recorded_route():
+    from app.agent_tools import (
+        ToolContext,
+        execute_tool,
+        openai_tool_schemas,
+        planning_tool_schemas,
+    )
+
+    project = new_project()
+    ctx = ToolContext(project, "")
+    full = {item["function"]["name"] for item in openai_tool_schemas(project)}
+
+    def available(context):
+        functions = [item["function"] for item in planning_tool_schemas(context)]
+        return {function["name"]: function for function in functions}
+
+    initial = available(ctx)
+    listed = initial["load_tools"]["parameters"]["properties"]["names"]["items"]["enum"]
+    assert set(listed) | {"load_tools"} == full
+    deferred = full - initial.keys()
+    assert "simulate_robot_protocol" in deferred
+    invalid_args = {"names": ["simulate_robot_protocol", "unknown"]}
+    invalid = asyncio.run(execute_tool("load_tools", invalid_args, ctx))
+    assert not invalid.ok and available(ctx) == initial
+    loaded = asyncio.run(execute_tool("load_tools", {"names": sorted(deferred)}, ctx))
+    assert loaded.ok and not loaded.mutated and not ctx.mutated
+    assert available(ctx).keys() == full
+    assert available(ToolContext(project, "")) == initial
+
+    project["design_plan"] = {
+        "options": [{"key": "a", "adapter": "develop_custom_equipment"}],
+        "decision": {"key": "a"},
+    }
+    selected = available(ToolContext(project, ""))
+    assert {"choose_design_route", "develop_custom_equipment"} <= selected.keys()
+
+
 def test_openai_tool_schemas_are_strict_and_complete():
     from app.agent_tools import openai_tool_schemas
 
     schemas = openai_tool_schemas(new_project())
     names = [entry["function"]["name"] for entry in schemas]
     assert names == [
+        "load_tools",
         "compare_design_routes",
         "choose_design_route",
         "inspect_project_state",
