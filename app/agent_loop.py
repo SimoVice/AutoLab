@@ -82,9 +82,10 @@ CORE PRINCIPLES
   Use object_dimensions for a missing contact footprint. Use tradeoff for subsequent print,
   loaded-clearance and physical fit checks. Use blocker only when a constraint prevents drafting
   the actual part. An overhead camera needs the height. For other routes choose the native tool.
-  When a specific fixture has been chosen and its dimensions supplied before a comparison was
-  saved, use configure_standalone_fixture directly. Use fastener_spec=none for a freestanding
-  piece. Revise an existing fixture with its native tool. The object dimensions determine geometry.
+  A need and measurements alone do not choose fabrication. Present the alternatives and wait
+  for a choice. When the user explicitly requests a custom design, build or print before a
+  comparison was saved, use configure_standalone_fixture directly. Use fastener_spec=none for
+  a freestanding piece. Revise an existing fixture with its native tool.
   An unknown printer envelope leaves print fit unchecked and allows draft STEP/STL export.
   For original geometry use develop_custom_equipment or configure_standalone_fixture.
   A route is applied when the tool succeeds. Bind purchased components to exact BOM identities.

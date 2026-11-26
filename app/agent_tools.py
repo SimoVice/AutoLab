@@ -29,7 +29,7 @@ from app.lab_profile import (
 from app.measurement_program import MeasurementSteps
 from app.microplates import PROFILE_ID as CORNING_96_ID
 from app.microplates import LabwareSelection, reapply_plate, select_plate
-from app.part_choices import ChoosePartArgs, update_choice
+from app.part_choices import ChoosePartArgs, _affirmative, update_choice
 from app.platform_profiles import platform_profiles
 from app.services.runtime import api_hook
 from app.spatial_fit import (
@@ -2115,6 +2115,23 @@ def _tool_configure_standalone_fixture(
     previous = ctx.project
     existing = previous.get("standalone_fixture")
     provided = args.model_dump(exclude_none=True)
+    if not existing and not previous.get("design_plan"):
+        # A measured object by itself does not select fabrication.
+        users = [ctx.user_message, *(h["content"] for h in ctx.history if h["role"] == "user")]
+        request = re.compile(
+            r"(?:^\s*|\b(?:please|kindly|let's|to|you to|per favore)\s+)"
+            r"(?:3d[ -]?)?(?:print|fabricate|build|design|model|create|draw|export|make|"
+            r"stampa|fabbrica|costruisci|progetta|modella|crea|esporta|disegna)\b", re.I,
+        )
+        if not any(
+            request.search(clause) and _affirmative(clause, text)
+            for text in users for clause in re.findall(r"[^.!?;\n]+[.!?]?", text)
+        ):
+            return _fail(
+                "configure_standalone_fixture", "designing",
+                "Compare the alternatives and ask the user to choose fabrication "
+                "before creating the first CAD.",
+            )
 
     if args.object_diameter_mm is not None and args.object_shape is None:
         provided["object_shape"] = "circular"

@@ -427,6 +427,7 @@ def restore_snapshot(
             workspace_width_mm=width,
             workspace_depth_mm=depth,
             workspace_height_mm=height,
+            lab_profile=lab_profile,
         )
         project["standalone_fixture"] = compiled_fixture
         project["design"]["footprint"] = {
@@ -630,7 +631,10 @@ def restore_snapshot(
     from app.spatial_fit import refresh_spatial_fit
 
     bound_before_fit = workflow_state(project)["machine_approved"]
-    refresh_spatial_fit(project, lab_profile=lab_profile if saved.cad_instances else None)
+    refresh_spatial_fit(
+        project,
+        lab_profile=lab_profile if saved.cad_instances or saved.standalone_fixture else None,
+    )
     # A portable approval can predate the derived spatial-fit display in older projects.
     if bound_before_fit and project["design"]["spatial_fit"]["status"] != "infeasible":
         project["machine_approval"]["machine_signature"] = machine_signature(project)

@@ -498,6 +498,7 @@ def compare_routes(args, ctx):
             old.get("measurement_question")
             and not option.measurement_question
             and not option.blocker
+            and not needs_review(ctx.project)
         ):
             if old["measurement_key"] in {"object_dimensions", "object_dimensions_mm"} and (
                 option.adapter == "configure_standalone_fixture"

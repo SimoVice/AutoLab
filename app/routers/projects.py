@@ -308,7 +308,9 @@ async def open_project(request: Request) -> dict:
             project, history = await run_in_threadpool(open_package, bytes(content), profile)
         else:
             snapshot = decode_snapshot(bytes(content))
-            profile = _active_lab_profile() if snapshot.get("cad_instances") else None
+            profile = _active_lab_profile() if (
+                snapshot.get("cad_instances") or snapshot.get("standalone_fixture")
+            ) else None
             project, history = restore_snapshot(snapshot, lab_profile=profile)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None

@@ -173,6 +173,34 @@ def test_open_holder_uses_the_footprint_without_assuming_a_loaded_height(context
     assert restored["standalone_fixture"]["spec"] == fixture["spec"]
 
 
+def test_need_and_measurements_precede_fabrication(context):
+    ctx = context
+    args = dict(object_label="Disk", object_diameter_mm=24, fastener_spec="none")
+    ctx.user_message = "I need a support for a disk with a 24 mm diameter."
+    before = deepcopy(ctx.project)
+    assert not run(ctx, "configure_standalone_fixture", **args).ok
+    assert ctx.project == before
+    ctx.user_message = "Please print the disk support."
+    using_profile = {"printer": {"name": "Bench printer", "build_volume_mm": [180, 180, 180]}}
+    ctx.lab_profile = using_profile
+    assert run(ctx, "configure_standalone_fixture", **args).ok
+    restored, _ = restore_snapshot(make_snapshot(ctx.project, []), lab_profile=using_profile)
+    assert restored["standalone_fixture"]["parts"] == ctx.project["standalone_fixture"]["parts"]
+
+
+def test_changed_interface_can_supersede_an_obsolete_measurement(context):
+    ctx = context
+    assert run(ctx, "compare_design_routes", **coupon_options()).ok
+    options = coupon_options()
+    options["options"][2].update(measurement_key=None, measurement_question=None)
+    assert not run(ctx, "compare_design_routes", **options).ok
+    ctx.user_message = "Use the camera only. We no longer need edge registration."
+    flags = dict(process="Use a fixed camera without edge registration.")
+    assert run(ctx, "update_project_brief", **flags).ok
+    assert needs_review(ctx.project)
+    assert run(ctx, "compare_design_routes", **options).ok
+
+
 def test_measurement_revises_the_route_then_applies_matching_geometry(context):
     ctx = context
     result = run(ctx, "compare_design_routes", **coupon_options())
