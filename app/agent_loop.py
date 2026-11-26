@@ -57,8 +57,7 @@ _TOOL_STAGES = {
 
 AGENT_SYSTEM_PROMPT = """You are AutoLab's autonomous laboratory engineering assistant.
 Work like a practical, careful biomedical automation engineer using typed domain tools.
-Use load_tools to request any additional tools you need together. The implementation tool for
-the chosen design route becomes available automatically after the choice is recorded.
+Call an available tool directly. Use load_tools only for additional tools.
 
 CORE PRINCIPLES
 - General-purpose automation first: classify non-liquid work (jigs, fixtures, cameras, scales,
@@ -74,7 +73,16 @@ CORE PRINCIPLES
   Ask one specific measurement question when its answer changes the choice. Keep the comparison
   in the project. Set measurement_key on its question. Record the answer, units and matching
   key in measurements, using the actual fixture parameter name when applicable.
-  After an affirmative choice call choose_design_route, then its native tool.
+  A user's answer to a measurement question or choice continues the recorded comparison. Use its
+  sources and options. For a chosen freestanding passive holder or locating base, immediately call
+  choose_design_route with make_passive_fixture=true and the quoted object dimensions, including
+  its upright height. This creates the first CAD. Record object_length_mm and object_width_mm
+  for a rectangular resting face or object_diameter_mm for a round face. Use object_dimensions
+  for a question about all dimensions. For other routes choose first, then call the native tool.
+  When a specific fixture has been chosen and its dimensions supplied before a comparison was
+  saved, use configure_standalone_fixture directly. Use fastener_spec=none for a freestanding
+  piece. Revise an existing fixture with its native tool. The object dimensions determine geometry.
+  An unknown printer envelope leaves print fit unchecked and allows draft STEP/STL export.
   For original geometry use develop_custom_equipment or configure_standalone_fixture.
   A route is applied when the tool succeeds. Bind purchased components to exact BOM identities.
   When a constraint changes, refresh the comparison before changing the geometry. Routine edits to
@@ -110,10 +118,10 @@ CORE PRINCIPLES
   actuator", "liquid handler", "syringe pump", "microscope stage"). If the first search returns 0
   candidates with require_cad=True, retry once with broader 2-3 word technical keywords or
   require_cad=False so documented open-source repositories and literature references are still
-  surfaced honestly (explicitly stating whether CAD files are present). Skip discovery ONLY on
-  narrow turns that do not choose or evaluate hardware (e.g., pure dilution volume arithmetic,
-  recording caliper measurements on an already-built fixture, or approving an already-chosen
-  machine). Cite exact SPDX license, pinned commit SHA, and file SHA-256 on ingested projects; ask
+  surfaced honestly (explicitly stating whether CAD files are present). Reuse the prior search
+  when the user supplies measurements, chooses an offered route or revises a fitted part. Search
+  again when different equipment is needed. Cite exact SPDX license, pinned commit SHA, and
+  file SHA-256 on ingested projects; ask
   the user explicitly before overriding Non-Commercial or Unknown licenses; then run
   adapt_open_hardware_project and check_spatial_fit to verify zero modeled interference and fit.
 - To add external CAD to a design already in progress, inspect its physical assembly, then call
@@ -312,10 +320,11 @@ async def run_agent_turn(
     tool_calls_used = 0
     force_text = False
     assistant_text = ""
+    first_cad: tuple[int, str] | None = None
     started = time.monotonic()
 
     async def execute_loop(active_client: httpx.AsyncClient) -> None:
-        nonlocal repairs_used, tool_calls_used, force_text, assistant_text
+        nonlocal repairs_used, tool_calls_used, force_text, assistant_text, first_cad
 
         for step in range(1, limits.max_steps + 1):
             elapsed = time.monotonic() - started
@@ -460,6 +469,8 @@ async def run_agent_turn(
                     continue
 
                 result = await execute_tool(fn_name, parsed_args, ctx)
+                if result.ok and result.data.get("first_cad"):
+                    first_cad = (result.data["first_cad"]["revision"], result.summary)
                 tool_trace.append(
                     {
                         "step": step,
@@ -527,10 +538,17 @@ async def run_agent_turn(
         else:
             await execute_loop(client)
     except ModelClientError as exc:
-        ctx.project = deepcopy(project)
-        if not getattr(exc, "usage", None):
-            exc.usage = total_usage
-        raise
+        # A failed presentation step must not discard an already exportable project revision.
+        if (
+            exc.failure_kind == "provider_unavailable" and first_cad and ctx.mutated
+            and ctx.project["revision"] == first_cad[0]
+        ):
+            assistant_text = first_cad[1]
+        else:
+            ctx.project = deepcopy(project)
+            if not getattr(exc, "usage", None):
+                exc.usage = total_usage
+            raise
 
     LOGGER.info(
         "OpenAI agent model=%s steps_tools=%d repairs=%d mutated=%s token_usage=%s",

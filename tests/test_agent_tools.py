@@ -44,15 +44,15 @@ def test_tool_loading_is_turn_local_and_follows_the_recorded_route():
 
     initial = available(ctx)
     listed = initial["load_tools"]["parameters"]["properties"]["names"]["items"]["enum"]
-    assert set(listed) | {"load_tools"} == full
     deferred = full - initial.keys()
+    assert set(listed) == deferred
     assert "simulate_robot_protocol" in deferred
     invalid_args = {"names": ["simulate_robot_protocol", "unknown"]}
     invalid = asyncio.run(execute_tool("load_tools", invalid_args, ctx))
     assert not invalid.ok and available(ctx) == initial
     loaded = asyncio.run(execute_tool("load_tools", {"names": sorted(deferred)}, ctx))
     assert loaded.ok and not loaded.mutated and not ctx.mutated
-    assert available(ctx).keys() == full
+    assert available(ctx).keys() == full - {"load_tools"}
     assert available(ToolContext(project, "")) == initial
 
     project["design_plan"] = {

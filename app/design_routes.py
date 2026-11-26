@@ -209,6 +209,15 @@ class DesignPlan(CompareRoutes):
 class ChooseRoute(Record):
     key: Key
     user_quote: Note
+    make_passive_fixture: bool = Field(
+        default=False, description="Create the first CAD for a chosen freestanding, unmounted "
+        "sample holder or locating base in this call. Requires the object's measured dimensions.",
+    )
+    measurements: list[Measurement] = Field(
+        default_factory=list, max_length=10,
+        description="New dimensions from the user's words for this option. For a passive holder "
+        "use object_length_mm and object_width_mm or object_diameter_mm, plus object_height_mm.",
+    )
 
 
 def planning_inputs(project):
@@ -451,6 +460,28 @@ def _inventory_stated(quote, ctx):
     )
 
 
+def _validate_measurements(measurements, previous, ctx):
+    statements = [ctx.user_message, *(h["content"] for h in ctx.history if h["role"] == "user")]
+    for m in measurements:
+        if m.model_dump() in previous:
+            continue
+        if not any(m.quote in s and _affirmative(m.quote, s) for s in statements):
+            raise ValueError("Quote the user's affirmative measurement verbatim.")
+        if _stated_value(m, m.quote):
+            continue
+        # A trailing unit applies to every member of a dimension tuple such as 12 × 8 × 20 mm.
+        number = r"\d+(?:[.,]\d+)?"
+        tuples = re.finditer(
+            rf"(?<![\w.,-])({number}(?:\s*[x×]\s*{number}){{1,2}})\s*{re.escape(m.unit)}(?!\w)",
+            m.quote, re.I,
+        )
+        if not m.unit or not any(
+            _number(value.replace(",", ".")) == _number(m.value)
+            for match in tuples for value in re.findall(number, match.group(1))
+        ):
+            raise ValueError("Record the measured value and units from the user's statement.")
+
+
 def compare_routes(args, ctx):
     if not any((ctx.project.get("brief") or {}).get(k) for k in ("objective", "process")):
         raise ValueError("Record the user's objective or process in the project brief first.")
@@ -459,16 +490,9 @@ def compare_routes(args, ctx):
     )
     previous = ctx.project.get("design_plan") or {}
     prior = {o["key"]: o for o in previous.get("options", [])}
-    statements = [ctx.user_message, *(h["content"] for h in ctx.history if h["role"] == "user")]
     for option in args.options:
         old = prior.get(option.key, {})
-        for m in option.measurements:
-            if m.model_dump() in old.get("measurements", []):
-                continue
-            if not any(
-                m.quote in s and _affirmative(m.quote, s) for s in statements
-            ) or not _stated_value(m, m.quote):
-                raise ValueError("Record the measured value and units from the user's statement.")
+        _validate_measurements(option.measurements, old.get("measurements", []), ctx)
         if (
             old.get("measurement_question")
             and not option.measurement_question
@@ -512,6 +536,71 @@ def require_available(project, plan, option):
         raise ValueError("Resolve this route first. " + " ".join(reasons))
 
 
+def _record_choice_measurements(plan, option, args, ctx):
+    measurements = args.measurements
+    values = {m["key"]: m for m in option["measurements"]}
+    if len({m.key for m in measurements}) != len(measurements):
+        raise ValueError("Record one measurement per parameter.")
+    _validate_measurements(measurements, option["measurements"], ctx)
+    values.update({m.key: m.model_dump() for m in measurements})
+    updated = {**option, "measurements": list(values.values())}
+    question = option.get("measurement_key")
+    if args.make_passive_fixture and question in {"object_dimensions", "object_dimensions_mm"}:
+        passive_fixture_arguments(updated)
+        updated.update(measurement_key=None, measurement_question=None)
+    elif question in {m.key for m in measurements}:
+        updated.update(measurement_key=None, measurement_question=None)
+    opt = Option.model_validate(updated)
+    reasons = option_blockers(
+        opt, [Operation.model_validate(o) for o in plan["operations"]],
+        {s["key"]: Source.model_validate(s) for s in plan["sources"]}, planning_inputs(ctx.project),
+    )
+    return {
+        **plan, "options": [updated if o["key"] == opt.key else o for o in plan["options"]],
+        "blockers": {**plan["blockers"], opt.key: reasons},
+    }, updated
+
+
+def _measurement_mm(measurement):
+    factor = {"mm": "1", "cm": "10", "in": "25.4"}.get(measurement["unit"])
+    value = _number(measurement["value"])
+    return value * _number(factor) if factor and value is not None else None
+
+
+def passive_fixture_arguments(option):
+    caps = {c["capability"] for c in option["coverage"]} - {"manual"}
+    if option["adapter"] != "configure_standalone_fixture" or caps not in (
+        {"locating_base"}, {"sample_holder"},
+    ):
+        raise ValueError("This option needs its own implementation tool.")
+    dims = {}
+    for m in option["measurements"]:
+        value = _measurement_mm(m)
+        if value is None:
+            raise ValueError("The measured fixture needs length dimensions with explicit units.")
+        dims[m["key"]] = float(value)
+    # Older comparisons described the two footprint axes as width and depth.
+    if "object_depth_mm" in dims and "object_length_mm" not in dims:
+        dims["object_length_mm"] = dims.pop("object_depth_mm")
+    shape = "circular" if "object_diameter_mm" in dims else "rectangular"
+    footprint = {"object_diameter_mm"} if shape == "circular" else {
+        "object_length_mm", "object_width_mm",
+    }
+    required = footprint | {"object_height_mm"}
+    if not required <= dims.keys():
+        raise ValueError("Record the object's resting footprint and upright height from the user.")
+    if dims.keys() - required - {
+        "clearance_per_side_mm", "wall_thickness_mm", "floor_thickness_mm", "lip_height_mm",
+    }:
+        raise ValueError("Use the native or custom design tool for the additional interfaces.")
+    return {
+        "fixture_kind": next(iter(caps)), "object_reference_id": "custom",
+        "title": option["label"], "object_label": option["label"], "object_shape": shape,
+        "fastener_spec": "none", "include_scale_reference": False, "include_camera_mount": False,
+        **dims,
+    }
+
+
 def choose_route(args, ctx):
     plan = ctx.project.get("design_plan")
     if not plan or needs_review(ctx.project):
@@ -519,7 +608,6 @@ def choose_route(args, ctx):
     option = next((o for o in plan["options"] if o["key"] == args.key), None)
     if option is None:
         raise ValueError("Choose one of the compared options.")
-    require_available(ctx.project, plan, option)
     quote = args.user_quote
     if quote not in ctx.user_message or not _affirmative(quote, ctx.user_message):
         raise ValueError("Use the user's current affirmative choice verbatim.")
@@ -537,7 +625,8 @@ def choose_route(args, ctx):
     terms = {
         "reuse": ("reuse", "riuso", "riusa", "riutilizza"),
         "buy": ("buy", "acquista", "acquisto"),
-        "fabricate": ("fabricate", "fabbrica", "fabbricazione"),
+        "fabricate": ("fabricate", "print", "printed", "fabbrica", "fabbricazione",
+                      "stampa", "stampato", "stampata"),
     }
 
     def names_for(index, opt):
@@ -558,14 +647,20 @@ def choose_route(args, ctx):
     direct = re.sub(r"[, ]+(?:please|grazie)$", "", direct, flags=re.I)
     direct_choice = direct.casefold() in {word.casefold() for word in terms_by_option[args.key]}
     instruction = re.search(
-        r"\b(choose|use|go with|proceed|select|build|make|fabricate|buy|reuse|pick|keep|"
+        r"\b(choose|use|go with|proceed|select|build|make|fabricate|print|buy|reuse|pick|keep|"
         r"scelgo|scegli|usa|usiamo|procedi|adotta|costruisci|stampa|riutilizza|acquista|mantieni)\b",
         quote,
         re.I,
     )
     if matches != [args.key] or not (direct_choice or instruction):
         raise ValueError("Ask the user to identify one option to adopt.")
+    if args.measurements:
+        plan, option = _record_choice_measurements(plan, option, args, ctx)
+    require_available(ctx.project, plan, option)
     if plan["decision"] and plan["decision"]["key"] == args.key:
+        applied = plan["decision"].get("applied_revision")
+        if plan != ctx.project["design_plan"] and applied is not None:
+            raise ValueError("Revise the existing geometry before recording new fit measurements.")
         return plan
     return {**plan, "decision": Decision(key=args.key, user_quote=quote).model_dump()}
 
@@ -636,13 +731,17 @@ def pending_adoption(name, args, project):
     if name == "configure_standalone_fixture" and args.fixture_kind not in caps:
         raise ValueError("Use the fixture kind compared in the selected route.")
     if name == "configure_standalone_fixture":
+        keys = {m["key"] for m in opt["measurements"]}
         for measurement in opt["measurements"]:
             key = measurement["key"]
+            if key == "object_depth_mm" and "object_length_mm" not in keys:
+                key = "object_length_mm"
             if key.endswith("_mm") and key in type(args).model_fields:
                 value = getattr(args, key)
                 if value is None:
                     value = ((project.get("standalone_fixture") or {}).get("spec") or {}).get(key)
-                if measurement["unit"] != "mm" or _number(value) != _number(measurement["value"]):
+                measured = _measurement_mm(measurement)
+                if measured is None or _number(value) != measured:
                     raise ValueError(
                         f"The fixture parameter {key} must match the recorded measurement."
                     )

@@ -422,8 +422,9 @@ _TOOL_SPECS: list[tuple[str, str, type[BaseModel]]] = [
      "values, bench:<operation>, platform:<id>, or catalog:<id>. Use inventory_quote for owned "
      "equipment, blocker for an unavailable route and measurement_question for a deciding unknown.",
      design_routes.CompareRoutes),
-    ("choose_design_route", "Record one explicitly chosen option by key and verbatim user quote. "
-     "Then run the implementation tool in the active project.", design_routes.ChooseRoute),
+    ("choose_design_route", "Record one explicitly chosen option and any new measurements. "
+     "Set make_passive_fixture to build a freestanding locating base or holder in this call. "
+     "Other options expose their implementation tool.", design_routes.ChooseRoute),
     (
         "inspect_project_state",
         "Read the current project state (workflow, brief, 3D dimensions, platform, "
@@ -629,6 +630,12 @@ def openai_tool_schemas(
 ) -> list[dict[str, Any]]:
     """Return strict OpenAI chat-completions function tool definitions."""
     _ = project, lab_profile
+    deferred = [
+        name for name, _, _ in _TOOL_SPECS
+        if name != "load_tools" and (names is None or name not in names)
+    ]
+    if names is not None and not deferred:
+        names = names - {"load_tools"}
     schemas = [
         {
             "type": "function",
@@ -645,7 +652,7 @@ def openai_tool_schemas(
     for entry in schemas:
         if entry["function"]["name"] == "load_tools":
             items = entry["function"]["parameters"]["properties"]["names"]["items"]
-            items["enum"] = [name for name, _, _ in _TOOL_SPECS if name != "load_tools"]
+            items["enum"] = deferred
     return schemas
 
 
@@ -660,6 +667,8 @@ def planning_tool_schemas(ctx: ToolContext) -> list[dict[str, Any]]:
         names.add("choose_design_route")
         selected = (plan.get("decision") or {}).get("key")
         names.update(option["adapter"] for option in plan["options"] if option["key"] == selected)
+    elif (ctx.project.get("workflow") or {}).get("kind") == "general":
+        names.add("configure_standalone_fixture")
     return openai_tool_schemas(ctx.project, ctx.lab_profile, names=names)
 
 
@@ -1002,11 +1011,21 @@ def _tool_lookup_references(args: LookupReviewedReferencesArgs, ctx: ToolContext
     )
 
 
-def _tool_design_routes(args, ctx: ToolContext) -> ToolResult:
+async def _tool_design_routes(args, ctx: ToolContext) -> ToolResult:
     comparing = isinstance(args, design_routes.CompareRoutes)
     name = "compare_design_routes" if comparing else "choose_design_route"
     plan = (design_routes.compare_routes(args, ctx) if comparing
             else design_routes.choose_route(args, ctx))
+    if not comparing and args.make_passive_fixture and plan["decision"]["applied_revision"] is None:
+        option = next(o for o in plan["options"] if o["key"] == args.key)
+        parameters = design_routes.passive_fixture_arguments(option)
+        previous = ctx.project
+        ctx.project = {**previous, "design_plan": plan}
+        result = await execute_tool("configure_standalone_fixture", parameters, ctx)
+        if not result.ok or result.requires_human_input:
+            ctx.project = previous
+        result.tool = name
+        return result
     changed = ctx.project.get("design_plan") != plan
     if changed:
         from app.project_storage import make_snapshot
@@ -1019,8 +1038,12 @@ def _tool_design_routes(args, ctx: ToolContext) -> ToolResult:
     if comparing and not plan["decision"]:
         question = next((o["measurement_question"] for o in plan["options"]
                          if o["measurement_question"]), None)
-    message = ("Compared design routes against the recorded operations." if comparing else
-               "Recorded the selected route. Run its implementation tool to apply it.")
+    if comparing:
+        message = "Compared design routes against the recorded operations."
+    elif plan["decision"]["applied_revision"] is not None:
+        message = "The selected route has already been applied to this project."
+    else:
+        message = "Recorded the selected route. Run its implementation tool to apply it."
     return ToolResult(tool=name, ok=True, stage="designing", mutated=changed, summary=message,
                       data=plan, requires_human_input=bool(question), question=question)
 
@@ -2124,10 +2147,12 @@ def _tool_configure_standalone_fixture(
         if "title" not in raw_spec:
             ref_title = provided.get("object_reference_id", "Custom").replace("_", " ").title()
             raw_spec["title"] = provided.get("object_label") or f"{ref_title} fixture"
-        if (
-            args.object_reference_id == "custom"
-            and args.object_length_mm is None
-            and args.object_diameter_mm is None
+        has_footprint = (
+            args.object_diameter_mm is not None if args.object_shape == "circular" else
+            args.object_length_mm is not None and args.object_width_mm is not None
+        )
+        if args.object_reference_id == "custom" and (
+            not has_footprint or args.object_height_mm is None or not args.object_label
         ):
             return ToolResult(
                 tool="configure_standalone_fixture",
@@ -2181,6 +2206,12 @@ def _tool_configure_standalone_fixture(
     ctx.project = updated
     ctx.mutated = True
     ctx.action_runs.append(run)
+    first_cad = {}
+    if not existing:
+        first_cad = {"first_cad": {"revision": updated["revision"], "formats": ["STEP", "STL"]}}
+        run["message"] += " STEP and STL are available in the fixture downloads."
+        if any(part["printer_fit"]["fits"] is None for part in fixture["parts"]):
+            run["message"] += " Printer fit is unverified."
     return ToolResult(
         tool="configure_standalone_fixture",
         ok=True,
@@ -2188,6 +2219,7 @@ def _tool_configure_standalone_fixture(
         mutated=True,
         summary=run["message"],
         data={
+            **first_cad,
             "spec": fixture["spec"],
             "derived": {
                 "pocket_length_mm": fixture["derived"]["pocket_length_mm"],
@@ -3072,8 +3104,8 @@ _DISPATCH: dict[str, tuple[type[BaseModel], Any, bool]] = {
     "inspect_project_state": (InspectProjectStateArgs, _tool_inspect_project_state, False),
     "check_spatial_fit": (CheckSpatialFitArgs, _tool_check_spatial_fit, False),
     "lookup_reviewed_references": (LookupReviewedReferencesArgs, _tool_lookup_references, False),
-    "compare_design_routes": (design_routes.CompareRoutes, _tool_design_routes, False),
-    "choose_design_route": (design_routes.ChooseRoute, _tool_design_routes, False),
+    "compare_design_routes": (design_routes.CompareRoutes, _tool_design_routes, True),
+    "choose_design_route": (design_routes.ChooseRoute, _tool_design_routes, True),
     "update_project_brief": (UpdateProjectBriefArgs, _tool_update_project_brief, False),
     "update_liquid_recipe": (UpdateLiquidRecipeArgs, _tool_update_liquid_recipe, False),
     "select_platform": (SelectPlatformArgs, _tool_select_platform, False),

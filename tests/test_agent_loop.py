@@ -202,6 +202,32 @@ def test_autonomous_self_repair_recovers_from_3d_depth_overflow():
     assert "970" in seen_tool_messages[0]["summary"]
 
 
+def test_presentation_disconnect_keeps_the_first_exportable_revision():
+    args = dict(
+        fixture_kind="sample_holder", object_reference_id="custom", object_label="Disk",
+        object_shape="circular", object_diameter_mm=20, object_height_mm=8, fastener_spec="none",
+    )
+
+    def handler(request):
+        messages = json.loads(request.content)["messages"]
+        if messages[-1]["role"] == "tool":
+            raise httpx.ConnectError("Disconnected after native CAD compilation", request=request)
+        reply = _tool_reply([_tc("make", "configure_standalone_fixture", args)])
+        return httpx.Response(200, json=reply)
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await run_agent_turn(
+                new_project(), "Print a holder for my 20 mm diameter, 8 mm high disk.", [],
+                settings=TEST_SETTINGS, client=client,
+            )
+
+    result = asyncio.run(run())
+    assert result["project"]["standalone_fixture"]["spec"]["object_diameter_mm"] == 20
+    assert "STEP and STL" in result["assistant_message"]
+    assert "Printer fit is unverified" in result["assistant_message"]
+
+
 def test_budget_caps_and_atomic_rollback_on_unrecoverable_failure():
     # Hard conflict: liquid_preparation project with engineering_design -> develop_bench_station
     # is unrecoverable (recoverable=False), so any earlier mutations in the turn must roll back.

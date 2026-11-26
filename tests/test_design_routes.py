@@ -106,6 +106,51 @@ def context(tmp_path, monkeypatch):
     return ToolContext(project, OWNED)
 
 
+@pytest.mark.parametrize(
+    ("quote", "fields", "unit", "expected"),
+    [
+        ("The part measures 5 × 3 × 2 cm", ("length", "width", "height"), "cm", (50, 30, 20)),
+        ("Diameter 16 mm and height 25 mm", ("diameter", "height"), "mm", (16, 25)),
+    ],
+)
+def test_choose_and_build_a_measured_draft(context, quote, fields, unit, expected):
+    ctx = context
+    options = coupon_options()
+    options["options"][2]["measurement_key"] = "object_dimensions"
+    assert run(ctx, "compare_design_routes", **options).ok
+    before = deepcopy(ctx.project)
+    values = [v / 10 if unit == "cm" else v for v in expected]
+    measurements = [
+        dict(key=f"object_{field}_mm", value=f"{value:g}", unit=unit, quote=quote)
+        for field, value in zip(fields, values, strict=True)
+    ]
+    selection = "Choose Keyed Tray"
+    args = dict(key="keyed-tray", user_quote=selection, make_passive_fixture=True)
+    ctx.user_message = f"{quote}. {selection}."
+    forged = [{**measurements[0], "value": "77"}, *measurements[1:]]
+    assert not run(ctx, "choose_design_route", measurements=forged, **args).ok
+    assert ctx.project == before
+    assert not run(ctx, "choose_design_route", measurements=measurements[:-1], **args).ok
+    assert ctx.project == before
+    result = run(ctx, "choose_design_route", measurements=measurements, **args)
+    assert result.ok and result.mutated
+    revision = ctx.project["revision"]
+    assert result.data["first_cad"]["revision"] == revision == before["revision"] + 1
+    fixture = ctx.project["standalone_fixture"]
+    assert tuple(fixture["spec"][f"object_{f}_mm"] for f in fields) == expected
+    assert fixture["spec"]["fastener_spec"] == "none"
+    assert all(p["printer_fit"]["fits"] is None for p in fixture["parts"])
+    plan = ctx.project["design_plan"]
+    assert plan["decision"] == {
+        "key": "keyed-tray", "user_quote": selection, "applied_revision": revision,
+    }
+    assert not plan["blockers"]["keyed-tray"] and plan["blockers"]["camera-kit"]
+    assert not run(ctx, "choose_design_route", measurements=measurements, **args).mutated
+    restored, _ = restore_snapshot(make_snapshot(ctx.project, []))
+    assert restored["design_plan"] == plan
+    assert restored["standalone_fixture"]["spec"] == fixture["spec"]
+
+
 def test_measurement_revises_the_route_then_applies_matching_geometry(context):
     ctx = context
     result = run(ctx, "compare_design_routes", **coupon_options())
