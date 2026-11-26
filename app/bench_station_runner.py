@@ -71,7 +71,7 @@ def operation_rows(plan):
         if (
             row["id"] != f"op-{i:03d}"
             or not binding
-            or row["mode"] not in ("manual", "driver", "missing_driver")
+            or row["mode"] not in ("manual", "driver", "missing_driver", "recorded_input")
             or (row["mode"] == "driver" and (key not in modules or not binding["driver"]))
         ):
             raise ValueError("Invalid operation or device binding in station sequence.")
@@ -181,6 +181,8 @@ def run_record(
     blocked = next((r for r in rows if r["mode"] == "missing_driver"), None)
     if blocked:
         raise ValueError(f"Missing driver for {blocked['action']}.")
+    if any(row["mode"] == "recorded_input" for row in rows):
+        raise ValueError("Use the recording replay in Software & protocols or its offline kit.")
     ports = {
         key: driver.port
         for key, driver in (("weigh", balance_driver), ("read_barcode", barcode_driver))

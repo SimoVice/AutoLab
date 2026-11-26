@@ -91,8 +91,10 @@ export type OperationSequence = {
   schema_version: 1; project_id: string; revision: number; platform: string | null;
   scope: 'approved' | 'illustrative'; sha256: string; hardware_blockers: string[];
   bindings: Record<string, { component_id: string | null; capability: string; driver: string | null;
-    unit: string | null; limits: Record<string, unknown>; prerequisites: string[] }>;
-  operations: { id: string; binding: string; action: string; mode: 'driver' | 'manual' | 'missing_driver';
+    unit: string | null; limits: Record<string, unknown>; prerequisites: string[];
+    adapter?: { id: string; version: number | null; command: string; execution: string;
+      supported_commands: string[]; missing_capability: string | null; integration_requirements: string[] } }>;
+  operations: { id: string; binding: string; action: string; mode: 'driver' | 'manual' | 'missing_driver' | 'recorded_input';
     request_id: string | null; parameters: Record<string, string | number> }[];
 };
 

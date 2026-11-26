@@ -250,7 +250,7 @@ export default function SoftwareWorkspace({ project, onProject, onConversation }
     setTime(0);
   }
 
-  const operationDetails = sequence ? <OperationSequenceView sequence={sequence} href={sequenceUrl} />
+  const operationDetails = sequence ? <OperationSequenceView sequence={sequence} href={sequenceUrl} softwareUrl={`${base}/software`} />
     : <p role="status">{sequenceState?.url === sequenceUrl && sequenceState.error || 'Loading the operation plan…'}</p>;
 
   return (

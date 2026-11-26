@@ -93,6 +93,10 @@ capability such as `weigh` needs its installed `component_id` and `port`. A
 missing driver is reported before collection begins. A visual inspection remains
 an operator checkpoint.
 
+A station with an inspection module can add a recorded optical measurement after
+a barcode scan and retain the final operator check. Open **Operating sequence**
+to download the recording template and replay the inputs. [Recorded measurement guide](measurement-adapters.md).
+
 ## Engineering limits
 
 The SVG is a dimensioned planning drawing; there is no fabrication STEP/STL

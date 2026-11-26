@@ -26,6 +26,7 @@ from app.lab_profile import (
     record_dimension,
     save_lab_profile,
 )
+from app.measurement_program import MeasurementSteps
 from app.microplates import PROFILE_ID as CORNING_96_ID
 from app.microplates import LabwareSelection, reapply_plate, select_plate
 from app.part_choices import ChoosePartArgs, update_choice
@@ -593,6 +594,14 @@ _TOOL_SPECS: list[tuple[str, str, type[BaseModel]]] = [
         GenerateRobotProtocolArgs,
     ),
     (
+        "configure_measurement_steps",
+        "Configure the complete ordered set of recorded instrument readings on an approved design. "
+        "Call inspect_project_state with include_components=true to get native operations, "
+        "component IDs and registered commands. Keep an explicitly requested unsupported command "
+        "as a missing capability. Use an empty list to remove the readings.",
+        MeasurementSteps,
+    ),
+    (
         "simulate_robot_protocol",
         "Run strict AST, tip/pipette-range, well-capacity, and simulator verification on the "
         "project's generated Opentrons API v2 or Science Jubilee protocol.",
@@ -777,6 +786,16 @@ def _compact_project_state(project: dict, lab_profile: dict | None) -> dict[str,
 
 def _tool_inspect_project_state(args: InspectProjectStateArgs, ctx: ToolContext) -> ToolResult:
     data = _compact_project_state(ctx.project, ctx.lab_profile)
+    if ctx.project.get("bench_station") or ctx.project.get("concept_design"):
+        from app.measurement_adapters import catalog
+        from app.measurement_program import native_plan
+
+        data["measurement_adapters"] = catalog(include_schema=args.include_components)
+        base = native_plan(ctx.project)
+        data["measurement_anchors"] = [
+            {"id": r["id"], "action": r["action"]} for r in base["operations"]
+        ]
+        data["measurement_steps"] = (ctx.project.get("measurement_program") or {}).get("steps", [])
     if args.include_components:
         from app.project_assembly import physical_assembly
 
@@ -2905,6 +2924,38 @@ def _tool_generate_robot_protocol(args: GenerateRobotProtocolArgs, ctx: ToolCont
     )
 
 
+def _tool_configure_measurements(args: MeasurementSteps, ctx: ToolContext) -> ToolResult:
+    from app.measurement_program import configure
+    from app.operation_plan import project_operation_plan
+
+    updated = configure(ctx.project, args)
+    changed = updated is not ctx.project
+    if changed:
+        ctx.project = updated
+        ctx.mutated = True
+    sequence = project_operation_plan(updated) if args.steps else None
+    unavailable = [
+        {"component_id": b["component_id"], **b["adapter"]}
+        for b in (sequence or {}).get("bindings", {}).values()
+        if b.get("adapter", {}).get("integration_requirements")
+    ]
+    return ToolResult(
+        tool="configure_measurement_steps",
+        ok=True,
+        mutated=changed,
+        stage="designing",
+        summary=(
+            "Saved the requested readings with unresolved device requirements."
+            if unavailable
+            else "Updated the recorded measurement sequence."
+        ),
+        data={
+            "measurement_program": updated.get("measurement_program"),
+            "integration_gaps": unavailable,
+        },
+    )
+
+
 def _tool_simulate_robot_protocol(args: SimulateRobotProtocolArgs, ctx: ToolContext) -> ToolResult:
     from app.opentrons_verifier import verify_jubilee_protocol, verify_opentrons_protocol
     from app.operation_plan import resolve_platform
@@ -3044,6 +3095,7 @@ _DISPATCH: dict[str, tuple[type[BaseModel], Any, bool]] = {
         _tool_generate_robot_protocol,
         False,
     ),
+    "configure_measurement_steps": (MeasurementSteps, _tool_configure_measurements, False),
     "simulate_robot_protocol": (
         SimulateRobotProtocolArgs,
         _tool_simulate_robot_protocol,

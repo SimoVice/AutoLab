@@ -6,9 +6,17 @@ import hashlib
 from copy import deepcopy
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi import APIRouter, HTTPException, Request, Response
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from starlette.concurrency import run_in_threadpool
 
+from app.measurement_replay import (
+    MAX_RECORDING_BYTES,
+    Recording,
+    StaleRecording,
+    recording_template,
+    replay,
+)
 from app.opentrons_verifier import verify_jubilee_protocol, verify_opentrons_protocol
 from app.operation_plan import project_operation_plan, resolve_platform
 from app.protocol_generators import (
@@ -56,6 +64,49 @@ async def preview_operations(project_id: str, revision: int) -> dict:
         return project_operation_plan(current)
     except ValueError as exc:
         raise HTTPException(422, detail=str(exc)) from None
+
+
+@router.get("/api/projects/{project_id}/software/recording-template")
+async def download_recording_template(project_id: str, revision: int) -> dict:
+    return recording_template(await preview_operations(project_id, revision))
+
+
+@router.get("/api/projects/{project_id}/software/replay-kit.zip")
+async def download_replay_kit(project_id: str, revision: int) -> Response:
+    from app.measurement_kit import build_replay_kit
+
+    plan = await preview_operations(project_id, revision)
+    return Response(
+        content=build_replay_kit(plan),
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="measurement-replay.zip"'},
+    )
+
+
+@router.post("/api/projects/{project_id}/software/replay")
+async def replay_recording(project_id: str, revision: int, request: Request) -> dict:
+    plan = await preview_operations(project_id, revision)
+    raw = bytearray()
+    async for chunk in request.stream():
+        if len(raw) + len(chunk) > MAX_RECORDING_BYTES:
+            raise HTTPException(413, "The recording exceeds 8 MiB.")
+        raw.extend(chunk)
+    try:
+        recording = Recording.model_validate_json(raw)
+    except ValidationError as exc:
+        issue = exc.errors(include_input=False, include_url=False)[0]
+        field = ".".join(str(x) for x in issue["loc"]) or "recording"
+        raise HTTPException(422, f"{field}: {issue['msg']}") from None
+    try:
+        result = await run_in_threadpool(replay, plan, recording)
+    except StaleRecording as exc:
+        raise HTTPException(409, str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    session = api_hook("session_for", session_for)(project_id)
+    async with session.model_lock():
+        check_revision(session.project, revision)
+    return result
 
 
 @router.post("/api/projects/{project_id}/software/protocol")

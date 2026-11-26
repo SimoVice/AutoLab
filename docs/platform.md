@@ -91,6 +91,10 @@ new dimensions. Save/Open preserves the comparison, including a pending constrai
 | Project continuity | Revisioned designs, portable save/reopen, supported design changes and revision-specific exports. |
 | Software | Equipment-specific setup and protocol-authoring guidance, a standalone logical direct-dilution preview, an operator-assisted bench-station record runner, and a custom-assembly Python sequence controller with default simulation and an opt-in JSON/HTTP gateway integration. |
 
+The software workspace also composes recorded measurements with operations on a
+bench station or custom assembly. A single adapter supplies the input schema,
+units and calibration instructions to both designs. [Measurement adapter contract](measurement-adapters.md).
+
 ### Inspect the parts in a project
 
 Open **Parts & prices** and select **Assembly JSON** to download the physical

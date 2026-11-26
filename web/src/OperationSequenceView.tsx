@@ -1,8 +1,9 @@
 import type { OperationSequence } from './types';
+import RecordingReplay from './RecordingReplay';
 
-type Props = { sequence: OperationSequence; href: string };
+type Props = { sequence: OperationSequence; href: string; softwareUrl: string };
 
-export default function OperationSequenceView({ sequence, href }: Props) {
+export default function OperationSequenceView({ sequence, href, softwareUrl }: Props) {
   if (!sequence.operations.length) return <p>Define the operations and choose a design in chat.</p>;
   const location = (role?: string | number, well?: string | number) =>
     role && well ? `${String(role).replaceAll('_', ' ')} / ${well}` : '';
@@ -20,7 +21,9 @@ export default function OperationSequenceView({ sequence, href }: Props) {
         {p.repetitions != null && <> × {p.repetitions}</>}
         {p.new_tip === 'always' && <> · fresh tip</>}
         {places.length > 0 && <span>{places.join(' → ')}</span>}
-        <small>{op.id} · {op.mode === 'driver' ? part.driver : op.mode === 'manual' ? 'Operator step' : 'Missing driver'}</small>
+        <small>{op.id} · {op.mode === 'driver' ? part.driver : op.mode === 'manual' ? 'Operator step' : op.mode === 'recorded_input' ? 'Recorded input' : 'Missing driver'}</small>
+        {part.adapter?.missing_capability && <span>Unsupported command · {part.adapter.missing_capability}</span>}
+        {part.adapter?.integration_requirements.map(need => <span key={need}>{need}</span>)}
       </li>;
     })}</ol>
     <details><summary>Device bindings and prerequisites</summary>
@@ -28,8 +31,11 @@ export default function OperationSequenceView({ sequence, href }: Props) {
         <div key={key}><strong>{b.capability.replaceAll('_', ' ')}</strong>
           <p>{b.component_id || 'Component unassigned'}{b.unit && ` · ${b.unit}`}</p>
           {Object.entries(b.limits).map(([name, value]) => <p key={name}>{name.replaceAll('_', ' ')} · {value == null ? 'Unverified' : String(value)}</p>)}
+          {b.adapter && <p>{b.adapter.id} · {b.adapter.command} · recorded input only</p>}
           {b.prerequisites.map(v => <p key={v}>{v}</p>)}</div>)}
     </details>
     <a href={href} download="operation-plan.json">Download operation plan</a>
+    {Object.values(sequence.bindings).some(b => b.adapter) &&
+      <RecordingReplay key={sequence.sha256} softwareUrl={softwareUrl} revision={sequence.revision} />}
   </section>;
 }

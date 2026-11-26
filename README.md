@@ -112,6 +112,10 @@ the same order and identify manual work and missing drivers. A Jubilee sequence
 with mapped positions also has 3D playback. The hardware workspace offers an
 illustrative preview before a recipe exists. [Software and protocol guide](docs/software-and-protocols.md).
 
+An approved bench station or custom assembly can also replay recorded camera,
+barcode and balance inputs. The camera command can measure a printed mark in a
+barcode workflow or compare two regions of a light panel. [Recorded measurement guide](docs/measurement-adapters.md).
+
 For a different process, describe what happens in your lab and select **Develop
 functional plan** in the project brief. The resulting specification lists the
 operations, the role of each device, what passes between steps and how to check

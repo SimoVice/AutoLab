@@ -24,6 +24,7 @@ from app.labware import (
     rack_inputs,
     restore_labware,
 )
+from app.measurement_program import SavedMeasurements
 from app.microplates import SavedPlate, plate_inputs, restore_plate
 from app.part_choices import PartChoice
 from app.tip_racks import (
@@ -105,6 +106,7 @@ class Snapshot(StrictModel):
     engineering: EngineeringState | None = None
     engineering_design: SavedDesign | None
     bench_station: dict[str, JsonValue] | None = None
+    measurement_program: SavedMeasurements | None = None
     custom_assembly_v1: dict[str, JsonValue] | None = None
     standalone_fixture: dict[str, JsonValue] | None = None
     upstream_project: dict[str, JsonValue] | None = None
@@ -238,6 +240,8 @@ def make_snapshot(project: dict, history: list[dict]) -> dict:
            if project.get("dimension_provenance") else {}),
         "history": deepcopy(history[-DISPLAY_HISTORY_LIMIT:]),
     }
+    if project.get("measurement_program"):
+        payload["measurement_program"] = deepcopy(project["measurement_program"])
     if project.get("budget_allowances"):
         payload["budget_allowances"] = deepcopy(project["budget_allowances"])
     if project.get("part_choices"):
@@ -630,5 +634,7 @@ def restore_snapshot(
     # A portable approval can predate the derived spatial-fit display in older projects.
     if bound_before_fit and project["design"]["spatial_fit"]["status"] != "infeasible":
         project["machine_approval"]["machine_signature"] = machine_signature(project)
+    if saved.measurement_program:
+        project["measurement_program"] = saved.measurement_program.model_dump()
     refresh_workflow(project)
     return project, [entry.model_dump() for entry in saved.history]

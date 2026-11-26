@@ -121,6 +121,10 @@ def make_plan(
         "execution_enabled": False,
         "hardware_blockers": list(blockers),
     }
+    if project.get("measurement_program") and platform == selected_platform(project):
+        from app.measurement_program import attach_measurements
+
+        attach_measurements(project, result)
     encoded = json.dumps(result, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
     return {**result, "sha256": hashlib.sha256(encoded).hexdigest()}
 

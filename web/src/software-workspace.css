@@ -81,3 +81,10 @@
 .software-sim-badge { padding: 9px 12px; border-radius: 8px; font-size: 12px; margin-bottom: 10px; border: 1px solid #c9e0da; background: #eff8f5; color: #165748; }
 .software-sim-badge.is-fail { background: #fdf1f1; border-color: #e6b8b8; color: #8c232b; }
 .software-sim-badge p { margin: 6px 0 0; }
+
+.recording-replay { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--line, #dce6e4); }
+.replay-downloads { display: flex; flex-wrap: wrap; gap: .4rem 1rem; margin: .5rem 0 .8rem; }
+.replay-downloads a { text-decoration: underline; text-underline-offset: .15em; }
+.recording-replay label, .recording-replay input { display: block; max-width: 100%; }
+.recording-replay input { margin: .35rem 0 .75rem; }
+.recording-replay ul { padding-inline-start: 1.2rem; }

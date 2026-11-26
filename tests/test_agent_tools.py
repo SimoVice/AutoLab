@@ -60,6 +60,7 @@ def test_openai_tool_schemas_are_strict_and_complete():
         "check_hardware_compatibility",
         "search_supplier_components",
         "generate_robot_protocol",
+        "configure_measurement_steps",
         "simulate_robot_protocol",
         "build_hardware_commissioning_pack",
     ]
