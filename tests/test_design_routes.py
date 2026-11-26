@@ -130,7 +130,7 @@ def test_choose_and_build_a_measured_draft(context, quote, fields, unit, expecte
     forged = [{**measurements[0], "value": "77"}, *measurements[1:]]
     assert not run(ctx, "choose_design_route", measurements=forged, **args).ok
     assert ctx.project == before
-    assert not run(ctx, "choose_design_route", measurements=measurements[:-1], **args).ok
+    assert not run(ctx, "choose_design_route", measurements=measurements[-1:], **args).ok
     assert ctx.project == before
     result = run(ctx, "choose_design_route", measurements=measurements, **args)
     assert result.ok and result.mutated
@@ -151,10 +151,33 @@ def test_choose_and_build_a_measured_draft(context, quote, fields, unit, expecte
     assert restored["standalone_fixture"]["spec"] == fixture["spec"]
 
 
+def test_open_holder_uses_the_footprint_without_assuming_a_loaded_height(context):
+    ctx = context
+    options = coupon_options()
+    options["options"][2]["measurement_key"] = "object_dimensions"
+    assert run(ctx, "compare_design_routes", **options).ok
+    ctx.user_message = "The diameter is 36 mm. I choose Keyed Tray for the first draft."
+    diameter = dict(key="object_diameter_mm", value="36", unit="mm", quote="The diameter is 36 mm")
+    result = run(ctx, "choose_design_route", key="keyed-tray", user_quote="I choose 'Keyed Tray'",
+                 measurements=[diameter], make_passive_fixture=True)
+    assert result.ok
+    project = ctx.project
+    fixture = project["standalone_fixture"]
+    assert fixture["spec"]["object_height_mm"] is None
+    assert "fixture_object_height_mm" not in project["dimension_provenance"]
+    assert fixture["derived"]["pocket_diameter_mm"] == pytest.approx(36.9)
+    assert "reference-object" not in {component["id"] for component in fixture["components"]}
+    assert not run(ctx, "configure_standalone_fixture", include_camera_mount=True).ok
+    assert ctx.project == project
+    restored, _ = restore_snapshot(make_snapshot(project, []))
+    assert restored["standalone_fixture"]["spec"] == fixture["spec"]
+
+
 def test_measurement_revises_the_route_then_applies_matching_geometry(context):
     ctx = context
     result = run(ctx, "compare_design_routes", **coupon_options())
-    assert result.ok and result.question == QUESTION
+    assert result.ok and result.question.endswith(QUESTION)
+    assert "Keyed Tray" in result.question
     assert "Missing operation" in str(result.data["blockers"]["camera-kit"])
     revision = ctx.project["revision"]
     assert not run(ctx, "compare_design_routes", **coupon_options()).mutated

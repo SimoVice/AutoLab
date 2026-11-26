@@ -179,7 +179,7 @@ class FixtureSpec(BaseModel):
     object_length_mm: float | None = Field(default=None, ge=5.0, le=400.0)
     object_width_mm: float | None = Field(default=None, ge=5.0, le=400.0)
     object_diameter_mm: float | None = Field(default=None, ge=5.0, le=300.0)
-    object_height_mm: float = Field(default=14.22, ge=0.5, le=250.0)
+    object_height_mm: float | None = Field(default=None, ge=0.5, le=250.0)
     dimension_provenance: Literal["reference", "user_measured"] = "reference"
     clearance_per_side_mm: float = Field(default=0.35, ge=0.05, le=3.0)
     fdm_undersize_mm: float = Field(default=0.20, ge=0.0, le=1.5)
@@ -331,6 +331,8 @@ def normalize_fixture_spec(raw: dict[str, Any] | FixtureSpec) -> FixtureSpec:
 
     final_data = {**parsed.model_dump(), **updates}
     normalized = FixtureSpec.model_validate(final_data)
+    if normalized.object_height_mm is None and normalized.include_camera_mount:
+        raise ValueError("Measure the object's height to set the overhead camera position.")
     if normalized.object_shape == "rectangular":
         if normalized.object_length_mm is None or normalized.object_width_mm is None:
             raise ValueError(
@@ -735,21 +737,22 @@ def compile_standalone_fixture(
         }
     )
 
-    components.append(
-        {
-            "id": "reference-object",
-            "kind": "specimen-reference",
-            "label": f"Target object: {spec.object_label}",
-            "position": [0.0, floor + spec.object_height_mm / 2.0, 0.0],
-            "size": [nominal_l, spec.object_height_mm, nominal_w],
-            "geometry": {
-                "schema_version": "1",
-                "primitives": _reference_object_primitives(spec),
-            },
-        }
-    )
-
-    total_height_mm = max(base_h, floor + spec.object_height_mm)
+    total_height_mm = base_h
+    if spec.object_height_mm is not None:
+        components.append(
+            {
+                "id": "reference-object",
+                "kind": "specimen-reference",
+                "label": f"Target object: {spec.object_label}",
+                "position": [0.0, floor + spec.object_height_mm / 2.0, 0.0],
+                "size": [nominal_l, spec.object_height_mm, nominal_w],
+                "geometry": {
+                    "schema_version": "1",
+                    "primitives": _reference_object_primitives(spec),
+                },
+            }
+        )
+        total_height_mm = max(base_h, floor + spec.object_height_mm)
     assembly_front_z = front_edge_z
     assembly_rear_z = rear_edge_z
     assembly_max_w = outer_w
@@ -1061,6 +1064,11 @@ def compile_standalone_fixture(
         "Fastener clamping, optical focus sharpness, and specimen glare require physical "
         "verification on the bench (E13).",
     ]
+    if spec.object_height_mm is None:
+        limitations.insert(
+            0, "Only the resting footprint was measured. The preview and bench checks cover "
+            "the holder. Object height and loaded clearance are unknown.",
+        )
     if spec.dimension_provenance == "reference":
         limitations.insert(
             0,
@@ -1167,13 +1175,13 @@ def attach_standalone_fixture(
             provenance=prov,
             source=src,
         )
-    updated = record_dimension(
-        updated,
-        "fixture_object_height_mm",
-        spec_dict["object_height_mm"],
-        provenance=prov,
-        source=src,
-    )
+    if spec_dict["object_height_mm"] is not None:
+        updated = record_dimension(
+            updated, "fixture_object_height_mm", spec_dict["object_height_mm"],
+            provenance=prov, source=src,
+        )
+    else:
+        updated.get("dimension_provenance", {}).pop("fixture_object_height_mm", None)
 
     updated["design"]["footprint"] = {
         "width_mm": compiled["footprint_mm"][0],

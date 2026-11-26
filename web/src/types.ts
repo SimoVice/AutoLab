@@ -618,7 +618,7 @@ export type StandaloneFixture = {
     object_length_mm?: number | null;
     object_width_mm?: number | null;
     object_diameter_mm?: number | null;
-    object_height_mm: number;
+    object_height_mm: number | null;
     dimension_provenance: 'reference' | 'user_measured';
     clearance_per_side_mm: number;
     fdm_undersize_mm: number;

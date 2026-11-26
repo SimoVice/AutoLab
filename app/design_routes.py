@@ -216,7 +216,8 @@ class ChooseRoute(Record):
     measurements: list[Measurement] = Field(
         default_factory=list, max_length=10,
         description="New dimensions from the user's words for this option. For a passive holder "
-        "use object_length_mm and object_width_mm or object_diameter_mm, plus object_height_mm.",
+        "use object_length_mm and object_width_mm or object_diameter_mm. Include object_height_mm "
+        "only when stated. Previously recorded measurements can be reused without repeating them.",
     )
 
 
@@ -498,7 +499,15 @@ def compare_routes(args, ctx):
             and not option.measurement_question
             and not option.blocker
         ):
-            if not any(
+            if old["measurement_key"] in {"object_dimensions", "object_dimensions_mm"} and (
+                option.adapter == "configure_standalone_fixture"
+                and option.strategy == "fabricate"
+                and {c.capability for c in option.coverage} - {"manual"} in (
+                    {"sample_holder"}, {"locating_base"},
+                )
+            ):
+                passive_fixture_arguments(option.model_dump())
+            elif not any(
                 m.key == old["measurement_key"] and m.model_dump() not in old["measurements"]
                 for m in option.measurements
             ):
@@ -580,17 +589,21 @@ def passive_fixture_arguments(option):
             raise ValueError("The measured fixture needs length dimensions with explicit units.")
         dims[m["key"]] = float(value)
     # Older comparisons described the two footprint axes as width and depth.
-    if "object_depth_mm" in dims and "object_length_mm" not in dims:
-        dims["object_length_mm"] = dims.pop("object_depth_mm")
+    if "object_depth_mm" in dims:
+        depth = dims.pop("object_depth_mm")
+        if "object_length_mm" not in dims:
+            dims["object_length_mm"] = depth
+        elif depth not in (dims["object_length_mm"], dims.get("object_width_mm")):
+            raise ValueError("The saved depth conflicts with the two measured footprint axes.")
     shape = "circular" if "object_diameter_mm" in dims else "rectangular"
     footprint = {"object_diameter_mm"} if shape == "circular" else {
         "object_length_mm", "object_width_mm",
     }
-    required = footprint | {"object_height_mm"}
-    if not required <= dims.keys():
-        raise ValueError("Record the object's resting footprint and upright height from the user.")
-    if dims.keys() - required - {
-        "clearance_per_side_mm", "wall_thickness_mm", "floor_thickness_mm", "lip_height_mm",
+    if not footprint <= dims.keys():
+        raise ValueError("Record the object's measured resting footprint.")
+    if dims.keys() - footprint - {
+        "object_height_mm", "clearance_per_side_mm", "wall_thickness_mm",
+        "floor_thickness_mm", "lip_height_mm",
     }:
         raise ValueError("Use the native or custom design tool for the additional interfaces.")
     return {
@@ -609,7 +622,16 @@ def choose_route(args, ctx):
     if option is None:
         raise ValueError("Choose one of the compared options.")
     quote = args.user_quote
-    if quote not in ctx.user_message or not _affirmative(quote, ctx.user_message):
+    if quote not in ctx.user_message:
+        # Models can normalize quotation marks. Bind consent to the actual sentence in chat.
+        choices = [
+            clause.strip() for clause in re.split(r"[.!?;\n]", ctx.user_message)
+            if option["label"].casefold() in clause.casefold()
+        ]
+        if len(choices) != 1:
+            raise ValueError("Use the user's current affirmative choice verbatim.")
+        quote = choices[0]
+    if not _affirmative(quote, ctx.user_message):
         raise ValueError("Use the user's current affirmative choice verbatim.")
     # Resolve the user's wording to one displayed option. An ordinal refers to display order.
     ordinals = (
@@ -638,7 +660,8 @@ def choose_route(args, ctx):
         return names
 
     terms_by_option = {o["key"]: names_for(i, o) for i, o in enumerate(plan["options"])}
-    matches = [
+    explicit = [o["key"] for o in plan["options"] if o["label"].casefold() in quote.casefold()]
+    matches = explicit or [
         key
         for key, words in terms_by_option.items()
         if any(re.search(r"(?<!\w)" + re.escape(word) + r"(?!\w)", quote, re.I) for word in words)
@@ -654,7 +677,9 @@ def choose_route(args, ctx):
     )
     if matches != [args.key] or not (direct_choice or instruction):
         raise ValueError("Ask the user to identify one option to adopt.")
-    if args.measurements:
+    if args.measurements or (args.make_passive_fixture and option.get("measurement_key") in (
+        "object_dimensions", "object_dimensions_mm",
+    )):
         plan, option = _record_choice_measurements(plan, option, args, ctx)
     require_available(ctx.project, plan, option)
     if plan["decision"] and plan["decision"]["key"] == args.key:

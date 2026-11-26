@@ -226,10 +226,11 @@ export default function FixturePanel({
 
         <div className="fixture-meta">
           <div>
-            <span>Envelope (W × D × H)</span>
+            <span>{fixture.spec.object_height_mm == null ? 'Holder envelope' : 'Envelope'} (W × D × H)</span>
             <strong>
               {fixture.footprint_mm[0].toFixed(1)} × {fixture.footprint_mm[1].toFixed(1)} × {fixture.height_mm.toFixed(1)} mm
             </strong>
+            {fixture.spec.object_height_mm == null && <small>Object height and loaded clearance are unknown.</small>}
           </div>
           <div>
             <span>Pocket allowance</span>

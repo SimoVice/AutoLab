@@ -1038,6 +1038,9 @@ async def _tool_design_routes(args, ctx: ToolContext) -> ToolResult:
     if comparing and not plan["decision"]:
         question = next((o["measurement_question"] for o in plan["options"]
                          if o["measurement_question"]), None)
+        if question:
+            labels = "\n".join(f"- {o['label']}" for o in plan["options"])
+            question = f"I compared these options.\n\n{labels}\n\n{question}"
     if comparing:
         message = "Compared design routes against the recorded operations."
     elif plan["decision"]["applied_revision"] is not None:
@@ -2113,6 +2116,8 @@ def _tool_configure_standalone_fixture(
     existing = previous.get("standalone_fixture")
     provided = args.model_dump(exclude_none=True)
 
+    if args.object_diameter_mm is not None and args.object_shape is None:
+        provided["object_shape"] = "circular"
     if existing:
         raw_spec = deepcopy(existing["spec"])
         if args.object_reference_id != raw_spec.get("object_reference_id"):
@@ -2148,11 +2153,11 @@ def _tool_configure_standalone_fixture(
             ref_title = provided.get("object_reference_id", "Custom").replace("_", " ").title()
             raw_spec["title"] = provided.get("object_label") or f"{ref_title} fixture"
         has_footprint = (
-            args.object_diameter_mm is not None if args.object_shape == "circular" else
+            args.object_diameter_mm is not None if provided.get("object_shape") == "circular" else
             args.object_length_mm is not None and args.object_width_mm is not None
         )
         if args.object_reference_id == "custom" and (
-            not has_footprint or args.object_height_mm is None or not args.object_label
+            not has_footprint or not args.object_label
         ):
             return ToolResult(
                 tool="configure_standalone_fixture",
@@ -2161,8 +2166,8 @@ def _tool_configure_standalone_fixture(
                 mutated=False,
                 requires_human_input=True,
                 question=(
-                    "Please provide the object label and its measured dimensions in mm "
-                    "(length x width x height, or diameter x height), or pick a reference "
+                    "Please provide the object's name and measured resting footprint in mm "
+                    "(length and width, or diameter), or pick a reference "
                     "(96-well plate, 90 mm Petri dish, 75x25 slide, or cuvette)."
                 ),
                 summary="Missing custom object dimensions for standalone fixture.",
