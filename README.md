@@ -51,6 +51,13 @@ available, and the reasons to reuse, buy or fabricate. A choice becomes part of
 the design when its implementation succeeds. The comparison and its sources
 survive Save/Open. [Design options and revisions](docs/platform.md#compare-design-options).
 
+For a freestanding holder, enter the object's measured resting diameter or its
+length and width, then choose fabrication in chat. The fixture panel exports
+the locating base as STEP and STL for the current revision. Its pocket includes
+the selected clearance and printer compensation. An open holder can be drafted
+from the resting footprint alone. An overhead camera also needs the object's
+height. Printer fit stays unchecked until a build volume is supplied.
+
 The purchasing list starts once a hardware design exists. For custom assemblies
 and imported part lists, an unidentified component keeps its required quantity
 and unit while its supplier, ordering code and price remain open. The parts
