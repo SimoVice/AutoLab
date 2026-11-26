@@ -20,11 +20,15 @@ from tempfile import TemporaryDirectory
 from app.geometry import GEOMETRY_SOURCE_SHA256, geometry_for_component
 from app.upstream_cad import (
     ASSET_ID,
+    STEP_CENTER_X,
+    STEP_CENTER_Z,
+    STEP_FLOOR_Y,
     STEP_PATH,
     STEP_SHA256,
     foundation_metadata,
     load_foundation_cad,
     original_step_bytes,
+    position_foundation,
 )
 
 _SOURCE_SHA256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
@@ -339,6 +343,7 @@ _PRIMITIVE_BUILDER_SOURCE = inspect.getsource(_primitive_solid)
 _PLATE_BUILDER_SOURCE = inspect.getsource(_build_plate_part)
 _COMPONENT_BUILDER_SOURCE = inspect.getsource(_build_solid)
 _COUPON_BUILDER_SOURCE = inspect.getsource(_build_rack_fit_coupon)
+_FOUNDATION_PLACEMENT_SOURCE = inspect.getsource(position_foundation)
 
 
 def _bbox_of(solid) -> dict:
@@ -348,6 +353,32 @@ def _bbox_of(solid) -> dict:
         "max": [float(bb.max.X), float(bb.max.Y), float(bb.max.Z)],
         "size": [float(bb.size.X), float(bb.size.Y), float(bb.size.Z)],
     }
+
+
+def _valid_imported_assembly(shape) -> bool:
+    """Validate each distinct member without building an analyzer for the entire STEP."""
+    from build123d import Shape
+    from OCP.TopAbs import TopAbs_COMPOUND
+    from OCP.TopLoc import TopLoc_Location
+    from OCP.TopoDS import TopoDS_Iterator
+
+    seen = set()
+    pending = [shape.wrapped]
+    while pending:
+        member = pending.pop()
+        if member.ShapeType() == TopAbs_COMPOUND:
+            children = TopoDS_Iterator(member)
+            while children.More():
+                pending.append(children.Value())
+                children.Next()
+        else:
+            prototype = Shape.cast(member.Located(TopLoc_Location()))
+            key = (prototype, member.Orientation())
+            if key not in seen:
+                if not prototype.is_valid:
+                    return False
+                seen.add(key)
+    return bool(seen)
 
 
 def _build123d_version() -> str:
@@ -378,10 +409,14 @@ def _deck_model_source(components: list[dict], project_id, revision) -> str:
         + "\n\n"
         + _COUPON_BUILDER_SOURCE
         + "\n\n"
+        + f"STEP_CENTER_X = {STEP_CENTER_X!r}\nSTEP_CENTER_Z = {STEP_CENTER_Z!r}\n"
+        + f"STEP_FLOOR_Y = {STEP_FLOOR_Y!r}\n\n"
+        + _FOUNDATION_PLACEMENT_SOURCE
+        + "\n\n"
         + "def _standalone_solid(c):\n"
         + "    if c['kind'] != 'upstream-cad': return _build_solid(c)\n"
         + "    import gzip, hashlib, tempfile\n"
-        + "    from build123d import import_step, Pos, Rot\n"
+        + "    from build123d import import_step\n"
         + "    path = Path(__file__).resolve().parent / 'source/jubilee-original.step.gz'\n"
         + "    raw = gzip.decompress(path.read_bytes())\n"
         + f"    if hashlib.sha256(raw).hexdigest() != {STEP_SHA256!r}:\n"
@@ -389,14 +424,9 @@ def _deck_model_source(components: list[dict], project_id, revision) -> str:
         + "    with tempfile.TemporaryDirectory() as tmp:\n"
         + "        source = Path(tmp) / 'original.step'; source.write_bytes(raw)\n"
         + "        original = import_step(source)\n"
-        + "    beds = [p for p in original.children if p.label == 'build_plate_assembly']\n"
-        + "    if len(beds) != 1: raise ValueError('Expected one bed assembly')\n"
-        + "    transform = Pos(-274.855945675, 425.743280356, -272.216535584) * Rot(90, 0, 0)\n"
-        + "    fixed = Compound([p for p in original.children "
-        + "if p.label != 'build_plate_assembly'])\n"
-        + "    bed = Pos(0, 0, -c['bed_drop_mm']) * transform * beds[0]\n"
-        + "    bed.label = 'build_plate_assembly'\n"
-        + "    return Compound(children=[transform * fixed, bed], label=c['id'])\n\n"
+        + "    foundation = position_foundation(original, c['bed_drop_mm'])\n"
+        + "    foundation.label = c['id']\n"
+        + "    return foundation\n\n"
         + "def interfaces():\n"
         + f"    return {pformat(plate_interfaces, width=88)}\n\n"
         + "def build():\n    return Compound(children=[_standalone_solid(c) "
@@ -658,7 +688,7 @@ def build_cad_files(project: dict) -> dict[str, bytes]:
         solid.label = comp["id"]
         if imported:
             solid.children[1].label = "build_plate_assembly"
-        if solid is None or not solid.is_valid:
+        if not (_valid_imported_assembly(solid) if imported else solid.is_valid):
             raise ValueError(f"CAD solid for '{comp['id']}' is invalid.")
         try:
             volume = float(solid.volume)
@@ -899,7 +929,8 @@ def build_cad_files(project: dict) -> dict[str, bytes]:
         ],
         "fabrication_ready": False,
         "assembly_validity_scope": (
-            "Component shapes checked individually; STEP assembly not separately checked."
+            "Imported members and generated component shapes checked individually; "
+            "STEP assembly not separately checked."
             if project["design"].get("foundation")
             else "Compound and component shapes checked."
         ),

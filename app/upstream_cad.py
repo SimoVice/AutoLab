@@ -74,16 +74,30 @@ def _original_shape():
         return import_step(path)
 
 
-@lru_cache(maxsize=1)
-def _parts():
-    from build123d import Compound
+def position_foundation(original, bed_drop_mm):
+    """Place a fresh assembly tree while sharing the STEP's immutable part geometry."""
+    from build123d import Compound, Pos, Rot, Shape
 
-    original = _original_shape()
-    beds = [c for c in original.children if c.label == "build_plate_assembly"]
+    def instance(node):
+        if node.children:
+            child = Compound(children=[instance(part) for part in node.children])
+            child.locate(node.location)
+        else:
+            # Make an independent placement handle to the same geometric definition.
+            child = Shape.cast(node.wrapped.Located(node.wrapped.Location()))
+        child.label = node.label
+        child.color = node.color
+        return child
+
+    beds = [part for part in original.children if part.label == "build_plate_assembly"]
     if len(beds) != 1:
         raise ValueError("Pinned Jubilee hierarchy must contain exactly one build plate assembly.")
-    # Assemble from unmodified shapes. Subassemblies not in the build plate stay fixed.
-    return Compound([c for c in original.children if c.label != "build_plate_assembly"]), beds[0]
+    fixed = Compound(children=[instance(part) for part in original.children if part is not beds[0]])
+    bed = instance(beds[0])
+    transform = Pos(-STEP_CENTER_X, STEP_CENTER_Z, -STEP_FLOOR_Y) * Rot(90, 0, 0)
+    fixed.move(transform)
+    bed.move(Pos(0, 0, -bed_drop_mm) * transform)
+    return Compound(children=[fixed, bed], label="Jubilee foundation")
 
 
 def load_foundation_topology(bed_drop_mm):
@@ -91,7 +105,6 @@ def load_foundation_topology(bed_drop_mm):
     import gc
 
     topology = load_foundation_cad(bed_drop_mm).wrapped
-    _parts.cache_clear()
     _original_shape.cache_clear()
     gc.collect()
     return topology
@@ -104,11 +117,5 @@ def load_foundation_cad(bed_drop_mm: float = 100.0):
     Y-272.216535584).  This is a rotation and translation, preserving geometry.
     The source shape is cached; caller receives a relocated copy.
     """
-    from build123d import Compound, Pos, Rot
-
     drop = _bed_drop(bed_drop_mm)
-    static, bed = _parts()
-    transform = Pos(-STEP_CENTER_X, STEP_CENTER_Z, -STEP_FLOOR_Y) * Rot(90, 0, 0)
-    fixed_cad = transform * static
-    bed_cad = Pos(0, 0, -drop) * transform * bed
-    return Compound(children=[fixed_cad, bed_cad], label="Jubilee foundation")
+    return position_foundation(_original_shape(), drop)

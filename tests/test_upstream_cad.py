@@ -16,6 +16,33 @@ def _digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def test_positioned_instances_retain_source_topology_and_local_placements():
+    from build123d import Box, Compound, Pos, Rot
+
+    from app.upstream_cad import STEP_CENTER_X, STEP_CENTER_Z, STEP_FLOOR_Y, position_foundation
+
+    fixed = Box(10, 20, 30)
+    fixed.label = "fixed member"
+    fixed.move(Pos(7, 3, 2))
+    pin = Box(1, 2, 3)
+    pin.move(Pos(2, 0, 0))
+    bed = Compound(children=[pin], label="build_plate_assembly")
+    bed.move(Pos(3, 4, 5) * Rot(0, 90, 0))
+    original = Compound(children=[fixed, bed])
+    transform = Pos(-STEP_CENTER_X, STEP_CENTER_Z, -STEP_FLOOR_Y) * Rot(90, 0, 0)
+
+    for drop in (0, 100):
+        placed = position_foundation(original, drop)
+        frame, platform = placed.children
+        assert frame.children[0].wrapped.IsPartner(fixed.wrapped)
+        assert platform.children[0].wrapped.IsPartner(pin.wrapped)
+        assert platform.label == bed.label
+        assert frame.location * frame.children[0].location == transform * fixed.location
+        assert platform.location == Pos(0, 0, -drop) * transform * bed.location
+        assert platform.children[0].location == pin.location
+    assert fixed.parent is original and bed.parent is original and pin.parent is bed
+
+
 def _bounds(path):
     data = path.read_bytes()
     assert data[:4] == b"glTF"
