@@ -138,12 +138,21 @@ def _safe_cell(value):
 
 
 def render_asset(
-    design: dict, project_id: str, revision: int, asset: str, *,
-    price_record: dict | None = None, purchasing_bom: dict | None = None,
+    design: dict,
+    project_id: str,
+    revision: int,
+    asset: str,
+    *,
+    price_record: dict | None = None,
+    purchasing_bom: dict | None = None,
     assembly: bytes | None = None,
+    operation_plan: dict | None = None,
 ) -> tuple[bytes, str]:
     if asset == "project.json":
         data = {"project_id": project_id, "revision": revision, "design": design}
+        if operation_plan:
+            data["operation_plan"] = operation_plan
+            data["lineage_id"] = operation_plan["project_id"]
         return json.dumps(data, ensure_ascii=False, indent=2).encode(), "application/json"
     if asset == "parts.csv":
         buf = io.StringIO(newline="")
@@ -237,7 +246,12 @@ def render_asset(
     if asset == "controller.py":
         return concept_controller_source(), "text/x-python"
     if asset == "gateway-config.json":
-        return concept_gateway_config(design, project_id, revision), "application/json"
+        config = concept_gateway_config(design, project_id, revision)
+        if operation_plan:
+            values = json.loads(config)
+            values["plan_sha256"] = operation_plan["sha256"]
+            config = json.dumps(values, indent=2).encode()
+        return config, "application/json"
     if asset == "machine.stl":
         return concept_stl(design), "model/stl"
     if asset == "machine.obj":
@@ -284,6 +298,7 @@ def render_asset(
                     name,
                     price_record=price_record,
                     purchasing_bom=purchasing_bom,
+                    operation_plan=operation_plan,
                 )
                 archive.writestr(name, content)
         return buf.getvalue(), "application/zip"

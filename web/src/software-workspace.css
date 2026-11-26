@@ -63,6 +63,13 @@
 .software-general-program { grid-column: 2 / -1; min-width: 0; }
 @media (max-width: 760px) { .software-general-program { width: 100%; } }
 
+.bound-sequence { margin: 1rem 0; min-width: 0; font-size: .875rem; }
+.bound-sequence ol { max-height: 23rem; overflow-y: auto; padding: 0 0 0 2.2rem; }
+.bound-sequence li { border-bottom: 1px solid #dce8e6; padding: .45rem .25rem; overflow-wrap: anywhere; }
+.bound-sequence li span, .bound-sequence li small { display: block; color: #4c6464; }
+.bound-sequence details { margin: .8rem 0; overflow-wrap: anywhere; }
+.bound-sequence details p { margin: .25rem 0; }
+.bound-sequence .sequence-blocker { border-left: 3px solid #ad7030; padding-left: .6rem; }
 .software-field { display: grid; gap: 8px; }
 .software-hardware-guide { margin-top: .5rem; }
 .software-hardware-guide summary { cursor: pointer; color: #285f5c; }

@@ -810,7 +810,7 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
                           <thead>
                             <tr>
                               <th scope="col">{project.labware_plate ? 'Well / target' : 'Target'}</th>
-                              <th scope="col">Stock</th>
+                              <th scope="col">{plan.steps.some(step => step.source_role) ? 'Source' : 'Stock'}</th>
                               <th scope="col">Diluent</th>
                               <th scope="col">Total</th>
                             </tr>
@@ -819,7 +819,7 @@ export default function App({ hosted = false, account = '', onSignOut = async ()
                             {plan.steps.map((step, index) => (
                               <tr key={step.id}>
                                 <th scope="row">{project.labware_plate ? `${project.labware_plate.compatibility.occupied_wells[index] ?? 'Unassigned'} · ${step.target}` : step.target}</th>
-                                <td>{formatVolumeUl(step.stock_volume_ul)}</td>
+                                <td>{formatVolumeUl(step.source_volume_ul ?? step.stock_volume_ul)}{step.source_role && ` · ${step.source_role}`}</td>
                                 <td>{formatVolumeUl(step.diluent_volume_ul)}</td>
                                 <td>{formatVolumeUl(step.total_volume_ul)}</td>
                               </tr>

@@ -36,6 +36,14 @@ be opened with **Open project** to inspect the preview without a model request.
    to inspect its revision, component/profile bindings, positions and illustrative
    timing. The example sequence has no motion-plan download.
 
+In **Software & protocols**, open **Generated program** and **Operations &
+volumes** for the ordered device operations. Each operation has an ID that also
+appears in the simulation and exported program. When every Jubilee location has
+a 3D pose, the downloadable motion plan includes those IDs and the operation
+plan's SHA-256. When a location such as an intermediate vessel has no pose, the
+workspace explains the gap and keeps the full sequence available for inspection.
+The hardware design view shows an illustrative motion study.
+
 Playback does not edit the project, update costs, request a model response or send
 commands to hardware. It starts only on an explicit action. Hiding the browser
 or switching away from the model on mobile pauses it without losing the position.

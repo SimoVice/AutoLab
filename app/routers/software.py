@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from copy import deepcopy
 from typing import Annotated, Literal
 
@@ -9,6 +10,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.opentrons_verifier import verify_jubilee_protocol, verify_opentrons_protocol
+from app.operation_plan import project_operation_plan, resolve_platform
 from app.protocol_generators import (
     extract_or_build_protocol_plan,
     generate_jubilee_protocol,
@@ -44,13 +46,16 @@ class ProtocolSimulateRequest(BaseModel):
     try_opentrons_cli: bool = True
 
 
-def _resolve_platform(project: dict, requested: str) -> str:
-    if requested != "auto":
-        return requested
-    design = project.get("design") or {}
-    if design.get("foundation"):
-        return "jubilee"
-    return "opentrons-ot2"
+@router.get("/api/projects/{project_id}/software/operations")
+async def preview_operations(project_id: str, revision: int) -> dict:
+    session = api_hook("session_for", session_for)(project_id)
+    async with session.model_lock():
+        check_revision(session.project, revision)
+        current = deepcopy(session.project)
+    try:
+        return project_operation_plan(current)
+    except ValueError as exc:
+        raise HTTPException(422, detail=str(exc)) from None
 
 
 @router.post("/api/projects/{project_id}/software/protocol")
@@ -60,7 +65,11 @@ async def generate_software_protocol(project_id: str, request: ProtocolGenerateR
         check_revision(session.project, request.project_revision)
         current = deepcopy(session.project)
 
-    platform = _resolve_platform(current, request.target_platform)
+    platform = resolve_platform(current, request.target_platform)
+    if platform not in ("opentrons-ot2", "jubilee"):
+        raise HTTPException(
+            422, "Use the operating sequence for this design or select a robot platform."
+        )
     try:
         plan = extract_or_build_protocol_plan(
             current,
@@ -90,9 +99,15 @@ async def generate_software_protocol(project_id: str, request: ProtocolGenerateR
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
 
+    digest = hashlib.sha256(generated["source_code"].encode()).hexdigest()
+    async with session.model_lock():
+        check_revision(session.project, request.project_revision)
+        issued = (request.project_revision, platform, digest)
+        session.issued_protocols = [*session.issued_protocols[-7:], issued]
     return {
         "project_id": project_id,
         "revision": current.get("revision", 0),
+        "operation_plan": generated["operation_plan"],
         "platform": generated["platform"],
         "filename": generated["filename"],
         "plan": generated["plan"],
@@ -110,16 +125,37 @@ async def simulate_software_protocol(project_id: str, request: ProtocolSimulateR
         check_revision(session.project, request.project_revision)
         current = deepcopy(session.project)
 
-    platform = _resolve_platform(current, request.target_platform)
+    platform = resolve_platform(current, request.target_platform)
     source_code = request.source_code
+    if platform not in ("opentrons-ot2", "jubilee"):
+        if source_code is not None:
+            raise HTTPException(422, "This design uses its own operating sequence.")
+        from app.operation_plan import simulate_sequence
+
+        result = simulate_sequence(current)
+        async with session.model_lock():
+            check_revision(session.project, request.project_revision)
+        return {
+            "project_id": project_id,
+            "revision": current["revision"],
+            "platform": platform,
+            "simulation": result,
+        }
     filename = "opentrons_protocol.py" if platform == "opentrons-ot2" else "jubilee_protocol.py"
-    if source_code is None:
+    issued = (
+        request.project_revision,
+        platform,
+        hashlib.sha256((source_code or "").encode()).hexdigest(),
+    )
+    if source_code is None or issued not in session.issued_protocols:
         try:
             generated = (
                 generate_jubilee_protocol(current)
                 if platform == "jubilee"
                 else generate_opentrons_protocol(current)
             )
+            if source_code is not None and source_code != generated["source_code"]:
+                raise HTTPException(409, "Use a protocol issued for this revision and platform.")
             source_code = generated["source_code"]
             filename = generated["filename"]
         except ValueError as exc:
@@ -130,6 +166,8 @@ async def simulate_software_protocol(project_id: str, request: ProtocolSimulateR
         if platform == "jubilee"
         else verify_opentrons_protocol(source_code, try_cli=request.try_opentrons_cli)
     )
+    async with session.model_lock():
+        check_revision(session.project, request.project_revision)
     return {
         "project_id": project_id,
         "revision": current.get("revision", 0),

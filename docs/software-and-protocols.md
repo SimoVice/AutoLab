@@ -2,8 +2,8 @@
 
 The hardware proposal and the current preparation recipe are separate. A new
 recipe can reuse compatible hardware; a different tool, vessel or working area
-may require a design revision. AutoLab currently calculates direct dilutions
-and guides upstream protocol programming. It does not run a physical robot.
+may require a design revision. AutoLab calculates direct and serial preparations
+for supported labware and can simulate the selected platform's program locally.
 
 ## Approve and program
 
@@ -76,6 +76,25 @@ source positions, offsets, rates, mixing and tip policy remain parameters to
 define. **Protocol data (JSON)** is available separately; the older paired
 `protocol-template.json` and `protocol-preview.py` downloads are also available
 through the instruction download API for existing workflows.
+
+## Inspect the issued operations
+
+Open **Operations & volumes** to review each command, quantity and source or
+destination. Expand **Device bindings and prerequisites** for the installed
+component, units and limits. **Download operation plan** saves that revision's
+JSON. **Simulate & verify** on the local preview uses the selected robot. Choosing
+another robot produces an illustrative program. The supported command-line
+programs can be checked offline with the same operation IDs and plan digest.
+
+Approval in the workspace records a design decision. A physical Jubilee run
+additionally requires a commissioning JSON file supplied via `--commissioning`
+and explicit `--arm-hardware`. The record identifies the project, revision,
+`plan_sha256`, controller address and tool index, with `commissioning_reviewed`
+set to true and the reviewed `pipette_min_ul` and `pipette_max_ul`. A command above
+the configured tip capacity blocks a run even if the offline accounting passes.
+The OT-2 export uses the accepted source, sample and tip-rack slots. It flags
+any extra rack or reservoir that needs a physical binding. An eligible OT-2
+program pauses on the robot for confirmation of the installed instruments. [Opentrons protocol commands](https://docs.opentrons.com/python-api/reference/protocols/).
 
 ## Compare two recipes on the same hardware
 

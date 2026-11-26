@@ -93,6 +93,9 @@ def device_bindings(project, assembly, impact):
         result["gateway_template"] = json.loads(
             concept_gateway_config(concept, assembly["project_id"], project["revision"])
         )
+        from app.operation_plan import custom_operation_plan
+
+        result["gateway_template"]["plan_sha256"] = custom_operation_plan(project)["sha256"]
         result["declared_interfaces"] = concept["software"].get("interfaces", [])
     elif platform := (project.get("design") or {}).get("platform"):
         result["platform"] = {
@@ -104,10 +107,14 @@ def device_bindings(project, assembly, impact):
 def host_software(project, assembly):
     if design := project.get("concept_design"):
         from app.concept_files import render_asset
+        from app.operation_plan import custom_operation_plan
 
+        sequence = custom_operation_plan(project)
         files = {}
         for name in ("controller.py", "gateway-config.json", "project.json"):
-            data, _ = render_asset(design, assembly["project_id"], assembly["revision"], name)
+            data, _ = render_asset(
+                design, assembly["project_id"], assembly["revision"], name, operation_plan=sequence
+            )
             if name.endswith(".json"):
                 data = json.dumps(json.loads(data), sort_keys=True, indent=2).encode()
             files["software/" + name] = data

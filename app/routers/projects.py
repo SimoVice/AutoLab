@@ -503,6 +503,7 @@ async def download_custom_asset(project_id: str, asset: str, revision: int) -> R
     from app.bom_engine import build_complete_bom
     from app.concept_cad import ConceptCADUnavailable
     from app.concept_files import price_record_for_project, render_asset
+    from app.operation_plan import custom_operation_plan
     from app.procurement import report_for_project
     from app.project_assembly import assembly_json
     from app.routers.procurement import _active_lab_profile
@@ -513,6 +514,11 @@ async def download_custom_asset(project_id: str, asset: str, revision: int) -> R
         design = session.project.get("concept_design")
         if design is None:
             raise HTTPException(404, "Generate a custom assembly first.")
+        sequence = (
+            custom_operation_plan(session.project)
+            if asset in ("package.zip", "gateway-config.json", "project.json")
+            else None
+        )
         mixed_assets = {"machine.step": "cad/assembly.step", "machine.stl": "cad/assembly.stl",
                         "parts.csv": "purchasing/bom.csv"}
         mixed = mixed_assets.get(asset) if session.project.get("cad_instances") else None
@@ -531,9 +537,15 @@ async def download_custom_asset(project_id: str, asset: str, revision: int) -> R
         return await download_handoff(project_id, mixed, revision)
     try:
         data, mime = await run_in_threadpool(
-            render_asset, design, project_id, revision, asset,
-            price_record=price_record, purchasing_bom=purchasing_bom,
+            render_asset,
+            design,
+            project_id,
+            revision,
+            asset,
+            price_record=price_record,
+            purchasing_bom=purchasing_bom,
             assembly=assembly,
+            operation_plan=sequence,
         )
     except KeyError:
         raise HTTPException(404, "This file is unavailable for the current assembly.") from None
@@ -812,13 +824,16 @@ async def bench_station_plan(project_id: str, revision: int) -> dict:
         if not station:
             raise HTTPException(status_code=404, detail="No bench station concept exists.")
         from app.bom_engine import build_complete_bom
+        from app.operation_plan import bench_operation_plan
         from app.procurement import report_for_project
         from app.project_assembly import physical_assembly
 
         report = report_for_project(session.project, session.procurement_report)
         return {
             "project_id": project_id,
+            "lineage_id": session.project.get("lineage_id") or project_id,
             "revision": revision,
+            "operation_plan": bench_operation_plan(session.project),
             **deepcopy(station),
             "physical_assembly": physical_assembly(session.project),
             "purchasing_bom": build_complete_bom(session.project, procurement_report=report),

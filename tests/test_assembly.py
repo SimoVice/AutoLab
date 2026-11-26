@@ -176,6 +176,7 @@ def test_expected_file_set_and_extension_plan():
         "automation/opentrons_protocol.py",
         "automation/preview.py",
         "automation/protocol-simulation.json",
+        "automation/operation-plan.json",
         "bill-of-materials.csv",
         "physical-assembly.json",
         "cost-estimate.csv",

@@ -314,7 +314,12 @@ def _find_placement(project: dict, size: list) -> tuple[float, float]:
 
 
 def reconcile_plate_plan(project: dict) -> None:
-    from app.dilution import _parse_volume, create_dilution_plan
+    from app.dilution import (
+        MAX_TARGETS,
+        _parse_volume,
+        create_dilution_plan,
+        create_protocol_dilution_plan,
+    )
     from app.quantities import normalize_volume
 
     module = project["labware_plate"]
@@ -322,6 +327,23 @@ def reconcile_plate_plan(project: dict) -> None:
     plan = create_dilution_plan(
         summary["stock_concentration"], summary["target_concentrations"], summary["final_volume"]
     )
+    # The small generic rack and older direct-preparation API keep their own limits.
+    # A selected plate has a verified order and capacity for the protocol compiler.
+    if plan["status"] != "incomplete":
+        extended = create_protocol_dilution_plan(
+            summary["stock_concentration"],
+            summary["target_concentrations"],
+            summary["final_volume"],
+            well_ordering=module["derived"]["well_ordering"],
+        )
+        if extended["status"] == "ready" and (
+            extended["mode"] == "serial" or extended["target_count"] > MAX_TARGETS
+        ):
+            plan = {
+                k: extended[k]
+                for k in ("status", "message", "stock", "final_volume_ul", "assumptions", "mode")
+            }
+            plan["steps"] = extended["target_steps"]
     requested = plan.get("final_volume_ul")
     if requested is None and summary.get("final_volume"):
         try:

@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 COMPILER = (ROOT / "web/src/motionPlan.ts").as_uri()
 
 
-def compile_plan(project, mode="preparation"):
+def compile_plan(project, mode="preparation", sequence=None):
     node = shutil.which("node")
     assert node, "The pinned Node 24 toolchain is required"
     script = f"""
@@ -29,7 +29,8 @@ import {{ compileMotionPlan, sampleMotionPlan, availableTipSlots, SOURCE_TUBE_MO
   from {json.dumps(COMPILER)};
 let input = ''; for await (const chunk of process.stdin) input += chunk;
 const project = JSON.parse(input), original = JSON.stringify(project);
-const plan = compileMotionPlan(project, {json.dumps(mode)});
+const sequence = {json.dumps(sequence) if sequence is not None else "undefined"};
+const plan = compileMotionPlan(project, {json.dumps(mode)}, sequence);
 const samples = [-1, 0, plan.duration_s / 2, plan.duration_s + 1, NaN].map(
   time => sampleMotionPlan(plan, time));
 const rack = project.design.components.find(p => p.id === 'tip-rack');
@@ -359,3 +360,28 @@ def test_custom_holder_uses_exact_holes_and_manual_refill():
         if event["frame"]["stage"] == "Pick up tip":
             slot = event["frame"]["tip_slot"]
             assert event["before"][slot] and not event["after"][slot]
+
+
+def test_approved_motion_consumes_the_ordered_operations_and_rejects_a_foreign_plan():
+    from test_design_workflow import hardware
+
+    from app.design_workflow import approve_machine
+    from app.domain import apply_update
+    from app.operation_plan import project_operation_plan
+
+    project = apply_update(approve_machine(select(hardware())), {
+        "stock_concentration": "10 mM", "target_concentrations": "1 mM, 2 mM",
+        "final_volume": "200 uL",
+    })
+    sequence = project_operation_plan(project)
+    result = compile_plan(project, sequence=sequence)["plan"]
+    assert result["status"] == "ready"
+    assert result["binding"]["operation_plan_sha256"] == sequence["sha256"]
+    visited = [f for f in result["keyframes"] if f["stage"] in ("Dispense", "Mix")]
+    assert [f["operation_id"] for f in visited] == [r["id"] for r in sequence["operations"]]
+    assert [f["volume_ul"] for f in visited] == [
+        r["parameters"]["volume_ul"] for r in sequence["operations"]
+    ]
+    for change in ({"project_id": "other"}, {"revision": project["revision"] - 1}):
+        rejected = compile_plan(project, sequence={**sequence, **change})["plan"]
+        assert rejected["status"] == "unavailable" and rejected["keyframes"] == []

@@ -40,6 +40,101 @@ def validate_plan(plan):
     return operations
 
 
+def operation_rows(plan):
+    modules = validate_plan(plan)
+    sequence = plan.get("operation_plan")
+    if sequence is None:
+        return [
+            {"id": f"op-{i:03d}", "binding": op, "action": op, "mode": "legacy"}
+            for i, op in enumerate(modules, 1)
+        ]
+    digest = hashlib.sha256(
+        json.dumps(
+            {k: v for k, v in sequence.items() if k != "sha256"},
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode()
+    ).hexdigest()
+    if (
+        sequence.get("schema_version") != 1
+        or sequence.get("sha256") != digest
+        or sequence.get("platform") != "bench_station"
+        or sequence.get("project_id") != (plan.get("lineage_id") or plan.get("project_id"))
+        or sequence.get("revision") != plan.get("revision")
+    ):
+        raise ValueError("The operating sequence must match the issued station and revision.")
+    rows = sequence["operations"]
+    for i, row in enumerate(rows, 1):
+        key = row["binding"]
+        binding = sequence["bindings"].get(key)
+        if (
+            row["id"] != f"op-{i:03d}"
+            or not binding
+            or row["mode"] not in ("manual", "driver", "missing_driver")
+            or (row["mode"] == "driver" and (key not in modules or not binding["driver"]))
+        ):
+            raise ValueError("Invalid operation or device binding in station sequence.")
+    return rows
+
+
+def dry_run(plan):
+    rows = operation_rows(plan)
+    return {
+        "schema_version": "1",
+        "mode": "dry_run_no_observations",
+        "project_id": plan.get("project_id"),
+        "revision": plan.get("revision"),
+        "plan_sha256": (plan.get("operation_plan") or {}).get("sha256"),
+        "status": "not_executed",
+        "events": [],
+        "pending_human_checkpoints": [
+            {
+                "sequence": i + 1,
+                "operation": row["binding"],
+                "requires_manual_handoff": i > 0,
+                **(
+                    {"operation_id": row["id"], "mode": row["mode"]}
+                    if "operation_plan" in plan
+                    else {}
+                ),
+            }
+            for i, row in enumerate(rows)
+        ],
+    }
+
+
+def verify_devices(plan, ports, armed, commissioning):
+    if not ports:
+        return
+    sequence = plan.get("operation_plan") or {}
+    if not armed or sequence.get("scope") != "approved" or not isinstance(commissioning, dict):
+        raise ValueError(
+            "Arm only the approved station with a reviewed device commissioning record."
+        )
+    expected = {
+        "plan_sha256": sequence["sha256"],
+        "revision": sequence["revision"],
+        "project_id": sequence["project_id"],
+    }
+    if commissioning.get("commissioning_reviewed") is not True or any(
+        commissioning.get(k) != v for k, v in expected.items()
+    ):
+        raise ValueError(
+            "The commissioned plan must match this project revision and operation sequence."
+        )
+    for capability, port in ports.items():
+        binding = sequence["bindings"].get(capability)
+        expected_device = {"port": port, "component_id": (binding or {}).get("component_id")}
+        if (
+            not binding
+            or not binding["driver"]
+            or not binding["component_id"]
+            or commissioning.get("devices", {}).get(capability) != expected_device
+        ):
+            raise ValueError(f"Commission the bound component and port for {capability}.")
+
+
 def nonempty(prompt, ask):
     value = ask(prompt).strip()
     if not value:
@@ -78,36 +173,59 @@ def run_record(
     barcode_driver=None,
     label_printer=None,
     label_format="html",
+    arm_hardware=False,
+    commissioning=None,
 ):
     """Gather human or optional bench-instrument observations cleanly without auto-arming."""
-    operations = validate_plan(plan)
+    rows = operation_rows(plan)
+    blocked = next((r for r in rows if r["mode"] == "missing_driver"), None)
+    if blocked:
+        raise ValueError(f"Missing driver for {blocked['action']}.")
+    ports = {
+        key: driver.port
+        for key, driver in (("weigh", balance_driver), ("read_barcode", barcode_driver))
+        if getattr(driver, "port", None)
+    }
+    verify_devices(plan, ports, arm_hardware, commissioning)
     fingerprint = hashlib.sha256(json.dumps(
         plan, sort_keys=True, separators=(',', ':'), allow_nan=False
     ).encode()).hexdigest()
     record = {
-        'schema_version': '1',
-        'mode': (
-            'instrument_assisted'
+        "schema_version": "1",
+        "mode": (
+            "instrument_assisted"
             if any(x is not None for x in (balance_driver, barcode_driver, label_printer))
-            else 'operator_assisted_no_hardware_control'
+            else "operator_assisted_no_hardware_control"
         ),
-        'plan_sha256': fingerprint, 'project_id': plan.get('project_id'),
-        'revision': plan.get('revision'),
-        'operator': nonempty('Operator identifier: ', ask),
-        'sample_id': nonempty('Item/sample identifier: ', ask), 'events': [],
+        "plan_sha256": fingerprint,
+        "operation_plan_sha256": (plan.get("operation_plan") or {}).get("sha256"),
+        "project_id": plan.get("project_id"),
+        "revision": plan.get("revision"),
+        "operator": nonempty("Operator identifier: ", ask),
+        "sample_id": nonempty("Item/sample identifier: ", ask),
+        "events": [],
     }
     label_html(record['sample_id'])  # Validate bounded printable identity before side effects.
     record['status'] = 'in_progress'
     if checkpoint:
         checkpoint(record)
-    for index, operation in enumerate(operations):
-        event = {'sequence': index + 1, 'operation': operation,
-                 'provenance': 'operator_entered'}
+    for index, row in enumerate(rows):
+        operation = row["binding"]
+        event = {
+            "sequence": index + 1,
+            "operation": operation,
+            "operation_id": row["id"],
+            "provenance": "operator_entered",
+        }
         if index:
             if ask('Confirm manual handoff with item identity preserved [yes]: ').strip() != 'yes':
                 raise ValueError('Manual handoff was not confirmed.')
-        if operation == 'weigh':
-            if balance_driver is not None:
+        if row["mode"] == "manual" and operation not in OPERATIONS:
+            event["observation"] = nonempty(
+                row["action"] + " — record the operator observation: ", ask
+            )
+        elif operation == "weigh":
+            if balance_driver is not None and row["mode"] != "manual":
                 reading = balance_driver.read_weight()
                 event.update(
                     mass=reading.mass_g,
@@ -173,7 +291,7 @@ def run_record(
                 else 'operator confirmation; printing performed separately'
             )
         elif operation == 'read_barcode':
-            if barcode_driver is not None:
+            if barcode_driver is not None and row["mode"] != "manual":
                 scan = barcode_driver.scan(expected=record['sample_id'])
                 if not scan.matched:
                     raise ValueError('Barcode does not match the item/sample identifier; stop.')
@@ -215,6 +333,10 @@ def main():
     parser.add_argument('--balance-port', default=None, help='Optional COM/tty serial balance')
     parser.add_argument('--balance-baud', type=int, default=9600)
     parser.add_argument('--barcode-port', default=None, help='Optional COM/tty serial scanner')
+    parser.add_argument(
+        "--arm-hardware", action="store_true", help="Enable reviewed serial devices."
+    )
+    parser.add_argument("--commissioning", type=Path, help="Reviewed device and plan JSON.")
     parser.add_argument('--dry-run', action='store_true',
                         help='Validate plan and write pending human checkpoints; no observations.')
     args = parser.parse_args()
@@ -235,19 +357,18 @@ def main():
                     (args.output.resolve(), args.plan.resolve())):
                 raise ValueError('Label path must be new and distinct from plan and record.')
         if args.dry_run:
-            operations = validate_plan(plan)
-            record = {
-                'schema_version': '1', 'mode': 'dry_run_no_observations',
-                'project_id': plan.get('project_id'), 'revision': plan.get('revision'),
-                'status': 'not_executed', 'events': [],
-                'pending_human_checkpoints': [
-                    {'sequence': index + 1, 'operation': operation,
-                     'requires_manual_handoff': index > 0}
-                    for index, operation in enumerate(operations)
-                ],
-            }
+            record = dry_run(plan)
         else:
-            kwargs = {'label_output': args.label_output}
+            reviewed = (
+                json.loads(args.commissioning.read_text(encoding="utf-8"))
+                if args.commissioning
+                else None
+            )
+            kwargs = {
+                "label_output": args.label_output,
+                "arm_hardware": args.arm_hardware,
+                "commissioning": reviewed,
+            }
             if args.label_format != 'html':
                 kwargs['label_format'] = args.label_format
             if args.balance_port:

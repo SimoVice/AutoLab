@@ -2810,23 +2810,28 @@ async def _tool_search_supplier_components(
     )
 
 
-def _resolve_protocol_platform(project: dict, requested: str) -> str:
-    if requested != "auto":
-        return requested
-    if (project.get("design") or {}).get("foundation"):
-        return "jubilee"
-    return "opentrons-ot2"
-
-
 def _tool_generate_robot_protocol(args: GenerateRobotProtocolArgs, ctx: ToolContext) -> ToolResult:
     from app.opentrons_verifier import verify_jubilee_protocol, verify_opentrons_protocol
+    from app.operation_plan import resolve_platform
     from app.protocol_generators import (
         extract_or_build_protocol_plan,
         generate_jubilee_protocol,
         generate_opentrons_protocol,
     )
 
-    platform = _resolve_protocol_platform(ctx.project, args.target_platform)
+    platform = resolve_platform(ctx.project, args.target_platform)
+    if platform not in ("jubilee", "opentrons-ot2"):
+        from app.operation_plan import project_operation_plan
+
+        sequence = project_operation_plan(ctx.project)
+        return ToolResult(
+            tool="generate_robot_protocol",
+            ok=True,
+            stage="designing",
+            mutated=False,
+            summary="Reviewed the device bindings and manual operations for this design.",
+            data={"operation_plan": sequence},
+        )
     try:
         plan = extract_or_build_protocol_plan(
             ctx.project,
@@ -2872,6 +2877,10 @@ def _tool_generate_robot_protocol(args: GenerateRobotProtocolArgs, ctx: ToolCont
         data={
             "platform": platform,
             "filename": generated["filename"],
+            "operation_binding": {
+                key: generated["operation_plan"][key]
+                for key in ("scope", "revision", "sha256", "bindings")
+            },
             "deck_slots": generated.get("deck_slots"),
             "pipettes": generated.get("pipettes"),
             "plan_summary": {
@@ -2879,7 +2888,7 @@ def _tool_generate_robot_protocol(args: GenerateRobotProtocolArgs, ctx: ToolCont
                 "target_count": plan["target_count"],
                 "intermediate_count": len(plan["intermediate_steps"]),
                 "intermediate_steps": plan["intermediate_steps"],
-                "totals": plan["totals"],
+                "totals": {**plan["totals"], "compiled_tips": sim.get("tips_used")},
                 "target_steps_sample": plan["steps"][:16],
             },
             "simulation": {
@@ -2898,9 +2907,22 @@ def _tool_generate_robot_protocol(args: GenerateRobotProtocolArgs, ctx: ToolCont
 
 def _tool_simulate_robot_protocol(args: SimulateRobotProtocolArgs, ctx: ToolContext) -> ToolResult:
     from app.opentrons_verifier import verify_jubilee_protocol, verify_opentrons_protocol
+    from app.operation_plan import resolve_platform
     from app.protocol_generators import generate_jubilee_protocol, generate_opentrons_protocol
 
-    platform = _resolve_protocol_platform(ctx.project, args.target_platform)
+    platform = resolve_platform(ctx.project, args.target_platform)
+    if platform not in ("jubilee", "opentrons-ot2"):
+        from app.operation_plan import simulate_sequence
+
+        sim = simulate_sequence(ctx.project)
+        return ToolResult(
+            tool="simulate_robot_protocol",
+            ok=sim["ok"],
+            stage="verifying",
+            mutated=False,
+            summary="Reviewed the operating sequence offline. No observations collected.",
+            data={"platform": platform, "simulation": sim},
+        )
     try:
         generated = (
             generate_jubilee_protocol(ctx.project)

@@ -37,8 +37,9 @@ def test_program_tracks_the_bound_plate_and_runs_offline(tmp_path):
     path.write_bytes(response.content)
     result = subprocess.run([sys.executable, "-I", str(path)], cwd=tmp_path, check=True,
                             capture_output=True, text=True)
-    assert "Transfer 20 uL from stock to A1" in result.stdout
-    assert "Transfer 190 uL from diluent to B1" in result.stdout
+    assert "Transfer 20 uL from stock/A1 to destination_plate/A1" in result.stdout
+    assert "Transfer 190 uL from diluent/A1 to destination_plate/B1" in result.stdout
     assert "B1: 200 uL total at planned 0.25 mg/mL" in result.stdout
-    assert "Pick up tip 4 and aspirate 190 uL from diluent" in result.stdout
+    assert "op-002 · driver · Transfer 190 uL from diluent/A1" in result.stdout
+    assert result.stdout.count("(fresh tip)") == 4
     assert "Total stock 30 uL, diluent 370 uL, 4 tips" in result.stdout

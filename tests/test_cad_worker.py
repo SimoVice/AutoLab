@@ -28,7 +28,8 @@ def use_worker(monkeypatch, mode="normal", marker=None):
 
     def spawn(*args, **kwargs):
         process = original(*args, **kwargs)
-        processes.append((process, args[0]))
+        if list(args[0][:3]) == command[:3]:
+            processes.append((process, args[0]))
         return process
 
     monkeypatch.setattr(worker.subprocess, "Popen", spawn)
@@ -42,7 +43,7 @@ async def wait_marker(path):
 
 
 def assert_clean(processes):
-    assert not worker._children
+    assert processes and not worker._children
     for process, command in processes:
         assert process.poll() is not None
         assert not Path(command[-3]).parent.exists()

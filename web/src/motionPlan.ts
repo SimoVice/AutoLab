@@ -1,4 +1,4 @@
-import type { Component, Project } from './types';
+import type { Component, OperationSequence, Project } from './types';
 import type { Vec3 } from './operation';
 import { compileColdTransferMotion } from './coldTransferMotion.ts';
 // Shared illustrative envelopes used by both planning and the viewer.
@@ -8,17 +8,17 @@ export const SCHEMATIC_TIP_TOP_ABOVE_RACK_MM = 14;
 export const PREVIEW_APPROACH_CLEARANCE_MM = 3;
 
 export type MotionMode = 'preparation' | 'inspection' | 'cold-transfer';
-export type MotionFrame = { time_s: number; position_mm: Vec3; stage: string; target: string; volume_ul: number | null; tip_attached: boolean; station_id?: string | null; destination_id?: string | null; tip_slot?: number | null };
-export type MotionPlan = { schema_version: 1; project_id: string; revision: number; mode: MotionMode; scope: 'illustrative' | 'recipe'; illustrative_recipe?: { stock: string; target: string; final_volume_ul: number; stock_volume_ul: number; diluent_volume_ul: number }; binding: { adapter_version: string; platform_id: string; foundation_id: string | null; foundation_source_sha256: string | null; plate_profile_id: string | null; tip_profile_id: string | null; rack_spec: Record<string, unknown> | null; component_ids: string[] }; status: 'ready' | 'unavailable'; message: string; duration_s: number; keyframes: MotionFrame[]; limitations: string[] };
+export type MotionFrame = { time_s: number; position_mm: Vec3; stage: string; target: string; volume_ul: number | null; tip_attached: boolean; station_id?: string | null; destination_id?: string | null; tip_slot?: number | null; operation_id?: string };
+export type MotionPlan = { schema_version: 1; project_id: string; revision: number; mode: MotionMode; scope: 'illustrative' | 'recipe'; illustrative_recipe?: { stock: string; target: string; final_volume_ul: number; stock_volume_ul: number; diluent_volume_ul: number }; binding: { operation_plan_sha256?: string; adapter_version: string; platform_id: string; foundation_id: string | null; foundation_source_sha256: string | null; plate_profile_id: string | null; tip_profile_id: string | null; rack_spec: Record<string, unknown> | null; component_ids: string[] }; status: 'ready' | 'unavailable'; message: string; duration_s: number; keyframes: MotionFrame[]; limitations: string[] };
 const LIMITS = ['Transfer amounts are totals; pipette capacity and repeated aspiration strokes are not modeled.', 'Planned kinematics only; no collision, fluid, calibration or physical validation.', 'Approach heights and timings are illustrative, not robot commands. Source containers and tubes must be open; caps are not operated.', 'Tips are illustrative envelopes; pipette fit is not validated. A labelled manual refill is required when a schematic rack is exhausted.'];
 const finite = (point: number[]) => point.length === 3 && point.every(Number.isFinite);
 function holes(part: Component): Vec3[] {
   const top = part.geometry?.primitives.find((primitive) => primitive.holes?.length);
   return top?.holes?.map((hole) => [part.position[0] + top.position[0] + hole.x_mm, part.position[1] + top.position[1] + top.size[1] / 2, part.position[2] + top.position[2] + hole.z_mm]) ?? [];
 }
-export function compileMotionPlan(project: Project, mode: MotionMode = 'preparation'): MotionPlan {
+export function compileMotionPlan(project: Project, mode: MotionMode = 'preparation', sequence?: OperationSequence | null): MotionPlan {
   const plan: MotionPlan = { schema_version: 1, project_id: project.id, revision: project.revision, mode, scope: 'recipe', binding: { adapter_version: 'illustrative-motion-1', platform_id: project.design.platform?.id ?? (project.design.foundation ? 'jubilee' : 'legacy-schematic'), foundation_id: project.design.foundation?.id ?? null, foundation_source_sha256: project.design.foundation?.source_sha256 ?? null, plate_profile_id: project.labware_plate?.profile_id ?? null, tip_profile_id: project.tip_rack?.profile_id ?? null, rack_spec: project.labware_rack?.spec ? { ...project.labware_rack.spec } : null, component_ids: project.design.components.map((part) => part.id) }, status: 'unavailable', message: '', duration_s: 0, keyframes: [], limitations: [...LIMITS] };
-  const unavailable = (message: string) => ({ ...plan, message });
+  const unavailable = (message: string) => ({ ...plan, keyframes: [], duration_s: 0, message });
   if (!project.engineering_design) return unavailable('Accept a supported design before preparing an operating preview.');
   if (mode === 'cold-transfer') return compileColdTransferMotion(project, project.cold_transfer_extension, plan);
   if (mode === 'inspection') {
@@ -32,6 +32,8 @@ export function compileMotionPlan(project: Project, mode: MotionMode = 'preparat
   const recipeStarted = [project.summary.stock_concentration, project.summary.target_concentrations, project.summary.final_volume].some((value) => Boolean(value?.trim()));
   const illustrative = !recipeStarted && project.plan?.status === 'incomplete';
   if (project.plan?.status !== 'ready' && !illustrative) return unavailable('Complete or correct the preparation quantities to enable this preview.');
+  if (!sequence && project.plan?.mode === 'serial' && !illustrative)
+    return unavailable('Intermediate locations are specified in the device operation plan.');
   if (illustrative) {
     plan.scope = 'illustrative';
     plan.illustrative_recipe = { stock: '1 mg/mL', target: '0.5 mg/mL', final_volume_ul: 100, stock_volume_ul: 50, diluent_volume_ul: 50 };
@@ -54,14 +56,19 @@ export function compileMotionPlan(project: Project, mode: MotionMode = 'preparat
   const destinationCount = illustrative ? 1 : steps.length;
   if (!project.labware_plate) targets = targets.map((point) => [point[0], sample.position[1] + sample.size[1] / 2 + (project.labware_rack ? PREVIEW_APPROACH_CLEARANCE_MM : SOURCE_TUBE_MOUTH_ABOVE_RACK_MM + PREVIEW_APPROACH_CLEARANCE_MM), point[2]]);
   if (!destinationCount || destinationCount > 96 || targets.length < destinationCount || sources.length < 2 || !tipPositions.length) return unavailable('The preparation exceeds the current station bindings.');
-  if (steps.some((step) => ![step.stock_volume_ul, step.diluent_volume_ul, step.total_volume_ul].every((value) => Number.isFinite(value) && value >= 0) || step.total_volume_ul <= 0 || Math.abs(step.stock_volume_ul + step.diluent_volume_ul - step.total_volume_ul) > 1e-6)) return unavailable('Preparation quantities are incomplete or inconsistent.');
+  if (steps.some((step) => ![step.source_volume_ul ?? step.stock_volume_ul, step.diluent_volume_ul, step.total_volume_ul].every((value) => Number.isFinite(value) && value >= 0) || step.total_volume_ul <= 0 || Math.abs((step.source_volume_ul ?? step.stock_volume_ul) + step.diluent_volume_ul - step.total_volume_ul) > 1e-6)) return unavailable('Preparation quantities are incomplete or inconsistent.');
+  if (sequence === null && !illustrative) return unavailable('Open the revision’s device operation plan to view its playback.');
+  if (sequence && (sequence.scope !== 'approved' || sequence.project_id !== (project.lineage_id ?? project.id) ||
+      sequence.revision !== project.revision || sequence.platform !== 'jubilee'))
+    return unavailable('The operation plan must match this approved platform and revision.');
   const points = [...targets.slice(0, destinationCount), ...sources, ...tipPositions];
   if (points.some((point) => !finite(point) || Math.abs(point[0] - base.position[0]) > base.size[0] / 2 || Math.abs(point[2] - base.position[2]) > base.size[2] / 2)) return unavailable('A bound station is outside the supported deck envelope. Revise the layout.');
   const home: Vec3 = [pipette.position[0], pipette.position[1] - pipette.size[1] / 2 - VIRTUAL_TIP_LENGTH_MM, pipette.position[2]];
   const cruise = Math.max(home[1], ...points.map((point) => point[1] + 8), ...[source, sample, tips, waste].map((part) => part.position[1] + part.size[1] / 2 + 10));
   let time = 0, tip = false, tipIndex = 0;
+  let operationId: string | undefined;
   let stationId: string | null = null, destinationId: string | null = null, tipSlot: number | null = null;
-  const add = (position_mm: Vec3, stage: string, target: string, volume_ul: number | null, seconds: number) => { time = Math.round((time + seconds) * 1000) / 1000; plan.keyframes.push({ time_s: time, position_mm: [...position_mm], stage, target, volume_ul, tip_attached: tip, station_id: stationId, destination_id: destinationId, tip_slot: tipSlot }); };
+  const add = (position_mm: Vec3, stage: string, target: string, volume_ul: number | null, seconds: number) => { time = Math.round((time + seconds) * 1000) / 1000; plan.keyframes.push({ time_s: time, position_mm: [...position_mm], stage, target, volume_ul, tip_attached: tip, station_id: stationId, destination_id: destinationId, tip_slot: tipSlot, operation_id: operationId }); };
   add(home, 'Ready', 'Home', null, 0);
   add([home[0], cruise, home[2]], 'Lift', 'Home', null, 0.45);
   const visit = (point: Vec3, stage: string, target: string, volume: number | null, tipAfter: boolean, station: string) => {
@@ -71,23 +78,48 @@ export function compileMotionPlan(project: Project, mode: MotionMode = 'preparat
     tip = tipAfter; add(point, stage, target, volume, 0.35);
     add([point[0], cruise, point[2]], 'Retract', target, volume, 0.35);
   };
-  for (let i = 0; i < destinationCount; i += 1) {
-    destinationId = project.labware_plate ? labels[i] : `tube-${i + 1}`;
-    const volumes = illustrative ? [plan.illustrative_recipe!.stock_volume_ul, plan.illustrative_recipe!.diluent_volume_ul] : [steps[i].stock_volume_ul, steps[i].diluent_volume_ul];
-    for (const [sourceIndex, volume] of volumes.entries()) {
-      if (volume === 0) continue;
-      if (tipIndex > 0 && tipIndex % tipPositions.length === 0) {
-        stationId = 'tip-rack'; tipSlot = null;
-        add([tips.position[0], cruise, tips.position[2]], 'Manual refill', 'Refill tip rack before continuing', null, 1.5);
+  type Visit = { index: number; source: number; volume: number; id?: string };
+  const visits: Visit[] = [];
+  if (sequence) {
+    plan.binding.operation_plan_sha256 = sequence.sha256;
+    for (const row of sequence.operations) {
+      const p = row.parameters;
+      const index = labels.indexOf(String(p.dest_well));
+      if (row.mode !== 'driver' || p.dest_role !== 'destination_plate' || index < 0 ||
+          typeof p.volume_ul !== 'number' || !Number.isFinite(p.volume_ul) ||
+          !['transfer', 'mix'].includes(row.action) ||
+          (row.action === 'transfer' && !['stock', 'diluent'].includes(String(p.source_role)))) {
+        return unavailable('Some protocol locations or actions have no mapped 3D pose. Review the full sequence in Operations & volumes.');
       }
-      tipSlot = tipIndex++ % tipPositions.length;
-      visit(tipPositions[tipSlot], 'Pick up tip', 'Tip rack · illustrative pickup', null, true, 'tip-rack');
-      tipSlot = null;
-      visit(sources[sourceIndex], 'Aspirate', sourceIndex === 0 ? 'Stock' : 'Diluent', volume, true, 'source-rack');
-      visit(targets[i], 'Dispense', illustrative ? `${labels[i]} · example ${plan.illustrative_recipe!.target}` : `${labels[i]} · ${steps[i].target}`, volume, true, 'sample-rack');
-      visit([waste.position[0], waste.position[1] + waste.size[1] / 2 + 5, waste.position[2]], 'Discard tip', 'Tip waste', null, false, 'tip-waste');
+      visits.push({ index, source: row.action === 'mix' ? -1 : p.source_role === 'stock' ? 0 : 1,
+        volume: p.volume_ul, id: row.id });
+    }
+  } else {
+    for (let index = 0; index < destinationCount; index += 1) {
+      const volumes = illustrative ? [plan.illustrative_recipe!.stock_volume_ul, plan.illustrative_recipe!.diluent_volume_ul] : [steps[index].stock_volume_ul, steps[index].diluent_volume_ul];
+      volumes.forEach((volume, source) => { if (volume > 0) visits.push({ index, source, volume }); });
     }
   }
+  for (const move of visits) {
+    const i = move.index;
+    operationId = move.id;
+    destinationId = project.labware_plate ? labels[i] : `tube-${i + 1}`;
+    if (move.source === -1) {
+      visit(targets[i], 'Mix', labels[i], move.volume, false, 'sample-rack');
+      continue;
+    }
+    if (tipIndex > 0 && tipIndex % tipPositions.length === 0) {
+      stationId = 'tip-rack'; tipSlot = null;
+      add([tips.position[0], cruise, tips.position[2]], 'Manual refill', 'Refill tip rack before continuing', null, 1.5);
+    }
+    tipSlot = tipIndex++ % tipPositions.length;
+    visit(tipPositions[tipSlot], 'Pick up tip', 'Tip rack · illustrative pickup', null, true, 'tip-rack');
+    tipSlot = null;
+    visit(sources[move.source], 'Aspirate', move.source === 0 ? 'Stock' : 'Diluent', move.volume, true, 'source-rack');
+    visit(targets[i], 'Dispense', illustrative ? `${labels[i]} · example ${plan.illustrative_recipe!.target}` : `${labels[i]} · ${steps[i].target}`, move.volume, true, 'sample-rack');
+    visit([waste.position[0], waste.position[1] + waste.size[1] / 2 + 5, waste.position[2]], 'Discard tip', 'Tip waste', null, false, 'tip-waste');
+  }
+  operationId = undefined;
   stationId = null; destinationId = null;
   add([home[0], cruise, home[2]], 'Return home', 'Home', null, 0.65);
   add(home, 'Complete', 'Home', null, 0.45);

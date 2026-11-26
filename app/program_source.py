@@ -1,59 +1,44 @@
-"""Generate the standalone Python liquid-transfer simulation for an approved design."""
+"""Generate an offline Python preview from the selected machine's compiled operations."""
+
+import inspect
+from pprint import pformat
 
 from app.design_workflow import workflow_state
-from app.protocol_preview import validate_protocol
-from app.software_guidance import build_software_guidance
+from app.operation_plan import project_operation_plan
+from app.protocol_preview import describe_operation, simulate_operations
 
 
 def build_program(project: dict) -> str:
     if not workflow_state(project)["machine_approved"]:
         raise ValueError("Approve the machine before generating its program.")
-    template = build_software_guidance(project)["protocol_template"]
-    transfers = validate_protocol(template)
-    binding = template["binding"]
-    stock = template["current_preparation"]["stock_concentration"]
-    rows = []
-    for index, transfer in enumerate(transfers, 1):
-        destination = transfer.get("destination_well") or f"Tube {index}"
-        row = (destination, transfer["target"], transfer["stock_volume_ul"],
-               transfer["diluent_volume_ul"])
-        rows.append(f"    {row!r},")
+    sequence = project_operation_plan(project)
+    if sequence["platform"] not in ("opentrons-ot2", "jubilee") or not sequence["operations"]:
+        raise ValueError("Use the operating sequence for this design.")
+    targets = {
+        row.get("well_name", ""): row["target"]
+        for row in (project.get("plan") or {}).get("steps", [])
+    }
+    return f'''"""Preview the saved operation sequence offline. Run python program.py."""
 
-    preparations = "\n".join(rows)
-    return f'''"""Simulate this preparation with Python 3. Run: python program.py
+OPERATION_PLAN = {pformat(sequence, width=100, sort_dicts=False)}
+TARGETS = {targets!r}
 
-Volumes are in microlitres. This program operates on an in-memory deck.
-"""
+{inspect.getsource(describe_operation)}
 
-PLATFORM = {binding["platform"]!r}
-REVISION = {binding["project_revision"]!r}
-STOCK = {stock!r}
-
-# Destination, target concentration, stock volume (uL), diluent volume (uL).
-PREPARATIONS = [
-{preparations}
-]
-
+{inspect.getsource(simulate_operations)}
 
 def simulate():
-    deck = {{}}
-    consumed = {{"stock": 0.0, "diluent": 0.0}}
-    tips = 0
-    print(f"{{PLATFORM}} | revision {{REVISION}} | stock {{STOCK}}")
-    for destination, target, stock_ul, diluent_ul in PREPARATIONS:
-        deck[destination] = 0.0
-        for source, volume in (("stock", stock_ul), ("diluent", diluent_ul)):
-            if volume > 0:
-                tips += 1
-                consumed[source] += volume
-                print(f"  Pick up tip {{tips}} and aspirate {{volume:g}} uL from {{source}}")
-                deck[destination] += volume
-                print(f"  Transfer {{volume:g}} uL from {{source}} to {{destination}}")
-                print("  Discard tip")
-        print(f"{{destination}}: {{deck[destination]:g}} uL total at planned {{target}}")
-    print(f"Total stock {{consumed['stock']:g}} uL, "
-          f"diluent {{consumed['diluent']:g}} uL, {{tips}} tips")
-    return deck
+    result = simulate_operations(OPERATION_PLAN)
+    print(f"Logical preview | {{OPERATION_PLAN['platform']}} | "
+          f"revision {{OPERATION_PLAN['revision']}} | {{result['plan_sha256']}}")
+    for op in OPERATION_PLAN["operations"]:
+        print(f"{{op['id']}} · {{op['mode']}} · {{describe_operation(op)}}")
+    for well, volume in result["destination_wells"].items():
+        print(f"{{well}}: {{volume:g}} uL total at planned {{TARGETS.get(well, well)}}")
+    used = result["consumed_ul"]
+    print(f"Total stock {{used['stock']:g}} uL, diluent {{used['diluent']:g}} uL, "
+          f"{{result['tips_used']}} tips")
+    return result["destination_wells"]
 
 
 if __name__ == "__main__":

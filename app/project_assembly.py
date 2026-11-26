@@ -313,6 +313,11 @@ def _geometry_signature(graph):
     })
 
 
+def component_instance_ids(project: dict) -> dict[str, str]:
+    """Resolve the compiler's component names to their placed assembly instances."""
+    return {key: part["id"] for key, part in _geometry(project).instances.items()}
+
+
 def assembly_binding(project: dict) -> dict:
     """Only the version and geometric fingerprint need space in a portable input file."""
     return {"version": 1, "geometry_sha256": _geometry_signature(_geometry(project))}

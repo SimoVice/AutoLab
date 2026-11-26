@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import math
 from decimal import Decimal
 from pprint import pformat
 
 from app.dilution import PLATE_96_WELL_ORDER, create_protocol_dilution_plan
+from app.operation_plan import device, liquid_plan, operation
+from app.project_assembly import component_instance_ids
+from app.protocol_preview import simulate_operations
 
 SUPPORTED_OT2_LABWARE: dict[str, dict] = {
     "nest_96_wellplate_200ul_flat": {
@@ -202,6 +206,22 @@ def _choose_ot2_pipettes(plan: dict) -> list[str]:
     return ["p300_single_gen2"]
 
 
+def _ot2_command(row):
+    """Render one compiler-authored operation as an Opentrons call."""
+    values = row["parameters"]
+    args = []
+    if "repetitions" in values:
+        args.append(str(values["repetitions"]))
+    if "volume_ul" in values:
+        args.append(repr(values["volume_ul"]))
+    if "well" in values:
+        labware = {"destination_plate": "dest_plate", "diluent": "diluent_reservoir"}.get(
+            values["role"], "source_rack"
+        )
+        args.append(f"{labware}[{values['well']!r}]" + (".top()" if values.get("top") else ""))
+    return f"    pip_{row['binding']}.{row['action']}({', '.join(args)})"
+
+
 def generate_opentrons_protocol(
     project: dict,
     *,
@@ -236,128 +256,109 @@ def generate_opentrons_protocol(
         mount_map[ordered[0]] = "left"
         mount_map[ordered[1]] = "right"
 
-    # Build step instructions & track exact tips needed per pipette.
-    tip_counts = {name: 0 for name in pipette_names}
-    code_ops: list[str] = []
+    rows = []
+    target_volumes = {}
+    reservoir = {"role": "diluent", "well": "A1"}
 
-    def _well_expr(role: str, well: str) -> str:
-        if role == "destination_plate":
-            return f"dest_plate[{well!r}]"
-        if role == "diluent":
-            return f"diluent_reservoir[{well!r}]"
-        return f"source_rack[{well!r}]"
+    def emit(pip, action, location=None, volume=None, **extra):
+        parameters = dict(extra)
+        if location is not None:
+            parameters.update(location)
+        if volume is not None:
+            parameters["volume_ul"] = volume
+        rows.append(operation(pip, action, parameters))
 
-    # Track current volume in every non-reservoir vessel so mix volume never overflows.
-    vessel_volumes: dict[str, float] = {}
-
-    # 1) Diluent steps (multi-dispense when enabled and beneficial).
-    md_groups = plan.get("multi_dispense_groups") or []
-    diluent_transfers = [t for t in plan["transfers"] if t["phase"] == "diluent"]
-    if multi_dispense and md_groups:
-        for grp in md_groups:
-            dispenses = grp["dispenses"]
-            if len(dispenses) > 1:
-                pip = _assign_pipette_for_volume(
-                    max(d["volume_ul"] for d in dispenses), pipette_names
-                )
-                spec = PIPETTE_SPECS[pip]
-                total_need = sum(d["volume_ul"] for d in dispenses) + grp["disposal_ul"]
-                if total_need <= spec["max_volume_ul"]:
-                    tip_counts[pip] += 1
-                    pvar = f"pip_{pip}"
-                    code_ops.append(
-                        f"    # Multi-dispense diluent group {grp['group_id']} "
-                        f"({len(dispenses)} wells)"
-                    )
-                    code_ops.append(f"    {pvar}.pick_up_tip()")
-                    code_ops.append(
-                        f"    {pvar}.aspirate({total_need:g}, diluent_reservoir['A1'])"
-                    )
-                    for item in dispenses:
-                        dexpr = _well_expr(item["dest_role"], item["dest_well"])
-                        code_ops.append(f"    {pvar}.dispense({item['volume_ul']:g}, {dexpr})")
-                        key = f"{item['dest_role']}:{item['dest_well']}"
-                        vessel_volumes[key] = vessel_volumes.get(key, 0.0) + item["volume_ul"]
-                    if grp["disposal_ul"] > 0:
-                        code_ops.append(f"    {pvar}.blow_out(diluent_reservoir['A1'].top())")
-                    code_ops.append(f"    {pvar}.drop_tip()")
-                    continue
-            for item in dispenses:
-                pip = _assign_pipette_for_volume(item["volume_ul"], pipette_names)
-                spec = PIPETTE_SPECS[pip]
-                tip_counts[pip] += 1
-                pvar = f"pip_{pip}"
-                dexpr = _well_expr(item["dest_role"], item["dest_well"])
-                chunks = _split_volume_chunks(
-                    item["volume_ul"], spec["min_volume_ul"], spec["max_volume_ul"]
-                )
-                code_ops.append(f"    {pvar}.pick_up_tip()")
-                for chunk in chunks:
-                    code_ops.append(f"    {pvar}.aspirate({chunk:g}, diluent_reservoir['A1'])")
-                    code_ops.append(f"    {pvar}.dispense({chunk:g}, {dexpr})")
-                    code_ops.append(f"    {pvar}.blow_out({dexpr}.top())")
-                code_ops.append(f"    {pvar}.drop_tip()")
-                key = f"{item['dest_role']}:{item['dest_well']}"
-                vessel_volumes[key] = vessel_volumes.get(key, 0.0) + item["volume_ul"]
-    else:
-        for item in diluent_transfers:
-            pip = _assign_pipette_for_volume(item["volume_ul"], pipette_names)
-            spec = PIPETTE_SPECS[pip]
-            tip_counts[pip] += 1
-            pvar = f"pip_{pip}"
-            dexpr = _well_expr(item["dest_role"], item["dest_well"])
-            chunks = _split_volume_chunks(
-                item["volume_ul"], spec["min_volume_ul"], spec["max_volume_ul"]
-            )
-            code_ops.append(f"    {pvar}.pick_up_tip()")
-            for chunk in chunks:
-                code_ops.append(f"    {pvar}.aspirate({chunk:g}, diluent_reservoir['A1'])")
-                code_ops.append(f"    {pvar}.dispense({chunk:g}, {dexpr})")
-                code_ops.append(f"    {pvar}.blow_out({dexpr}.top())")
-            code_ops.append(f"    {pvar}.drop_tip()")
-            key = f"{item['dest_role']}:{item['dest_well']}"
-            vessel_volumes[key] = vessel_volumes.get(key, 0.0) + item["volume_ul"]
-
-    # 2) Serial intermediates + 3) Sample transfers (strictly one fresh tip per source).
-    for item in plan["transfers"]:
-        if item["phase"] == "diluent":
-            continue
-        pip = _assign_pipette_for_volume(item["volume_ul"], pipette_names)
+    def single(item, *, diluent):
+        volume = item["volume_ul"]
+        pip = _assign_pipette_for_volume(volume, pipette_names)
         spec = PIPETTE_SPECS[pip]
-        tip_counts[pip] += 1
-        pvar = f"pip_{pip}"
-        sexpr = _well_expr(item["source_role"], item["source_well"])
-        dexpr = _well_expr(item["dest_role"], item["dest_well"])
-        chunks = _split_volume_chunks(
-            item["volume_ul"], spec["min_volume_ul"], spec["max_volume_ul"]
-        )
-        code_ops.append(
-            f"    # {item['phase']}: {item['source_role']} ({item['source_well']}) -> "
-            f"{item['dest_well']} ({item['target']})"
-        )
-        code_ops.append(f"    {pvar}.pick_up_tip()")
-        for chunk in chunks:
-            code_ops.append(f"    {pvar}.aspirate({chunk:g}, {sexpr})")
-            code_ops.append(f"    {pvar}.dispense({chunk:g}, {dexpr})")
-        key = f"{item['dest_role']}:{item['dest_well']}"
-        vessel_volumes[key] = vessel_volumes.get(key, 0.0) + item["volume_ul"]
-        if mix_after and item.get("mix_after"):
-            cur_vol = vessel_volumes.get(key, item["volume_ul"])
-            raw_mix = min(spec["max_volume_ul"], max(spec["min_volume_ul"], cur_vol * 0.5))
-            mix_vol = round(min(raw_mix, spec["max_volume_ul"]), 4)
-            if mix_vol >= spec["min_volume_ul"]:
-                code_ops.append(f"    {pvar}.mix(3, {mix_vol:g}, {dexpr})")
-        code_ops.append(f"    {pvar}.blow_out({dexpr}.top())")
-        code_ops.append(f"    {pvar}.touch_tip({dexpr})")
-        code_ops.append(f"    {pvar}.drop_tip()")
+        loc = {"role": item["dest_role"], "well": item["dest_well"]}
+        src = reservoir if diluent else {"role": item["source_role"], "well": item["source_well"]}
+        emit(pip, "pick_up_tip")
+        for chunk in _split_volume_chunks(volume, spec["min_volume_ul"], spec["max_volume_ul"]):
+            emit(pip, "aspirate", src, chunk)
+            emit(pip, "dispense", loc, chunk)
+            if diluent:
+                emit(pip, "blow_out", loc, top=True)
+        key = (loc["role"], loc["well"])
+        target_volumes[key] = target_volumes.get(key, 0) + volume
+        if not diluent:
+            if mix_after and item.get("mix_after"):
+                amount = min(
+                    spec["max_volume_ul"], max(spec["min_volume_ul"], target_volumes[key] * 0.5)
+                )
+                emit(pip, "mix", loc, round(amount, 4), repetitions=3)
+            emit(pip, "blow_out", loc, top=True)
+            emit(pip, "touch_tip", loc)
+        emit(pip, "drop_tip")
 
-    # Allocate deck slots (1=dest, 2=source/intermediates, 3=diluent, 4..11=tipracks).
-    deck_slots: dict[str, str] = {
-        "1": dest_loadname,
-        "2": "opentrons_15_tuberack_falcon_15ml_conical",
-        "3": "nest_1_reservoir_195ml",
+    groups = plan.get("multi_dispense_groups") if multi_dispense else None
+    for group in groups or []:
+        dispenses = group["dispenses"]
+        pip = _assign_pipette_for_volume(max(d["volume_ul"] for d in dispenses), pipette_names)
+        total = sum(d["volume_ul"] for d in dispenses) + group["disposal_ul"]
+        if len(dispenses) == 1 or total > PIPETTE_SPECS[pip]["max_volume_ul"]:
+            for item in dispenses:
+                single(item, diluent=True)
+            continue
+        emit(pip, "pick_up_tip")
+        emit(pip, "aspirate", reservoir, total)
+        for item in dispenses:
+            loc = {"role": item["dest_role"], "well": item["dest_well"]}
+            emit(pip, "dispense", loc, item["volume_ul"])
+            key = (loc["role"], loc["well"])
+            target_volumes[key] = target_volumes.get(key, 0) + item["volume_ul"]
+        if group["disposal_ul"] > 0:
+            emit(pip, "blow_out", reservoir, top=True)
+        emit(pip, "drop_tip")
+    for item in plan["transfers"]:
+        diluent = item["phase"] == "diluent"
+        if not (groups and diluent):
+            single(item, diluent=diluent)
+
+    component = component_instance_ids(project).get("pipette")
+    bindings = {
+        pip: device(
+            component,
+            "liquid_handling",
+            pip,
+            "uL",
+            {
+                **{k: PIPETTE_SPECS[pip][k] for k in ("min_volume_ul", "max_volume_ul", "tiprack")},
+                "mount": mount_map[pip],
+                "destination_labware": dest_loadname,
+            },
+            [f"Verify the {mount_map[pip]} mount, tip rack and calibrated deck."],
+        )
+        for pip in pipette_names
     }
-    free_slots = [str(s) for s in range(4, 12)]
+    tip_counts = {
+        pip: sum(row["binding"] == pip and row["action"] == "pick_up_tip" for row in rows)
+        for pip in pipette_names
+    }
+    # Only an OT-2 design has meaningful OT-2 slot assignments. Other platforms are previews.
+    design = project.get("design") or {}
+    assigned = {}
+    if (design.get("platform") or {}).get("id") == "opentrons-ot2":
+        assigned = {
+            part["id"]: str(part["slot_id"]) for part in design["components"] if part.get("slot_id")
+        }
+    dest_slot = assigned.get("sample-rack", "1")
+    source_slot = assigned.get("source-rack", "2")
+    tip_slot = assigned.get("tip-rack", "4")
+    free_slots = [
+        str(i)
+        for i in range(1, 12)
+        if str(i) not in assigned.values() and str(i) not in {dest_slot, source_slot, tip_slot}
+    ]
+    diluent_slot = assigned.get("diluent-reservoir") or free_slots.pop(0)
+    source_load = "opentrons_15_tuberack_falcon_15ml_conical"
+    diluent_load = "nest_1_reservoir_195ml"
+    deck_slots = {dest_slot: dest_loadname, source_slot: source_load, diluent_slot: diluent_load}
+    free_slots.insert(0, tip_slot)
+    blockers = []
+    if assigned and "diluent-reservoir" not in assigned:
+        blockers.append(f"The diluent reservoir in slot {diluent_slot} has no bound assembly part.")
     tiprack_vars_by_pip: dict[str, list[str]] = {}
     rack_idx = 0
     for pip in pipette_names:
@@ -370,27 +371,37 @@ def generate_opentrons_protocol(
             )
         tiprack_load = PIPETTE_SPECS[pip]["tiprack"]
         var_list: list[str] = []
+        limits = bindings[pip]["limits"]
+        limits.update(
+            destination_slot=dest_slot,
+            source_slot=source_slot,
+            diluent_slot=diluent_slot,
+            tiprack_slots=[],
+        )
         for _ in range(racks_needed):
             slot = free_slots.pop(0)
+            limits["tiprack_slots"].append(slot)
             rack_idx += 1
             var_name = f"tiprack_{rack_idx}"
             deck_slots[slot] = tiprack_load
             var_list.append(f"{var_name} = protocol.load_labware({tiprack_load!r}, {slot!r})")
         tiprack_vars_by_pip[pip] = var_list
 
-    setup_lines: list[str] = [
-        f"    dest_plate = protocol.load_labware({dest_loadname!r}, '1')",
-        "    source_rack = protocol.load_labware("
-        "'opentrons_15_tuberack_falcon_15ml_conical', '2')",
-        "    diluent_reservoir = protocol.load_labware('nest_1_reservoir_195ml', '3')",
+    if assigned and rack_idx > 1:
+        blockers.append("Bind all required tip racks to their installed deck slots.")
+    if assigned and len(pipette_names) > 1:
+        blockers.append("Bind each pipette mount to a distinct installed instrument.")
+    sequence = liquid_plan(project, "opentrons-ot2", plan, bindings, rows, blockers=blockers)
+    setup_lines = [
+        f"    dest_plate = protocol.load_labware({dest_loadname!r}, {dest_slot!r})",
+        f"    source_rack = protocol.load_labware({source_load!r}, {source_slot!r})",
+        f"    diluent_reservoir = protocol.load_labware({diluent_load!r}, {diluent_slot!r})",
     ]
-    rack_counter = 0
     pipette_lines: list[str] = []
     for pip in pipette_names:
         mount = mount_map[pip]
         assigned_vars: list[str] = []
         for stmt in tiprack_vars_by_pip[pip]:
-            rack_counter += 1
             assigned_vars.append(stmt.split(" =", 1)[0])
             setup_lines.append("    " + stmt)
         racks_arg = ", ".join(assigned_vars)
@@ -399,8 +410,8 @@ def generate_opentrons_protocol(
             f"tip_racks=[{racks_arg}])"
         )
 
-    project_id = str(project.get("id", "autolab-project"))
-    revision = int(project.get("revision", 1) or 1)
+    project_id = str(project.get("lineage_id") or project["id"])
+    revision = int(project["revision"])
     header_comment = (
         f"Project {project_id} r{revision} | mode={plan['mode']} | "
         f"{plan['target_count']} targets @ {plan['final_volume_ul']:g} uL"
@@ -419,14 +430,38 @@ def generate_opentrons_protocol(
         "",
         f"metadata = {pformat(meta, width=96, sort_dicts=False)}",
         f"requirements = {json.dumps(reqs)}",
+        f"PLAN_SHA256 = {sequence['sha256']!r}",
+        f"DESTINATION_SLOT = {dest_slot!r}",
         "",
         "",
         "def run(protocol: protocol_api.ProtocolContext):",
         f"    protocol.comment({header_comment!r})",
+        "    if not protocol.is_simulating():",
+        (
+            "        protocol.pause("
+            + repr(
+                f"Confirm commissioning of the bound instruments for "
+                f"{project_id} r{revision} before resuming."
+            )
+            + ")"
+            if sequence["scope"] == "approved"
+            and not sequence["hardware_blockers"]
+            and all(r["mode"] == "driver" for r in sequence["operations"])
+            else "        raise RuntimeError('This protocol is available for offline review only.')"
+        ),
         *setup_lines,
         *pipette_lines,
         "",
-        *code_ops,
+        *[
+            line
+            for row in sequence["operations"]
+            for line in (
+                f"    protocol.comment({('Operation ' + row['id'] + ' ' + row['mode'])!r})",
+                _ot2_command(row)
+                if row["mode"] == "driver"
+                else f"    protocol.comment({row['action']!r})",
+            )
+        ],
         "",
         "    protocol.comment('AutoLab protocol completed.')",
         "",
@@ -440,6 +475,7 @@ def generate_opentrons_protocol(
         "deck_slots": deck_slots,
         "pipettes": {mount_map[p]: p for p in pipette_names},
         "tips_required": tip_counts,
+        "operation_plan": sequence,
         "plan": plan,
         "source_code": source_code,
     }
@@ -464,14 +500,71 @@ def generate_jubilee_protocol(
     if not math.isfinite(safe_z_mm) or safe_z_mm <= 0 or safe_z_mm > 350:
         raise ValueError("safe_z_mm must be within (0, 350].")
 
-    project_id = str(project.get("id", "autolab-project"))
-    revision = int(project.get("revision", 1) or 1)
+    project_id = str(project.get("lineage_id") or project["id"])
+    revision = int(project["revision"])
     dest_loadname = _select_destination_labware(
         project,
         final_volume_ul=plan["final_volume_ul"],
         target_count=plan["target_count"],
     )
+    rows = []
+    for item in plan["transfers"]:
+        rows.append(
+            operation(
+                "pipette",
+                "transfer",
+                {
+                    k: item[k]
+                    for k in ("source_role", "source_well", "dest_role", "dest_well", "volume_ul")
+                }
+                | {"new_tip": "always"},
+            )
+        )
+        if item.get("mix_after"):
+            rows.append(
+                operation(
+                    "pipette",
+                    "mix",
+                    {
+                        "dest_role": item["dest_role"],
+                        "dest_well": item["dest_well"],
+                        "volume_ul": item.get("mix_volume_ul", item["volume_ul"]),
+                        "repetitions": 3,
+                    },
+                )
+            )
+    bindings = {
+        "pipette": device(
+            component_instance_ids(project).get("pipette"),
+            "liquid_handling",
+            "science_jubilee.tools.Pipette",
+            "uL",
+            {
+                "minimum_planned_ul": plan["min_transfer_ul"],
+                "commissioned_range_ul": None,
+                "fresh_tip_per_transfer": True,
+            },
+            ["Verify pipette range, tip inventory and deck calibration."],
+        )
+    }
+    tiprack = "opentrons_96_tiprack_300ul"
+    tip_capacity = SUPPORTED_OT2_LABWARE[tiprack]["max_volume_ul"]
+    limits = bindings["pipette"]["limits"]
+    limits.update(
+        tip_capacity_ul=tip_capacity,
+        tip_positions=96,
+        safe_z_mm=float(safe_z_mm),
+        destination_labware=dest_loadname,
+        tiprack=tiprack,
+    )
+    blockers = []
+    if any(row["parameters"]["volume_ul"] > tip_capacity for row in rows):
+        blockers.append("A planned command exceeds the configured 300 uL tip capacity.")
+    if len(plan["transfers"]) > 96:
+        blockers.append("The required fresh tips exceed the configured rack.")
+    sequence = liquid_plan(project, "jubilee", plan, bindings, rows, blockers=blockers)
     compact_plan = {
+        "operation_plan": sequence,
         "project_id": project_id,
         "revision": revision,
         "mode": plan["mode"],
@@ -479,9 +572,6 @@ def generate_jubilee_protocol(
         "final_volume_ul": plan["final_volume_ul"],
         "target_count": plan["target_count"],
         "intermediate_steps": plan["intermediate_steps"],
-        "transfers": plan["transfers"],
-        "multi_dispense_groups": plan.get("multi_dispense_groups") or [],
-        "multi_dispense_enabled": bool(multi_dispense),
         "safe_z_mm": float(safe_z_mm),
         "labware": {
             "destination": dest_loadname,
@@ -497,7 +587,7 @@ Simulate locally without hardware:
     python jubilee_protocol.py --simulate
 
 Execute on a commissioned Science Jubilee over Duet HTTP:
-    python jubilee_protocol.py --address <duet-ip> --arm-hardware
+    python jubilee_protocol.py --address <duet-ip> --arm-hardware --commissioning FILE
 """
 
 from __future__ import annotations
@@ -508,63 +598,49 @@ import json
 PROTOCOL_SPEC = {plan_literal}
 
 
+{inspect.getsource(simulate_operations)}
+
+
 def _simulate_plan() -> dict:
-    vessels: dict[str, float] = {{}}
-    consumed = {{"stock": 0.0, "diluent": 0.0}}
-    tips_used = 0
-    executed_steps: list[dict] = []
-
-    use_md = PROTOCOL_SPEC["multi_dispense_enabled"] and PROTOCOL_SPEC["multi_dispense_groups"]
-    if use_md:
-        for grp in PROTOCOL_SPEC["multi_dispense_groups"]:
-            tips_used += 1
-            for item in grp["dispenses"]:
-                key = f"{{item['dest_role']}}:{{item['dest_well']}}"
-                vessels[key] = round(vessels.get(key, 0.0) + item["volume_ul"], 4)
-                consumed["diluent"] = round(consumed["diluent"] + item["volume_ul"], 4)
-                executed_steps.append(
-                    {{"op": "multi_dispense", "well": item["dest_well"], "uL": item["volume_ul"]}}
-                )
-
-    for item in PROTOCOL_SPEC["transfers"]:
-        if use_md and item["phase"] == "diluent":
-            continue
-        tips_used += 1
-        key = f"{{item['dest_role']}}:{{item['dest_well']}}"
-        vessels[key] = round(vessels.get(key, 0.0) + item["volume_ul"], 4)
-        if item["source_role"] in ("stock", "diluent"):
-            consumed[item["source_role"]] = round(
-                consumed[item["source_role"]] + item["volume_ul"], 4
-            )
-        executed_steps.append(
-            {{
-                "op": item["phase"],
-                "from": f"{{item['source_role']}}:{{item['source_well']}}",
-                "to": key,
-                "uL": item["volume_ul"],
-                "mix_after": bool(item.get("mix_after")),
-            }}
-        )
-
-    return {{
-        "status": "simulated_ok",
-        "platform": "jubilee",
-        "project_id": PROTOCOL_SPEC["project_id"],
-        "revision": PROTOCOL_SPEC["revision"],
-        "mode": PROTOCOL_SPEC["mode"],
-        "target_count": PROTOCOL_SPEC["target_count"],
-        "steps_executed": len(executed_steps),
-        "tips_used": tips_used,
-        "consumed_ul": consumed,
-        "destination_wells": {{
-            k.split(":", 1)[1]: v
-            for k, v in vessels.items()
-            if k.startswith("destination_plate:")
-        }},
-    }}
+    return {{"status": "simulated_ok", "platform": "jubilee",
+            "project_id": PROTOCOL_SPEC["project_id"], "revision": PROTOCOL_SPEC["revision"],
+            "mode": PROTOCOL_SPEC["mode"], "target_count": PROTOCOL_SPEC["target_count"],
+            **simulate_operations(PROTOCOL_SPEC["operation_plan"])}}
 
 
-def _run_hardware(address: str, tool_index: int) -> dict:
+def _dispatch(pipette, resolve, sequence):
+    done = []
+    for row in sequence["operations"]:
+        if row["mode"] != "driver":
+            raise ValueError("Unresolved operation in device sequence.")
+        item = row["parameters"]
+        dst = resolve(item["dest_role"], item["dest_well"])
+        if row["action"] == "transfer":
+            src = resolve(item["source_role"], item["source_well"])
+            pipette.transfer(item["volume_ul"], src, dst, new_tip=item["new_tip"])
+        elif row["action"] == "mix":
+            pipette.mix(item["volume_ul"], item["repetitions"], dst)
+        else:
+            raise ValueError("Unknown Jubilee operation.")
+        done.append(row["id"])
+    return done
+
+
+def _run_hardware(address: str, tool_index: int, *, armed=False, commissioning=None) -> dict:
+    sequence = PROTOCOL_SPEC["operation_plan"]
+    expected = {{"project_id": sequence["project_id"], "revision": sequence["revision"],
+                "plan_sha256": sequence["sha256"], "address": address, "tool_index": tool_index}}
+    if (not armed or sequence["scope"] != "approved" or sequence["hardware_blockers"]
+            or any(r["mode"] != "driver" for r in sequence["operations"])
+            or not isinstance(commissioning, dict)
+            or commissioning.get("commissioning_reviewed") is not True
+            or any(commissioning.get(k) != v for k, v in expected.items())):
+        raise ValueError("Review and arm this revision and its bound controller and tool.")
+    low, high = commissioning.get("pipette_min_ul"), commissioning.get("pipette_max_ul")
+    volumes = [row["parameters"]["volume_ul"] for row in sequence["operations"]]
+    if (type(low) not in (int, float) or type(high) not in (int, float) or not 0 < low <= high
+            or not all(low <= volume <= high for volume in volumes)):
+        raise ValueError("The reviewed pipette range must cover each planned command.")
     from science_jubilee.Machine import Machine
     from science_jubilee.tools.Pipette import Pipette
 
@@ -574,7 +650,7 @@ def _run_hardware(address: str, tool_index: int) -> dict:
     pipette = Pipette.from_config(tool_index, "Pipette", "pipette_config.json")
     machine.load_tool(pipette)
     deck = machine.load_deck("lab_automation_deck.json")
-    tiprack = deck.load_labware("opentrons_96_tiprack_300ul", slot=0)
+    tiprack = deck.load_labware(sequence["bindings"]["pipette"]["limits"]["tiprack"], slot=0)
     source_rack = deck.load_labware(PROTOCOL_SPEC["labware"]["source_rack"], slot=1)
     diluent_res = deck.load_labware(PROTOCOL_SPEC["labware"]["diluent_reservoir"], slot=2)
     dest_plate = deck.load_labware(PROTOCOL_SPEC["labware"]["destination"], slot=3)
@@ -588,18 +664,12 @@ def _run_hardware(address: str, tool_index: int) -> dict:
         return source_rack[well]
 
     machine.pickup_tool(pipette)
-    steps_done = 0
     try:
-        for item in PROTOCOL_SPEC["transfers"]:
-            src = resolve(item["source_role"], item["source_well"])
-            dst = resolve(item["dest_role"], item["dest_well"])
-            pipette.transfer(item["volume_ul"], src, dst, new_tip="always")
-            if item.get("mix_after"):
-                pipette.mix(item.get("mix_volume_ul", item["volume_ul"]), 3, dst)
-            steps_done += 1
+        done = _dispatch(pipette, resolve, sequence)
     finally:
         machine.park_tool()
-    return {{"status": "hardware_completed", "steps_executed": steps_done}}
+    return {{"status": "hardware_completed", "steps_executed": len(done), "operation_ids": done,
+            "plan_sha256": sequence["sha256"]}}
 
 
 def main() -> int:
@@ -612,9 +682,14 @@ def main() -> int:
         action="store_true",
         help="Explicitly confirm physical bench hardware is commissioned and clear",
     )
+    parser.add_argument("--commissioning", help="Reviewed record for this plan, address and tool")
     args = parser.parse_args()
     if args.address and args.arm_hardware and not args.simulate:
-        result = _run_hardware(args.address, args.tool_index)
+        if not args.commissioning:
+            parser.exit(2, "Supply the reviewed commissioning record for this device.\\n")
+        with open(args.commissioning, encoding="utf-8") as stream:
+            reviewed = json.load(stream)
+        result = _run_hardware(args.address, args.tool_index, armed=True, commissioning=reviewed)
     elif args.address and not args.arm_hardware:
         parser.exit(2, "Refusing live Jubilee motion without --arm-hardware confirmation.\\n")
     else:
@@ -629,6 +704,8 @@ if __name__ == "__main__":
     return {
         "platform": "jubilee",
         "filename": "jubilee_protocol.py",
+        "operation_plan": sequence,
+        "tips_required": sum(row["action"] == "transfer" for row in sequence["operations"]),
         "plan": plan,
         "source_code": script,
     }

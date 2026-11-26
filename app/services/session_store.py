@@ -29,6 +29,7 @@ class ProjectSession:
     estimate_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     functional_plan: dict | None = None
     issued_handoff: dict | None = None
+    issued_protocols: list[tuple[int, str, str]] = field(default_factory=list)
 
     @asynccontextmanager
     async def model_lock(self):

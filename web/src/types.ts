@@ -79,15 +79,27 @@ export type ColdTransferExtension = {
 
 export type PlanStep = {
   id: string;
+  source_role?: string;
+  source_volume_ul?: number;
   target: string;
   stock_volume_ul: number;
   diluent_volume_ul: number;
   total_volume_ul: number;
 };
 
+export type OperationSequence = {
+  schema_version: 1; project_id: string; revision: number; platform: string | null;
+  scope: 'approved' | 'illustrative'; sha256: string; hardware_blockers: string[];
+  bindings: Record<string, { component_id: string | null; capability: string; driver: string | null;
+    unit: string | null; limits: Record<string, unknown>; prerequisites: string[] }>;
+  operations: { id: string; binding: string; action: string; mode: 'driver' | 'manual' | 'missing_driver';
+    request_id: string | null; parameters: Record<string, string | number> }[];
+};
+
 export type PlanStatus = 'incomplete' | 'invalid' | 'ready';
 
 export type PreparationPlan = {
+  mode?: 'direct' | 'serial';
   status: PlanStatus;
   message: string;
   stock: string | null;

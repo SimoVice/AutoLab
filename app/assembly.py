@@ -106,7 +106,10 @@ def build_preparation_csv(project: dict) -> bytes:
     writer = csv.writer(buf, quoting=csv.QUOTE_MINIMAL, lineterminator="\n")
     plate = project.get("labware_plate")
     wells = plate["compatibility"]["occupied_wells"] if plate else []
+    serial = (project.get("plan") or {}).get("mode") == "serial"
     header = ["target", "stock_volume_ul", "diluent_volume_ul", "total_volume_ul"]
+    if serial:
+        header.extend(["source_role", "source_well", "source_volume_ul"])
     writer.writerow((["well"] if plate else []) + header)
     plan = project.get("plan") or {}
     for index, step in enumerate(plan.get("steps") or []):
@@ -120,6 +123,14 @@ def build_preparation_csv(project: dict) -> bytes:
                 _csv_cell(str(step.get("diluent_volume_ul", ""))),
                 _csv_cell(str(step.get("total_volume_ul", ""))),
             ]
+            + (
+                [
+                    _csv_cell(str(step.get(k, "")))
+                    for k in ("source_role", "source_well", "source_volume_ul")
+                ]
+                if serial
+                else []
+            )
         )
     return buf.getvalue().encode("utf-8")
 
@@ -493,11 +504,17 @@ STEPS
         plan = project.get("plan") or {}
         wells = project["labware_plate"]["compatibility"]["occupied_wells"]
         rows = []
+        serial = any(s.get("source_role") for s in plan.get("steps", []))
+        source_header = "Source (µL)" if serial else "Stock (µL)"
         for index, step in enumerate(plan.get("steps") or []):
             values = [
                 wells[index] if index < len(wells) else "Unassigned",
                 step.get("target", ""),
-                step.get("stock_volume_ul", ""),
+                (
+                    f"{step['source_volume_ul']} · {step['source_role']}"
+                    if step.get("source_role")
+                    else step.get("stock_volume_ul", "")
+                ),
                 step.get("diluent_volume_ul", ""),
                 step.get("total_volume_ul", ""),
             ]
@@ -508,7 +525,7 @@ STEPS
             '<section class="card"><h2>Well assignments and preparation volumes</h2><p>'
             + html.escape(str(plan.get("message", "")))
             + '</p><div class="table-scroll"><table><thead><tr><th>Well</th><th>Target</th>'
-            "<th>Stock (µL)</th><th>Diluent (µL)</th><th>Total (µL)</th></tr></thead><tbody>"
+            f"<th>{source_header}</th><th>Diluent (µL)</th><th>Total (µL)</th></tr></thead><tbody>"
             + "".join(rows)
             + "</tbody></table></div></section>"
         )
@@ -523,7 +540,17 @@ STEPS
 
 
 def build_preview_source(project: dict) -> bytes:
+    from app.design_workflow import workflow_state
+    from app.operation_plan import selected_platform
+    from app.program_source import build_program
+
     plan = project.get("plan") or {}
+    if (
+        selected_platform(project) in ("jubilee", "opentrons-ot2")
+        and workflow_state(project)["machine_approved"]
+        and plan.get("status") == "ready"
+    ):
+        return build_program(project).encode("utf-8")
     raw_steps = [s for s in (plan.get("steps") or []) if isinstance(s, dict)]
     safe_steps = [
         {
@@ -1021,7 +1048,8 @@ def build_document_files(project: dict, procurement: dict | None = None) -> dict
         == "liquid_preparation"
     ):
         try:
-            from app.opentrons_verifier import verify_opentrons_protocol
+            from app.opentrons_verifier import verify_jubilee_protocol, verify_opentrons_protocol
+            from app.operation_plan import selected_platform
             from app.protocol_generators import (
                 generate_jubilee_protocol,
                 generate_opentrons_protocol,
@@ -1029,7 +1057,15 @@ def build_document_files(project: dict, procurement: dict | None = None) -> dict
 
             ot2 = generate_opentrons_protocol(project)
             jub = generate_jubilee_protocol(project)
-            sim = verify_opentrons_protocol(ot2["source_code"], try_cli=False)
+            selected = jub if selected_platform(project) == "jubilee" else ot2
+            sim = (
+                verify_jubilee_protocol(jub["source_code"])
+                if selected is jub
+                else verify_opentrons_protocol(ot2["source_code"], try_cli=False)
+            )
+            files["automation/operation-plan.json"] = json.dumps(
+                selected["operation_plan"], indent=2, ensure_ascii=False, allow_nan=False
+            ).encode("utf-8")
             files["automation/opentrons_protocol.py"] = ot2["source_code"].encode("utf-8")
             files["automation/jubilee_protocol.py"] = jub["source_code"].encode("utf-8")
             files["automation/protocol-simulation.json"] = json.dumps(

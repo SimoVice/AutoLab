@@ -106,11 +106,11 @@ Two specialized workflows add detail for particular tasks. **Liquid handling**
 connects the workstation, labware, sourcing and pipetting protocol. The **modular
 bench station** supports weighing, label printing, barcode reading and visual
 inspection. Its local runner guides an operator through the selected sequence.
-Before a liquid-handling recipe exists, the supported Jubilee motion preview can
-show a labelled example that is not saved as the user's recipe. After a recipe is
-provided, its own transfers drive the preview and a downloadable `program.py`
-prints the logical schedule locally; it does not control hardware. See the
-[software and protocol guide](docs/software-and-protocols.md).
+In **Software & protocols**, the operation plan links each step to the selected
+device, its limits and its prerequisites. The preview and downloaded program use
+the same order and identify manual work and missing drivers. A Jubilee sequence
+with mapped positions also has 3D playback. The hardware workspace offers an
+illustrative preview before a recipe exists. [Software and protocol guide](docs/software-and-protocols.md).
 
 For a different process, describe what happens in your lab and select **Develop
 functional plan** in the project brief. The resulting specification lists the

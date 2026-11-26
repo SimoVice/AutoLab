@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import json
 import math
+import re
 import shutil
 import subprocess
 import sys
@@ -203,6 +204,9 @@ class _SimProtocolContext:
     instruments: dict[str, _SimInstrumentContext] = field(default_factory=dict)
     comments: list[str] = field(default_factory=list)
 
+    def is_simulating(self) -> bool:
+        return True
+
     def comment(self, msg: str) -> None:
         self.comments.append(str(msg))
 
@@ -370,7 +374,7 @@ def verify_opentrons_protocol(source_code: str, *, try_cli: bool = True) -> dict
     tips_used = sum(inst.tips_picked for inst in ctx.instruments.values())
     total_asp = round(sum(inst.total_aspirated_ul for inst in ctx.instruments.values()), 4)
     total_disp = round(sum(inst.total_dispensed_ul for inst in ctx.instruments.values()), 4)
-    dest_lw = ctx.deck.get("1")
+    dest_lw = ctx.deck.get(str(namespace.get("DESTINATION_SLOT", "1")))
     well_vols = (
         {
             w.label: round(w.current_volume_ul, 4)
@@ -380,6 +384,11 @@ def verify_opentrons_protocol(source_code: str, *, try_cli: bool = True) -> dict
         if dest_lw is not None and not dest_lw.is_tiprack
         else {}
     )
+    markers = [m.groups() for line in ctx.comments
+               if (m := re.fullmatch(r"Operation (op-\d+) (driver|manual|missing_driver)", line))]
+    missing = [key for key, mode in markers if mode == "missing_driver"]
+    if missing:
+        errors.append("Missing device driver for " + ", ".join(missing) + ".")
     verifier_name = "opentrons_simulate" if (cli_result and cli_result["returncode"] == 0) else (
         "autolab_opentrons_api_v2_simulator"
     )
@@ -397,6 +406,10 @@ def verify_opentrons_protocol(source_code: str, *, try_cli: bool = True) -> dict
         "pipettes_loaded": {mount: inst.name for mount, inst in sorted(ctx.instruments.items())},
         "well_final_volumes_ul": well_vols,
         "run_log": ctx.comments,
+        "plan_sha256": namespace.get("PLAN_SHA256"),
+        "operation_ids": [key for key, mode in markers if mode == "driver"],
+        "pending_operations": [key for key, mode in markers if mode != "driver"],
+        "missing_drivers": missing,
         "errors": errors,
         "warnings": warnings,
     }
@@ -426,6 +439,8 @@ def verify_jubilee_protocol(source_code: str) -> dict:
         else:
             try:
                 parsed = json.loads(done.stdout)
+                if missing := parsed.get("missing_drivers"):
+                    errors.append("Missing device driver for " + ", ".join(missing) + ".")
                 if parsed.get("status") != "simulated_ok":
                     errors.append(f"Unexpected simulation status: {parsed.get('status')!r}")
             except json.JSONDecodeError as exc:
@@ -438,6 +453,10 @@ def verify_jubilee_protocol(source_code: str) -> dict:
         "tips_used": int(parsed.get("tips_used", 0) or 0),
         "consumed_ul": parsed.get("consumed_ul", {}),
         "destination_wells": parsed.get("destination_wells", {}),
+        "operation_ids": parsed.get("operation_ids", []),
+        "pending_operations": parsed.get("pending_operations", []),
+        "missing_drivers": parsed.get("missing_drivers", []),
+        "plan_sha256": parsed.get("plan_sha256"),
         "errors": errors,
         "warnings": [],
     }

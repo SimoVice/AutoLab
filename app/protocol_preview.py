@@ -7,6 +7,7 @@ This standalone file uses only the Python standard library.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -69,7 +70,9 @@ def validate_protocol(configuration: dict) -> list[dict]:
         ):
             raise ValueError("Every transfer destination must belong to the bound hardware.")
         values = [
-            transfer.get(key) for key in ("stock_volume_ul", "diluent_volume_ul", "total_volume_ul")
+            transfer.get("source_volume_ul", transfer.get("stock_volume_ul")),
+            transfer.get("diluent_volume_ul"),
+            transfer.get("total_volume_ul"),
         ]
         if not all(
             isinstance(value, (float, int))
@@ -108,6 +111,85 @@ def validate_protocol(configuration: dict) -> list[dict]:
     return transfers
 
 
+def validate_sequence(plan, binding):
+    expected = hashlib.sha256(
+        json.dumps(
+            {k: v for k, v in plan.items() if k != "sha256"},
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode()
+    ).hexdigest()
+    if (
+        expected != plan.get("sha256")
+        or plan.get("schema_version") != 1
+        or plan.get("execution_enabled") is not False
+        or plan.get("platform") != binding["platform"]
+        or plan.get("project_id") != binding.get("lineage_id", binding["project_id"])
+        or plan.get("revision") != binding["project_revision"]
+    ):
+        raise ValueError("The operation plan does not match this protocol revision.")
+    for i, row in enumerate(plan["operations"], 1):
+        if row["id"] != f"op-{i:03d}" or row["binding"] not in plan["bindings"]:
+            raise ValueError("Invalid device binding or operation order.")
+
+
+def simulate_operations(sequence):
+    """Account for the issued driver calls in order, without acquiring any observations."""
+    wells, consumed = {}, {"stock": 0.0, "diluent": 0.0}
+    tips = 0
+    done, pending = [], []
+    for row in sequence["operations"]:
+        if row["mode"] != "driver":
+            pending.append(row["id"])
+            continue
+        action, p = row["action"], row["parameters"]
+        amount = p.get("volume_ul", 0.0)
+        if action == "transfer":
+            tips += int(p["new_tip"] == "always")
+            if p["source_role"] in consumed:
+                consumed[p["source_role"]] += amount
+            if p["dest_role"] == "destination_plate":
+                well = p["dest_well"]
+                wells[well] = wells.get(well, 0.0) + amount
+        elif action == "pick_up_tip":
+            tips += 1
+        elif action == "aspirate" and p["role"] in consumed:
+            consumed[p["role"]] += amount
+        elif action == "dispense" and p["role"] == "destination_plate":
+            well = p["well"]
+            wells[well] = wells.get(well, 0.0) + amount
+        done.append(row["id"])
+    return {
+        "operation_ids": done,
+        "pending_operations": pending,
+        "missing_drivers": [
+            r["id"] for r in sequence["operations"] if r["mode"] == "missing_driver"
+        ],
+        "steps_executed": len(done),
+        "tips_used": tips,
+        "consumed_ul": {k: round(v, 4) for k, v in consumed.items()},
+        "destination_wells": {k: round(v, 4) for k, v in wells.items()},
+        "plan_sha256": sequence["sha256"],
+    }
+
+
+def describe_operation(row):
+    args = row["parameters"]
+    action = row["action"].replace("_", " ")
+    if row["action"] == "transfer":
+        return (
+            f"Transfer {args['volume_ul']:g} uL from {args['source_role']}/{args['source_well']} "
+            f"to {args['dest_role']}/{args['dest_well']} (fresh tip)"
+        )
+    amount = f" {args['volume_ul']:g} uL" if "volume_ul" in args else ""
+    role = args.get("role") or args.get("dest_role")
+    well = args.get("well") or args.get("dest_well")
+    location = f" at {role}/{well}" if role else ""
+    cycles = f" × {args['repetitions']}" if "repetitions" in args else ""
+    return f"{action}{amount}{location}{cycles}"
+
+
 def render_preview(configuration: dict) -> str:
     """Return a logical stock/diluent schedule without actuator instructions."""
     transfers = validate_protocol(configuration)
@@ -118,12 +200,23 @@ def render_preview(configuration: dict) -> str:
         f"· platform {binding['platform']}",
         "Physical source positions, tool offsets and dispensing settings remain unresolved.",
     ]
+    sequence = configuration.get("operation_plan")
+    if sequence:
+        validate_sequence(sequence, binding)
+        lines.append(f"Device operation plan {sequence['sha256']}")
+        for row in sequence["operations"]:
+            lines.append(
+                f"{row['id']} · {row['binding']} · {row['mode']} · {describe_operation(row)}"
+            )
+        lines.append("Destination totals")
     for index, transfer in enumerate(transfers, 1):
         destination = transfer["destination_component_id"]
         if transfer.get("destination_well"):
             destination += "/" + transfer["destination_well"]
+        source = transfer.get("source_role", "stock")
+        amount = transfer.get("source_volume_ul", transfer["stock_volume_ul"])
         lines.append(
-            f"{index}. {destination}: stock {transfer['stock_volume_ul']:g} uL + "
+            f"{index}. {destination}: {source} {amount:g} uL + "
             f"diluent {transfer['diluent_volume_ul']:g} uL = "
             f"{transfer['total_volume_ul']:g} uL; target {transfer.get('target', 'unspecified')}"
         )

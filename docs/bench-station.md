@@ -78,6 +78,21 @@ has completed, that record retains the label path, hash and physical confirmatio
 status. Inspect its status and pending event before treating any sequence as
 complete. Dry-run mode does not create a label or request physical confirmation.
 
+## Match a record to its instruments
+
+In **Software & protocols**, open **Operating sequence** for the ordered IDs,
+driver names, units and prerequisites. Download the operation plan to compare
+it with the `operation_plan` inside `plan.json`. An offline dry run lists the
+same checkpoints. A recorded run attaches each observation to its operation ID
+and distinguishes instrument input from operator entry.
+
+Using a serial port requires `--arm-hardware` and `--commissioning FILE`. The
+reviewed JSON record must supply `commissioning_reviewed`, `project_id`,
+`revision` and `plan_sha256` for the approved plan. Under `devices`, each serial
+capability such as `weigh` needs its installed `component_id` and `port`. A
+missing driver is reported before collection begins. A visual inspection remains
+an operator checkpoint.
+
 ## Engineering limits
 
 The SVG is a dimensioned planning drawing; there is no fabrication STEP/STL

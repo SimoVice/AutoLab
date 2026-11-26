@@ -184,12 +184,15 @@ def test_two_clients_cannot_publish_over_a_changed_revision(monkeypatch):
 
 
 def test_actual_downloaded_controller_runs_configured_gateway_cli(client, gateway, tmp_path):
-    project = project_fixture()
+    from app.design_workflow import approve_machine
+
+    project = approve_machine(project_fixture())
     url = install(project)
     data = download_bundle(client, url, project["revision"], tmp_path)
     config, records, faults = gateway
     configured = deepcopy(config)
-    configured.update(project_id=data["project_id"], revision=data["revision"])
+    configured.update(project_id=data["project_id"], revision=data["revision"],
+                      plan_sha256=data["operation_plan"]["sha256"])
     configured["actions"] = {
         step["name"]: {"action": "test_record_only", "parameters": {"index": index}}
         for index, step in enumerate(data["design"]["steps"])

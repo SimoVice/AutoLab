@@ -166,6 +166,11 @@ class HttpGatewayAdapter:
             or not self.config["device_id"].strip()
         ):
             raise ValueError("Specify the commissioned device identity.")
+        if (
+            "operation_plan" in project
+            and self.config.get("plan_sha256") != project["operation_plan"]["sha256"]
+        ):
+            raise ValueError("Review the device mapping for this operation plan.")
         actions = self.config.get("actions")
         step_names = [step["name"] for step in project["design"]["steps"]]
         if (
@@ -363,17 +368,57 @@ def run_sequence(
     simulation = isinstance(device, SimulationAdapter)
     if not simulation and not commissioned:
         raise ValueError("Review and commission the device integration before enabling hardware.")
+    sequence = project.get("operation_plan")
+    steps = project["design"]["steps"]
+    rows = sequence["operations"] if sequence else []
+    if sequence:
+        import hashlib
+
+        data = {k: v for k, v in sequence.items() if k != "sha256"}
+        digest = hashlib.sha256(
+            json.dumps(data, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+        ).hexdigest()
+        native = [r for r in rows if "step_index" in r["parameters"]]
+        if (
+            sequence["revision"] != project["revision"]
+            or sequence["sha256"] != digest
+            or sequence["project_id"] != (project.get("lineage_id") or project["project_id"])
+            or [r["parameters"]["step_index"] for r in native] != list(range(len(steps)))
+            or [r["action"] for r in native] != [step["name"] for step in steps]
+        ):
+            raise ValueError("The device sequence must match the issued steps and revision.")
+        if not simulation and (
+            sequence["scope"] != "approved"
+            or len(native) != len(rows)
+            or any(row["mode"] == "manual" for row in native)
+            or (
+                any(row["mode"] == "missing_driver" for row in native)
+                and not isinstance(device, HttpGatewayAdapter)
+            )
+        ):
+            raise ValueError("Resolve manual checkpoints and device bindings before hardware use.")
     events = []
     try:
         device.prepare(project)
-        for step in project["design"]["steps"]:
-            events.append(device.perform(step))
+        if sequence:
+            for row in rows:
+                index = row["parameters"].get("step_index")
+                event = (
+                    device.perform(steps[index])
+                    if index is not None
+                    else {"step": row["action"], "status": row["mode"]}
+                )
+                events.append({**event, "operation_id": row["id"], "binding_status": row["mode"]})
+        else:
+            for step in steps:
+                events.append(device.perform(step))
     finally:
         device.stop()
     return {
         "project_id": project["project_id"],
         "revision": project["revision"],
         "mode": "simulation" if simulation else "external_device_adapter",
+        **({"plan_sha256": sequence["sha256"]} if sequence else {}),
         "events": events,
     }
 

@@ -94,8 +94,12 @@ def test_standalone_and_zip_export_supplier_packs_and_declared_ranges_separately
                 for key, value in archived[name].items()
                 if key != "Price record exported at"
             }
+        from app.operation_plan import custom_operation_plan
+
         state = json.loads(archive.read("project.json"))
         assert state == {
+            "operation_plan": custom_operation_plan(project),
+            "lineage_id": project["id"],
             "project_id": project["id"],
             "revision": project["revision"],
             "design": project["concept_design"],

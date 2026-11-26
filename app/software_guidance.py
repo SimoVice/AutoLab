@@ -161,6 +161,11 @@ def build_software_guidance(project: dict) -> dict:
             "destination_component_id": step.get("destination_component_id", "sample-rack"),
             "destination_well": step.get("well_name"),
             "stock_volume_ul": step.get("stock_volume_ul"),
+            **(
+                {k: step[k] for k in ("source_volume_ul", "source_role", "source_well")}
+                if "source_volume_ul" in step
+                else {}
+            ),
             "diluent_volume_ul": step.get("diluent_volume_ul"),
             "total_volume_ul": step.get("total_volume_ul"),
         }
@@ -239,6 +244,26 @@ def build_software_guidance(project: dict) -> dict:
         ],
         "limits": limitations,
     }
+    if route in ("jubilee", "opentrons-ot2") and project.get("machine_approval"):
+        from app.operation_plan import project_operation_plan
+
+        try:
+            sequence = project_operation_plan(project)
+        except ValueError as exc:
+            template["operation_plan_issue"] = str(exc)
+        else:
+            template["operation_plan"] = sequence
+            template["binding"]["lineage_id"] = sequence["project_id"]
+    from app.design_workflow import workflow_state
+
+    if workflow_state(project)["machine_approved"] and route in ("jubilee", "opentrons-ot2"):
+        from app.operation_plan import project_operation_plan
+
+        try:
+            template["operation_plan"] = project_operation_plan(project)
+            binding["lineage_id"] = project.get("lineage_id") or project["id"]
+        except ValueError as exc:
+            template["operation_plan_error"] = str(exc)
     if project.get("cold_transfer_extension"):
         limitations.extend(project["cold_transfer_extension"]["limitations"])
         authoring.append("Treat cold transfer as a separate uncommissioned subsystem: "

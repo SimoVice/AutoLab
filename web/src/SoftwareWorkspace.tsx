@@ -4,9 +4,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import Scene from './Scene';
 import OperatingPreview from './OperatingPreview';
+import OperationSequenceView from './OperationSequenceView';
 import { compileMotionPlan } from './motionPlan';
 import type { MotionMode } from './motionPlan';
-import type { Project } from './types';
+import type { OperationSequence, Project } from './types';
 import AssistantMessage from './AssistantMessage';
 import './software-workspace.css';
 
@@ -21,6 +22,7 @@ type ProtocolFormat = 'program' | 'opentrons' | 'jubilee';
 type ProtocolSimulation = {
   platform: string;
   filename: string;
+  operation_plan?: OperationSequence;
   plan?: { mode?: string; target_count?: number; intermediate_steps?: unknown[]; totals?: { tips_saved?: number; multi_dispense_tips?: number } };
   simulation?: { ok: boolean; verifier: string; steps_executed?: number; tips_used?: number; errors?: string[]; warnings?: string[] };
 };
@@ -48,7 +50,10 @@ export default function SoftwareWorkspace({ project, onProject, onConversation }
   const [speed, setSpeed] = useState(1);
   const clock = useRef(0);
   const requestEpoch = useRef(0);
-  const plan = useMemo(() => compileMotionPlan(project, mode), [project, mode]);
+  const [sequenceState, setSequenceState] = useState<{ url: string; plan?: OperationSequence; error?: string }>();
+  const sequenceUrl = `/api/projects/${encodeURIComponent(project.id)}/software/operations?revision=${project.revision}`;
+  const sequence = sequenceState?.url === sequenceUrl ? sequenceState.plan : undefined;
+  const plan = useMemo(() => compileMotionPlan(project, mode, sequence ?? null), [project, mode, sequence]);
   const key = `${project.id}:${project.revision}:${plan.mode}:${plan.scope}`;
   const dirty = stock !== (project.summary.stock_concentration ?? '')
     || targets !== (project.summary.target_concentrations ?? '')
@@ -59,6 +64,19 @@ export default function SoftwareWorkspace({ project, onProject, onConversation }
   const download = `${base}/instructions/download?revision=${project.revision}`;
   const platform = project.design.platform?.label
     ?? (project.design.foundation ? 'Jubilee' : 'Custom workstation');
+  useEffect(() => {
+    if (liquid && !ready) return;
+    const controller = new AbortController();
+    fetch(sequenceUrl, { signal: controller.signal }).then(async response => {
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || 'Cannot load the operation plan.');
+      if (!controller.signal.aborted) setSequenceState({ url: sequenceUrl, plan: data });
+    }).catch(reason => {
+      if (!controller.signal.aborted) setSequenceState({ url: sequenceUrl, error: reason.message });
+    });
+    return () => controller.abort();
+  }, [sequenceUrl, ready, liquid]);
+
   useEffect(() => {
     setStock(project.summary.stock_concentration ?? '');
     setTargets(project.summary.target_concentrations ?? '');
@@ -112,11 +130,19 @@ export default function SoftwareWorkspace({ project, onProject, onConversation }
     return () => controller.abort();
   }, [download, ready, codeFormat]);
 
+  const simEpoch = useRef(0);
+  useEffect(() => {
+    simEpoch.current += 1;
+    setSimBusy(false);
+    return () => { simEpoch.current += 1; };
+  }, [sequenceUrl, codeFormat]);
+
   async function runSimulateCheck() {
+    const epoch = ++simEpoch.current;
     setSimBusy(true);
     setSimError('');
     try {
-      const targetPlatform = codeFormat === 'jubilee' ? 'jubilee' : 'opentrons-ot2';
+      const targetPlatform = codeFormat === 'program' ? 'auto' : codeFormat === 'jubilee' ? 'jubilee' : 'opentrons-ot2';
       const response = await fetch(`${base}/software/protocol`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -131,11 +157,11 @@ export default function SoftwareWorkspace({ project, onProject, onConversation }
       if (!response.ok) {
         throw new Error(typeof data.detail === 'string' ? data.detail : 'Protocol simulation failed.');
       }
-      setSimResult(data as ProtocolSimulation);
+      if (epoch === simEpoch.current) setSimResult(data as ProtocolSimulation);
     } catch (reason) {
-      setSimError(reason instanceof Error ? reason.message : 'Simulation failed.');
+      if (epoch === simEpoch.current) setSimError(reason instanceof Error ? reason.message : 'Simulation failed.');
     } finally {
-      setSimBusy(false);
+      if (epoch === simEpoch.current) setSimBusy(false);
     }
   }
 
@@ -224,6 +250,9 @@ export default function SoftwareWorkspace({ project, onProject, onConversation }
     setTime(0);
   }
 
+  const operationDetails = sequence ? <OperationSequenceView sequence={sequence} href={sequenceUrl} />
+    : <p role="status">{sequenceState?.url === sequenceUrl && sequenceState.error || 'Loading the operation plan…'}</p>;
+
   return (
     <main className="software-workspace" aria-labelledby="software-title">
       <div className="software-heading">
@@ -258,7 +287,7 @@ export default function SoftwareWorkspace({ project, onProject, onConversation }
         </div>
         <div>
           <span>Project binding</span>
-          <strong>Revision {project.revision} · approved hardware</strong>
+          <strong>Revision {project.revision} · approved design</strong>
         </div>
       </div>
 
@@ -409,7 +438,7 @@ export default function SoftwareWorkspace({ project, onProject, onConversation }
                     <thead>
                       <tr>
                         <th>Target</th>
-                        <th>Stock (µL)</th>
+                        <th>{project.plan?.mode === 'serial' ? 'Source (µL)' : 'Stock (µL)'}</th>
                         <th>Diluent (µL)</th>
                         <th>Total (µL)</th>
                       </tr>
@@ -418,7 +447,7 @@ export default function SoftwareWorkspace({ project, onProject, onConversation }
                       {project.plan?.steps.map(step => (
                         <tr key={step.id}>
                           <th scope="row">{step.target}</th>
-                          <td>{number(step.stock_volume_ul)}</td>
+                          <td>{number(step.source_volume_ul ?? step.stock_volume_ul)}{step.source_role && ` · ${step.source_role.replaceAll('_', ' ')}`}</td>
                           <td>{number(step.diluent_volume_ul)}</td>
                           <td>{number(step.total_volume_ul)}</td>
                         </tr>
@@ -426,17 +455,7 @@ export default function SoftwareWorkspace({ project, onProject, onConversation }
                     </tbody>
                   </table>
                 </div>
-                <ol className="software-operations">
-                  <li>
-                    Load stock, diluent, tips and destination labware at their assigned locations.
-                  </li>
-                  <li>For each destination, transfer its calculated stock and diluent volumes.</li>
-                  <li>Discard used tips and review the prepared destinations.</li>
-                </ol>
-                <p className="software-scope">
-                  Logical transfer schedule. Pipette configuration, calibration and robot
-                  integration require review.
-                </p>
+                {operationDetails}
               </>
             ) : (
               <div className="software-code">
@@ -453,6 +472,8 @@ export default function SoftwareWorkspace({ project, onProject, onConversation }
                 {simError && <p className="software-error" role="alert">{simError}</p>}
                 {simResult?.simulation && (
                   <div className={`software-sim-badge ${simResult.simulation.ok ? 'is-ok' : 'is-fail'}`} role="status">
+                    {simResult.operation_plan?.scope === 'illustrative' && <p>Illustrative configuration</p>}
+                    {simResult.operation_plan?.hardware_blockers.map(reason => <p key={reason}>{reason}</p>)}
                     <strong>{simResult.simulation.ok ? 'Simulation PASSED' : 'Simulation FAILED'}</strong>
                     <span>
                       {' '}· {simResult.simulation.verifier} · {simResult.simulation.steps_executed ?? 0} steps ·{' '}
@@ -562,6 +583,7 @@ export default function SoftwareWorkspace({ project, onProject, onConversation }
           </section>
         ) : (
           <div className="software-general-program">
+            {operationDetails}
             {project.concept_design ? (
               <ConceptWorkspace
                 panel="software"
