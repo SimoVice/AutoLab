@@ -461,6 +461,32 @@ def _inventory_stated(quote, ctx):
     )
 
 
+_THREAD_FIELD = re.compile(
+    r"(?:^|_)(?:thread|screw|bolt|fastener)_(?P<dimension>(?:(?:nominal|major)_)?diameter|pitch)"
+    r"(?:_mm)?$"
+)
+_METRIC_THREAD = re.compile(
+    r"(?<!\w)M(?P<diameter>\d+(?:[.,]\d+)?)\s*[xX×]\s*(?P<pitch>\d+(?:[.,]\d+)?)"
+    r"(?!\w|[.,]\d)"
+)
+
+
+def _metric_thread_matches(measurement):
+    """Read the nominal diameter and explicit pitch of one metric thread in a user's quote."""
+    field = _THREAD_FIELD.search(measurement.key)
+    if not field:
+        return None
+    designations = {match.groups() for match in _METRIC_THREAD.finditer(measurement.quote)}
+    if not designations:
+        return None
+    if len(designations) != 1 or measurement.unit != "mm":
+        return False
+    diameter, pitch = (v.replace(",", ".") for v in designations.pop())
+    expected = pitch if field["dimension"] == "pitch" else diameter
+    value = _number(measurement.value.replace(",", "."))
+    return _number(diameter) > 0 and _number(pitch) > 0 and value == _number(expected)
+
+
 def _validate_measurements(measurements, previous, ctx):
     statements = [ctx.user_message, *(h["content"] for h in ctx.history if h["role"] == "user")]
     for m in measurements:
@@ -468,6 +494,11 @@ def _validate_measurements(measurements, previous, ctx):
             continue
         if not any(m.quote in s and _affirmative(m.quote, s) for s in statements):
             raise ValueError("Quote the user's affirmative measurement verbatim.")
+        thread_match = _metric_thread_matches(m)
+        if thread_match is False:
+            raise ValueError(f"Quote one metric thread and record its stated {m.key} in mm.")
+        if thread_match:
+            continue
         if _stated_value(m, m.quote):
             continue
         # A trailing unit applies to every member of a dimension tuple such as 12 × 8 × 20 mm.
@@ -652,8 +683,8 @@ def choose_route(args, ctx):
     terms = {
         "reuse": ("reuse", "riuso", "riusa", "riutilizza"),
         "buy": ("buy", "acquista", "acquisto"),
-        "fabricate": ("fabricate", "print", "printed", "fabbrica", "fabbricazione",
-                      "stampa", "stampato", "stampata"),
+        "fabricate": ("fabricate", "fabrication", "print", "printed", "printable", "fabbrica",
+                      "fabbricazione", "stampa", "stampato", "stampata", "stampabile"),
     }
 
     def names_for(index, opt):

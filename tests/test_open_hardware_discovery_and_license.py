@@ -294,3 +294,23 @@ def test_license_scope_follows_the_asset_path():
     assert scoped_license_path(paths, "electrical/board.stl") == "LICENSE"
     assert scoped_license_path(paths[:2], "parts/base.step") is None
     assert scoped_license_path(["COPYING-MIT", "COPYING-GPL"]) is None
+
+
+@pytest.mark.parametrize("stage", ["commit", "files"])
+def test_repository_inspection_denial_is_reported_with_empty_cad_results(stage):
+    def handler(request):
+        if request.url.path == "/search/repositories":
+            return httpx.Response(200, json={"items": [{"full_name": "fixture/stand"}]})
+        if "/commits/" in request.url.path and stage != "commit":
+            return httpx.Response(200, json={"sha": "a" * 40})
+        return httpx.Response(403, json={"message": "Access denied."})
+
+    async def search():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await discover_open_hardware("mounting arm", sources=["github"], client=client)
+
+    report = asyncio.run(search())
+    assert not report["candidates"]
+    assert any(
+        stage in w and "fixture/stand" in w and "403" in w for w in report["source_warnings"]
+    )

@@ -106,6 +106,33 @@ def context(tmp_path, monkeypatch):
     return ToolContext(project, OWNED)
 
 
+def test_explicit_printable_preference_resolves_one_available_route(context):
+    context.user_message = f"{OWNED}. {THICKNESS}."
+    assert run(context, "compare_design_routes", **coupon_options(4)).ok
+    context.user_message = "I choose the printable option."
+    result = run(context, "choose_design_route", key="keyed-tray", user_quote=context.user_message)
+    assert result.ok and context.project["design_plan"]["decision"]["key"] == "keyed-tray"
+
+
+def test_route_preserves_declared_metric_thread_dimensions(context):
+    quote = "Use an M12 × 1,5 thread for this interface."
+    context.user_message = f"{OWNED}. {quote}"
+    options = coupon_options()
+    measurements = [
+        dict(key="mount_thread_diameter_mm", value="12", unit="mm", quote=quote),
+        dict(key="mount_thread_pitch_mm", value="1.5", unit="mm", quote=quote),
+    ]
+    options["options"][2]["measurements"] = measurements
+    assert run(context, "compare_design_routes", **options).ok
+    saved, _ = restore_snapshot(make_snapshot(context.project, []))
+    assert saved["design_plan"]["options"][2]["measurements"] == measurements
+    before = deepcopy(context.project)
+    for changes in ({"value": "12"}, {"unit": "in"}, {"key": "stem_diameter_mm"}):
+        options["options"][2]["measurements"] = [measurements[0], {**measurements[1], **changes}]
+        assert not run(context, "compare_design_routes", **options).ok
+        assert context.project == before
+
+
 @pytest.mark.parametrize(
     ("quote", "fields", "unit", "expected"),
     [

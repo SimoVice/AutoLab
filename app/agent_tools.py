@@ -2383,6 +2383,8 @@ async def _tool_discover_open_hardware_projects(
         f"Discovered {len(compact_candidates)} open-source hardware candidate(s) for "
         f"'{args.query}'."
     )
+    if res.get("source_warnings"):
+        summary += " Search coverage is incomplete. See the source warnings."
     return ToolResult(
         tool="discover_open_hardware_projects",
         ok=True,

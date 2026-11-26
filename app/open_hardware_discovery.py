@@ -323,7 +323,7 @@ def rank_discovery_candidates(query: str, candidates: list[dict[str, Any]]) -> l
 
 
 async def _inspect_github_repo(
-    client: httpx.AsyncClient, repo: dict[str, Any], query: str
+    client: httpx.AsyncClient, repo: dict[str, Any], query: str, warnings: list[str]
 ) -> dict[str, Any] | None:
     full_name = repo.get("full_name")
     branch = repo.get("default_branch") or "main"
@@ -336,6 +336,7 @@ async def _inspect_github_repo(
         is_github=True,
     )
     if status != 200 or not isinstance(commit_body, dict) or not commit_body.get("sha"):
+        warnings.append(f"GitHub could not verify the commit for {full_name} (HTTP {status}).")
         return None
     commit_sha = str(commit_body["sha"])
 
@@ -352,6 +353,10 @@ async def _inspect_github_repo(
             for e in (tree_body.get("tree") or [])
             if isinstance(e, dict) and e.get("type") == "blob" and isinstance(e.get("path"), str)
         ]
+        if tree_body.get("truncated"):
+            warnings.append(f"GitHub returned a partial file list for {full_name}.")
+    else:
+        warnings.append(f"GitHub could not inspect the files in {full_name} (HTTP {t_status}).")
     classified = _classify_repo_paths(tree_paths, query)
 
     lic_meta = repo.get("license") or {}
@@ -417,17 +422,23 @@ async def search_github_open_hardware(
 
     items = [r for r in (data.get("items") or []) if isinstance(r, dict)][:max_candidates]
     results = await asyncio.gather(
-        *(_inspect_github_repo(client, repo, query) for repo in items), return_exceptions=True
+        *(_inspect_github_repo(client, repo, query, warnings) for repo in items),
+        return_exceptions=True,
     )
-    out: list[dict[str, Any]] = []
+    return _inspection_results("GitHub", results, warnings)
+
+
+def _inspection_results(provider, results, warnings):
     for res in results:
-        if isinstance(res, dict):
-            out.append(res)
-    return out
+        if isinstance(res, Exception):
+            warning = f"{provider} repository inspection was incomplete ({type(res).__name__})."
+            if warning not in warnings:
+                warnings.append(warning)
+    return [r for r in results if isinstance(r, dict)]
 
 
 async def _inspect_gitlab_project(
-    client: httpx.AsyncClient, proj: dict[str, Any], query: str
+    client: httpx.AsyncClient, proj: dict[str, Any], query: str, warnings: list[str]
 ) -> dict[str, Any] | None:
     full_name = proj.get("path_with_namespace")
     proj_id = proj.get("id")
@@ -440,6 +451,7 @@ async def _inspect_gitlab_project(
         f"https://gitlab.com/api/v4/projects/{enc_id}/repository/commits/{quote(branch, safe='')}",
     )
     if c_status != 200 or not isinstance(commit_body, dict) or not commit_body.get("id"):
+        warnings.append(f"GitLab could not verify the commit for {full_name} (HTTP {c_status}).")
         return None
     commit_sha = str(commit_body["id"])
 
@@ -455,6 +467,10 @@ async def _inspect_gitlab_project(
             for e in tree_body
             if isinstance(e, dict) and e.get("type") == "blob" and isinstance(e.get("path"), str)
         ]
+        if len(tree_body) == 100:
+            warnings.append(f"GitLab file inspection for {full_name} covered the first 100 items.")
+    else:
+        warnings.append(f"GitLab could not inspect the files in {full_name} (HTTP {t_status}).")
     classified = _classify_repo_paths(tree_paths, query)
     license_obj = proj.get("license") or {}
     spdx_hint = license_obj.get("key") if isinstance(license_obj, dict) else None
@@ -512,9 +528,10 @@ async def search_gitlab_open_hardware(
         return []
     projects = [p for p in data if isinstance(p, dict)][:max_candidates]
     results = await asyncio.gather(
-        *(_inspect_gitlab_project(client, p, query) for p in projects), return_exceptions=True
+        *(_inspect_gitlab_project(client, p, query, warnings) for p in projects),
+        return_exceptions=True,
     )
-    return [r for r in results if isinstance(r, dict)]
+    return _inspection_results("GitLab", results, warnings)
 
 
 async def search_openalex_hardware_literature(
