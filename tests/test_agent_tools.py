@@ -71,6 +71,7 @@ def test_openai_tool_schemas_are_strict_and_complete():
     assert names == [
         "load_tools",
         "compare_design_routes",
+        "configure_threaded_mount",
         "choose_design_route",
         "inspect_project_state",
         "check_spatial_fit",

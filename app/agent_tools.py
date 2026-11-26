@@ -38,6 +38,7 @@ from app.spatial_fit import (
     format_spatial_violations,
     refresh_spatial_fit,
 )
+from app.threaded_mount import BODY, CATALOG, SCREW, MountDimensions, MountSpec
 from app.tip_racks import (
     PREVIOUS_ID as TIP_PREVIOUS_ID,
 )
@@ -423,6 +424,11 @@ _TOOL_SPECS: list[tuple[str, str, type[BaseModel]]] = [
      "values, bench:<operation>, platform:<id>, or catalog:<id>. Use inventory_quote for owned "
      "equipment, blocker for an unavailable route and measurement_question for a deciding unknown.",
      design_routes.CompareRoutes),
+    ("configure_threaded_mount",
+     "Fit or revise a detailed open-catalog ISO 4762 screw in a split shaft/stem support. "
+     "Use the measured stem diameter and the user's requested metric thread diameter and pitch. "
+     "This makes an exportable local mounting interface; the full stand height may remain open.",
+     MountDimensions),
     ("choose_design_route", "Record one explicitly chosen option and any new measurements. "
      "Set make_passive_fixture to build a freestanding locating base or holder in this call. "
      "Other options expose their implementation tool.", design_routes.ChooseRoute),
@@ -669,6 +675,8 @@ def planning_tool_schemas(ctx: ToolContext) -> list[dict[str, Any]]:
         "lookup_reviewed_references", "discover_open_hardware_projects", "compare_design_routes",
     }
     plan = ctx.project.get("design_plan") or {}
+    if (ctx.project.get("workflow") or {}).get("kind") == "general" or plan.get("options"):
+        names.add("configure_threaded_mount")
     if plan.get("options"):
         names.add("choose_design_route")
         selected = (plan.get("decision") or {}).get("key")
@@ -777,6 +785,8 @@ def _compact_project_state(project: dict, lab_profile: dict | None) -> dict[str,
             "footprint_mm": concept.get("footprint_mm"),
             "bounds_mm": concept.get("bounds_mm"),
             "components": [c.get("key") for c in concept.get("components", [])],
+            **({"threaded_mount": concept["proposal"]["threaded_mount"]}
+               if (concept.get("proposal") or {}).get("threaded_mount") else {}),
         }
     if sf := project.get("standalone_fixture"):
         compact["standalone_fixture"] = {
@@ -2021,6 +2031,66 @@ async def _tool_develop_custom_equipment(
     )
 
 
+async def _tool_threaded_mount(args: MountDimensions, ctx: ToolContext) -> ToolResult:
+    from starlette.concurrency import run_in_threadpool
+
+    from app.concept_agent import attach_concept
+    from app.concept_design import compile_concept
+    from app.threaded_mount import build_mount
+
+    tool = "configure_threaded_mount"
+    args = MountSpec(**args.model_dump())
+    old = ctx.project
+    design = old.get("concept_design") or {}
+    prior = (design.get("proposal") or {}).get("threaded_mount")
+    if (any(old.get(k) for k in ("standalone_fixture", "bench_station", "engineering_design",
+                                 "upstream_project", "cad_instances"))
+            or state_for(old).get("selected_platform_id")
+            or (old.get("workflow") or {}).get("kind") == "liquid_preparation"
+            or design and (not prior or {c["key"] for c in design["components"]} != {BODY, SCREW})):
+        return _fail(tool, "inspecting", "An existing assembly requires an explicit mating frame.")
+    if not design_routes.explicitly_requested_thread(
+            ctx.user_message, args.thread_diameter_mm, args.thread_pitch_mm):
+        return _fail(tool, "inspecting", "Use the metric thread requested in the current message.")
+    options = (old.get("design_plan") or {}).get("options", [])
+    recorded = {float(m["value"].replace(",", ".")) for opt in options
+                for m in opt["measurements"] if m["unit"] == "mm"
+                and re.search(r"(?:stem|shaft|rod).*diameter", m["key"])
+                and re.fullmatch(r"\d+(?:[.,]\d+)?", m["value"])}
+    if prior:
+        recorded = {prior["stem_diameter_mm"]}
+    if recorded and recorded != {args.stem_diameter_mm}:
+        return _fail(tool, "inspecting", "The mounting stem must match the saved measurement.")
+    if not recorded:
+        printed = re.escape(f"{args.stem_diameter_mm:g}").replace(r"\.", "[.,]")
+        diameter = printed + (r"(?:[.,]0+)?" if args.stem_diameter_mm.is_integer() else "0*")
+        stem = r"(?:stem|shaft|rod|gambo|stelo|albero)"
+        measurement = rf"(?<![\d.,]){diameter}\s*mm\b"
+        if not re.search(rf"{stem}\b[^.;\n]{{0,32}}{measurement}|"
+                         rf"{measurement}[^.;\n]{{0,24}}\b{stem}", ctx.user_message, re.I):
+            return _fail(tool, "inspecting", "Provide the measured stem diameter in millimetres.")
+    summary = old.get("summary") or {}
+    design = compile_concept(args.proposal(), summary.get("workspace_width_mm"),
+                             summary.get("workspace_depth_mm"), summary.get("workspace_height_mm"))
+    try:
+        await run_in_threadpool(build_mount, args)
+    except ImportError:
+        return _fail(tool, "inspecting", "Install the CAD extra to build threaded parts.")
+    updated = attach_concept(old, apply_update(old, {"workflow_kind": "general"}), design)
+    refresh_spatial_fit(updated)
+    changed = updated != old
+    ctx.project = updated
+    ctx.mutated |= changed
+    message = (f"Fitted the detailed {args.designation} × 20 mm catalog screw and matching tapped "
+               f"clamp for the {args.stem_diameter_mm:g} mm stem. STEP and STL are in Assembly.")
+    run = {"kind": tool, "status": "accepted", "message": message}
+    ctx.action_runs.append(run)
+    return ToolResult(tool=tool, ok=True, stage="designing", mutated=changed, summary=message,
+                      action_run=run, data={"first_cad": {"revision": updated["revision"],
+                                                         "formats": ["STEP", "STL"]},
+                                            "source": CATALOG, "scope": "stem mounting interface"})
+
+
 def _tool_approve_machine(args: ApproveMachineArgs, ctx: ToolContext) -> ToolResult:
     from app.design_workflow import approve_machine, has_machine
 
@@ -3133,6 +3203,7 @@ def _tool_build_hardware_commissioning_pack(
 
 
 _DISPATCH: dict[str, tuple[type[BaseModel], Any, bool]] = {
+    "configure_threaded_mount": (MountDimensions, _tool_threaded_mount, True),
     "load_tools": (LoadToolsArgs, _tool_load_tools, False),
     "inspect_project_state": (InspectProjectStateArgs, _tool_inspect_project_state, False),
     "check_spatial_fit": (CheckSpatialFitArgs, _tool_check_spatial_fit, False),

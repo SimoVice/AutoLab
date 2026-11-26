@@ -471,6 +471,16 @@ _METRIC_THREAD = re.compile(
 )
 
 
+def explicitly_requested_thread(message, diameter, pitch):
+    from app.part_choices import _affirmative
+
+    return any(
+        tuple(float(n.replace(",", ".")) for n in match.groups()) == (diameter, pitch)
+        and _affirmative(match.group(), message)
+        for match in _METRIC_THREAD.finditer(message)
+    )
+
+
 def _metric_thread_matches(measurement):
     """Read the nominal diameter and explicit pitch of one metric thread in a user's quote."""
     field = _THREAD_FIELD.search(measurement.key)

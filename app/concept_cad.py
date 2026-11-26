@@ -50,7 +50,9 @@ def concept_step_with_metrics(
         raise ValueError(f'STEP export supports up to {MAX_STEP_PRIMITIVES} primitives per file.')
     # Only geometry and component names affect this output, not user history or prices.
     data = [{'key': c['key'], 'name': c['name'], 'position_mm': c['position_mm'],
-             'primitives': c['primitives']} for c in components]
+             'primitives': c['primitives'],
+             **({'threaded_mount': c['threaded_mount']} if c.get('threaded_mount') else {})}
+            for c in components]
     encoded = json.dumps(data, sort_keys=True, separators=(',', ':'))
     ck = cache_key(
         _CACHE_NAMESPACE,
@@ -344,6 +346,16 @@ def _primitive_solid(primitive: dict, offset: list[float]):
 
 
 def _component_body(component, world_coordinates):
+    if recipe := component.get('threaded_mount'):
+        from app.threaded_mount import component_body
+        try:
+            body = component_body(recipe, component['key'])
+        except ImportError as exc:
+            raise ConceptCADUnavailable('Threaded models require the CAD installation.') from exc
+        if world_coordinates:
+            body = body.translate(component['position_mm'])
+        body.label = component['name']
+        return body
     from build123d import Compound
 
     parts = []

@@ -29,11 +29,19 @@ asttokens==3.0.2 \
 bd-materials==0.2.5 \
     --hash=sha256:a08fa367c460ed7bfedaf8bdf57c91d93ef87dd5e3b66dc5e4a6771668d168e0 \
     --hash=sha256:da08680efe34d582b72dde78d7f375705bf0f1258829bab83118ac0b24d88a11
-    # via build123d
+    # via
+    #   bd-warehouse
+    #   build123d
+bd-warehouse==0.4.0 \
+    --hash=sha256:2bb830513dc53a5095904d645a92466e629a50bd5493783544bdf3a7d5efc339 \
+    --hash=sha256:3c98f83b0b5c67fade67411b9775ae98a7fcffc714e231e825886f0c86778191
+    # via autolab
 build123d==0.13.0 \
     --hash=sha256:177f114e5f0514054189134346d386c7004048f8e58430b9b84b74a04fbc94fe \
     --hash=sha256:97c5577a777ff7219714b10f70f253c7109e84bb3ec621eea5d4597b4c7656b4
-    # via autolab
+    # via
+    #   autolab
+    #   bd-warehouse
 cadquery-ocp-novtk==8.0.1.1.0 \
     --hash=sha256:9df1e3700016bee819c0a8627880f37de47540eef63e8adb368f659a0fdeff78 \
     --hash=sha256:a8fe4d9d67eebec876eb213a03ff2b267060f7fe0661736555e6e71874331c56 \
@@ -584,6 +592,7 @@ typing-extensions==4.16.0 \
     --hash=sha256:dc983d19a509c94dba722ee6abd33940f7c05a89e243c47e907eb4db6f1a43e5
     # via
     #   anyio
+    #   bd-warehouse
     #   build123d
     #   etils
     #   ezdxf

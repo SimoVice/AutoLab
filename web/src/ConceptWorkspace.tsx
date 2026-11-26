@@ -4,8 +4,9 @@ import StepIllustration from './StepIllustration';
 import type { ImageCapability } from './ModelSelector';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { Vector3 as ThreeVector3, type Group } from 'three';
-import { Bounds, OrbitControls } from '@react-three/drei';
+import { Vector3 as ThreeVector3, type BufferGeometry, type Group } from 'three';
+import { Bounds, Html, OrbitControls } from '@react-three/drei';
+import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { conceptDuration, conceptIndexAngle, conceptIndexDuration, conceptTravelAt } from './conceptMotion';
 import './concept-workspace.css';
 
@@ -43,7 +44,7 @@ type ConceptPrimitive = {
   chamfer_mm?: number | null;
   features?: ConceptFeature[];
 };
-type ConceptComponent = { key: string; name: string; role: string; primitives: ConceptPrimitive[]; source: { title: string; url: string } | null; assembly: string; check: string; position_mm: Vector3; size_mm: Vector3 };
+type ConceptComponent = { key: string; name: string; geometry_basis?: string; role: string; primitives: ConceptPrimitive[]; source: { title: string; url: string } | null; assembly: string; check: string; position_mm: Vector3; size_mm: Vector3 };
 type ConceptSupply = { key: string; name: string; role: string; quantity: number; unit: string; source: { title: string; url: string } | null; catalog_search_url?: string | null; component_names?: string[] };
 type ConceptStep = { name: string; instruction: string; component_keys: string[]; moving_key: string | null; moving_component_keys?: string[]; translation_mm: Vector3; rotation_deg?: number; rotation_axis?: 'x' | 'y' | 'z' | null; pivot_mm?: Vector3 | null; stops?: number[]; rotation_reference?: 'from_rest' | 'previous_index'; index_chain?: boolean; start_rotation_deg?: number; rotation_delta_deg?: number };
 type WorkInterface = { key: string; label: string; tool_key: string; target_key: string; step_name: string | null; phase: number };
@@ -195,6 +196,32 @@ function AnimationClock({ playing, progress, onComplete, motionVersion, step, st
   return null;
 }
 
+function DetailedPart({ project, component, scale }: { project: Project; component: ConceptComponent; scale: number }) {
+  const [geometry, setGeometry] = useState<BufferGeometry | null>(null);
+  const [failed, setFailed] = useState(false);
+  const invalidate = useThree(state => state.invalidate);
+  const url = `/api/projects/${encodeURIComponent(project.id)}/concept/parts/${encodeURIComponent(component.key)}.stl?revision=${project.revision}`;
+  useEffect(() => {
+    const request = new AbortController();
+    let mesh: BufferGeometry | undefined;
+    async function load() {
+      const response = await fetch(url, { signal: request.signal });
+      if (!response.ok) throw new Error('CAD mesh unavailable');
+      const bytes = await response.arrayBuffer();
+      if (request.signal.aborted) return;
+      mesh = new STLLoader().parse(bytes);
+      setGeometry(mesh);
+      invalidate();
+    }
+    void load().catch(() => { if (!request.signal.aborted) { setFailed(true); invalidate(); } });
+    return () => { request.abort(); mesh?.dispose(); };
+  }, [url, invalidate]);
+  if (!geometry) return failed ? <Html center>CAD preview unavailable</Html> : null;
+  return <mesh geometry={geometry} scale={scale} castShadow receiveShadow>
+    <PrimitiveMaterial primitive={component.primitives[0]} />
+  </mesh>;
+}
+
 function ComponentGroup({ project, component, step, progress, scale, footprint, pivot, selected }: { project?: Project; selected: boolean; component: ConceptComponent; step: ConceptStep | undefined; progress: RefObject<number>; scale: number; footprint: [number, number]; pivot: Vector3 }) {
   const group = useRef<Group>(null);
   const scratch = useRef(new ThreeVector3());
@@ -212,7 +239,7 @@ function ComponentGroup({ project, component, step, progress, scale, footprint, 
     scratch.current.set(rest[0] - pivot[0], rest[1] - pivot[1], rest[2] - pivot[2]).applyQuaternion(group.current.quaternion);
     group.current.position.set(pivot[0] + scratch.current.x + offset[0] * travel * scale, pivot[1] + scratch.current.y + offset[1] * travel * scale, pivot[2] + scratch.current.z + offset[2] * travel * scale);
   });
-  return <group ref={group} position={rest}><AttachedCadModels project={project} scale={scale} origin={component.position_mm} host={component.key} />{selected && <mesh><boxGeometry args={component.size_mm.map(value => value * scale * 1.04) as Vector3} /><meshBasicMaterial color="#db7418" wireframe depthTest={false} /></mesh>}{component.primitives.map((primitive, index) => <ShapedPrimitive key={index} primitive={primitive} scale={scale} />)}</group>;
+  return <group ref={group} position={rest}><AttachedCadModels project={project} scale={scale} origin={component.position_mm} host={component.key} />{selected && <mesh><boxGeometry args={component.size_mm.map(value => value * scale * 1.04) as Vector3} /><meshBasicMaterial color="#db7418" wireframe depthTest={false} /></mesh>}{project && (component.geometry_basis === 'parametric_catalog' || component.geometry_basis === 'custom_brep') ? <DetailedPart key={`${project.id}/${project.revision}/${component.key}`} project={project} component={component} scale={scale} /> : component.primitives.map((primitive, index) => <ShapedPrimitive key={index} primitive={primitive} scale={scale} />)}</group>;
 }
 
 function ConceptScene({ project, design, step, progress, turn, playing, onComplete, motionVersion, stepIndex, hiddenKeys, selectedId }: { project?: Project; selectedId?: string | null; design: ConceptDesign; step: ConceptStep | undefined; progress: RefObject<number>; turn: number; playing: boolean; onComplete: () => void; motionVersion: number; stepIndex: number; hiddenKeys: Set<string> }) {
@@ -323,7 +350,7 @@ export default function ConceptWorkspace({ project, projectId, revision, design,
     {panel === 'parts' && <details className="concept-visibility"><summary>Show or hide parts</summary><div><p>View only; the design and downloads stay unchanged.</p>{design.components.map((component) => <label key={component.key}><input type="checkbox" checked={!hiddenKeys.has(component.key)} onChange={(event) => { const visible = event.target.checked; if (!visible && component.key === selectedId) onHideSelected?.(); setHiddenKeys((current) => { const next = new Set(current); if (visible) next.delete(component.key); else next.add(component.key); return next; }); }} />{component.name}</label>)}<button type="button" disabled={!hiddenKeys.size} onClick={() => setHiddenKeys(new Set())}>Show all parts</button></div></details>}
     {panel !== 'design' && <div className="concept-details">
       {(panel === 'instructions' || panel === 'software') && <section><div className="concept-section-heading"><h3>Assembly and operation</h3><span>{design.steps.length} {design.steps.length === 1 ? 'step' : 'steps'}</span></div><ol className="concept-steps">{design.steps.map((item, index) => <li key={`${index}-${item.name}`}><button type="button" aria-current={index === stepIndex ? 'step' : undefined} onClick={() => selectStep(index)}><span>{index + 1}</span><div><strong>{item.name}</strong><p>{item.instruction}</p>{item.component_keys.length > 0 && <small>{item.component_keys.map((key) => componentNames.get(key)).filter(Boolean).join(', ')}</small>}</div></button><StepIllustration key={`${projectId}:${revision}:concept-step-${index + 1}`} projectId={projectId} revision={revision} stepId={`concept-step-${index + 1}`} title={item.name} capability={imageCapability} /></li>)}</ol></section>}
-      {panel === 'parts' && <section><div className="concept-section-heading"><h3>Components</h3><span>{design.components.length} items</span></div><p className="concept-intro">Each entry represents one proposed component. References are candidates; confirm compatibility before building.</p><ul className="concept-parts">{design.components.map((component) => <li key={component.key}><strong>{component.name}</strong><p>{component.role}</p><p className="concept-part-kind">Quantity: 1 · {component.source ? 'Sourcing reference' : 'Custom concept'}</p><dl><dt>Assembly</dt><dd>{component.assembly}</dd><dt>Check</dt><dd>{component.check}</dd></dl><StepIllustration key={`${projectId}:${revision}:concept-${component.key}`} projectId={projectId} revision={revision} stepId={`concept-${component.key}`} title={`Assemble ${component.name}`} capability={imageCapability} /><div className="concept-links"><a href={`${base}/parts/${encodeURIComponent(component.key)}.stl${query}`} download>Download model (STL)</a><StepDownload url={`${base}/parts/${encodeURIComponent(component.key)}.step${query}`} filename={`${component.key}.step`} label={`Download ${component.name} editable model (STEP)`} />{component.source && <a href={component.source.url} target="_blank" rel="noopener noreferrer">{component.source.title} ↗</a>}</div></li>)}</ul></section>}
+      {panel === 'parts' && <section><div className="concept-section-heading"><h3>Components</h3><span>{design.components.length} items</span></div><p className="concept-intro">{design.components.some(c => c.geometry_basis === 'parametric_catalog') ? 'The screw uses the linked catalog geometry. The split clamp is a custom part.' : 'Each entry represents one proposed component. References are candidates; confirm compatibility before building.'}</p><ul className="concept-parts">{design.components.map((component) => <li key={component.key}><strong>{component.name}</strong><p>{component.role}</p><p className="concept-part-kind">Quantity: 1 · {component.geometry_basis === 'parametric_catalog' ? 'Catalog CAD' : component.source ? 'Sourcing reference' : 'Custom part'}</p><dl><dt>Assembly</dt><dd>{component.assembly}</dd><dt>Check</dt><dd>{component.check}</dd></dl><StepIllustration key={`${projectId}:${revision}:concept-${component.key}`} projectId={projectId} revision={revision} stepId={`concept-${component.key}`} title={`Assemble ${component.name}`} capability={imageCapability} /><div className="concept-links"><a href={`${base}/parts/${encodeURIComponent(component.key)}.stl${query}`} download>Download model (STL)</a><StepDownload url={`${base}/parts/${encodeURIComponent(component.key)}.step${query}`} filename={`${component.key}.step`} label={`Download ${component.name} editable model (STEP)`} />{component.source && <a href={component.source.url} target="_blank" rel="noopener noreferrer">{component.source.title} ↗</a>}</div></li>)}</ul></section>}
     </div>}
     {panel === 'parts' && Boolean(design.supplies?.length) && <section className="concept-supplies"><div className="concept-section-heading"><h3>Additional supplies</h3><span>Not shown in the model</span></div><p className="concept-intro">These items support the setup and are included in the parts list. Sourcing references identify candidates; catalog searches require product selection.</p><ul className="concept-parts">{design.supplies?.map((supply) => <li key={supply.key}><strong>{supply.name}</strong><p>{supply.role}</p><p className="concept-part-kind">Quantity: {supply.quantity} {supply.unit} · {supply.source ? 'Sourcing reference' : 'Selection required'}</p>{Boolean(supply.component_names?.length) && <p className="concept-part-kind">For: {supply.component_names?.join(', ')}</p>}{supply.source ? <a href={supply.source.url} target="_blank" rel="noopener noreferrer">{supply.source.title} ↗</a> : supply.catalog_search_url && <a href={supply.catalog_search_url} target="_blank" rel="noopener noreferrer">Search US catalog ↗</a>}</li>)}</ul></section>}
     {(panel === 'instructions' || panel === 'software') && <section className="concept-software"><div className="concept-section-heading"><h3>Controller software</h3></div><p><strong>Proposed sequence:</strong> {design.software.controller}</p><p>The Python controller can run the sequence locally in simulation. Its optional HTTP gateway requires a separately implemented and commissioned device integration.</p><div className="concept-software-actions"><a href={`${base}/controller.py${query}`} download>Download controller (Python)</a><a href={`${base}/project.json${query}`} download>Download project data (JSON)</a><a href={`${base}/gateway-config.json${query}`} download>Download gateway configuration (JSON)</a><a href={`${base}/guide.html${query}#software`} target="_blank" rel="noopener noreferrer">Read software and commissioning guide ↗</a></div><p>Keep the controller and project data together, then run <code>python controller.py project.json --simulate</code>.</p>{design.software.interfaces.length > 0 && <p><strong>Interfaces to specify:</strong> {design.software.interfaces.join(', ')}</p>}<div className="concept-software-columns"><div><h4>Setup</h4><ol>{design.software.setup.map((item, index) => <li key={index}>{item}</li>)}</ol></div><div><h4>Checks</h4><ul>{design.software.checks.map((item, index) => <li key={index}>{item}</li>)}</ul></div></div></section>}

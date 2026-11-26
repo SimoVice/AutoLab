@@ -120,9 +120,14 @@ def _concept(graph, design):
         key = part["key"]
         proof = [graph.record("component:" + key, "compiled_concept", {"component_key": key})]
         if part.get("source"):
-            proof.append(graph.record("candidate:" + key, "sourcing_candidate", part["source"]))
-        graph.part(key, part["name"], "custom_concept", "concept_design.components",
-                   part.get("primitives"), part.get("position_mm"), part.get("size_mm"), proof,
+            kind = ("parametric_catalog" if part.get("geometry_basis") == "parametric_catalog"
+                    else "sourcing_candidate")
+            proof.append(graph.record("candidate:" + key, kind, part["source"]))
+        geometry = ({"member": key, "threaded_mount": part["threaded_mount"]}
+                    if part.get("threaded_mount") else part.get("primitives"))
+        graph.part(key, part["name"], part.get("geometry_basis", "custom_concept"),
+                   "concept_design.components", geometry, part.get("position_mm"),
+                   part.get("size_mm"), proof,
                    parent=part.get("parent_key"), local=part.get("placement_mm"),
                    anchor="component_local_origin")
     for part in design.get("components", []):

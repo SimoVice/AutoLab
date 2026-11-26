@@ -22,6 +22,7 @@ from app.design_sources import reference_library
 from app.jubilee_procurement import upstream_candidate_groups
 from app.part_choices import Criterion
 from app.supplier_catalogs import PRODUCTS
+from app.threaded_mount import BODY, CATALOG, SCREW, MountSpec
 
 Vector = Annotated[list[float], Field(min_length=3, max_length=3)]
 Text = Annotated[str, Field(min_length=1, max_length=2000)]
@@ -84,6 +85,7 @@ def concept_sources() -> dict:
             'geometry_basis': 'custom_concept_not_vendor_cad',
             'limits': 'Sourcing candidate only; generated dimensions and compatibility unverified.',
         }
+    result[CATALOG['id']] = CATALOG.copy()
     return result
 
 
@@ -445,9 +447,21 @@ class ConceptProposal(_Model):
     open_questions: list[Text] = Field(max_length=40)
     supplies: list[ConceptSupply] = Field(default_factory=list, max_length=100)
     work_interfaces: list[WorkInterface] = Field(default_factory=list, max_length=40)
+    threaded_mount: MountSpec | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode='after')
     def coherent_links(self):
+        mount_sources = [c.key for c in self.components if c.source_id == CATALOG['id']]
+        if self.threaded_mount:
+            members = {c.key: c for c in self.components}
+            for record in self.threaded_mount.components():
+                expected = ConceptComponent.model_validate(record)
+                actual = members.get(expected.key)
+                if actual is None or any(getattr(actual, k) != getattr(expected, k) for k in
+                                         ('source_id', 'primitives', 'parent_key', 'placement_mm')):
+                    raise ValueError('The clamp and its catalog screw must share a mounting spec.')
+        if mount_sources != ([SCREW] if self.threaded_mount else []):
+            raise ValueError('A catalog screw requires a matching threaded mount.')
         interface_errors = interface_binding_issues(
             self.work_interfaces, self.components, self.steps)
         if interface_errors:
@@ -688,6 +702,10 @@ def compile_concept(proposal: ConceptProposal | dict, workspace_width_mm=None,
     for first, second in combinations(specs, 2):
         if roots[first] != roots[second]:
             continue
+        # This validated pair shares a bored and tapped interface. Its conservative
+        # packing envelopes necessarily overlap when the screw is seated.
+        if proposal.threaded_mount and {first, second} == {BODY, SCREW}:
+            continue
         conflict = next(((i, j, a, b) for i, a in enumerate(boxes[first])
                          for j, b in enumerate(boxes[second]) if _intersects(a, b)), None)
         if conflict is not None and len(issues) < 8:
@@ -788,12 +806,18 @@ def compile_concept(proposal: ConceptProposal | dict, workspace_width_mm=None,
                             groups[roots[c.key]]['offset']),
             },
         )
+        if proposal.threaded_mount and c.key in (BODY, SCREW):
+            component['threaded_mount'] = proposal.threaded_mount.model_dump(mode='json')
+            component['geometry_basis'] = 'parametric_catalog' if c.key == SCREW else 'custom_brep'
         components.append(component)
         parts.append({'key': c.key, 'label': c.name, 'name': c.name, 'quantity': 1, 'unit': 'item',
                       'source_id': c.source_id, 'source_title': source['title'] if source else None,
                       'source_url': source['url'] if source else None, 'price_usd': None,
                       'basis': 'sourcing_candidate_only' if source else 'custom_concept',
-                      'geometry_basis': 'custom_concept', 'assembly': readable(c.assembly)})
+                      'geometry_basis': component['geometry_basis'],
+                      'assembly': readable(c.assembly)})
+        if component['geometry_basis'] == 'parametric_catalog':
+            parts[-1]['basis'] = 'parametric_catalog'
         if c.critical_specs:
             parts[-1]['critical_specs'] = component['critical_specs']
     # A procurement line for a device already mounted in the model must not
@@ -880,6 +904,14 @@ def compile_concept(proposal: ConceptProposal | dict, workspace_width_mm=None,
             'are separate shells, not a boolean-unioned or print-ready fabrication model.',
         ],
     }
+    if proposal.threaded_mount:
+        design['limits'] = [
+            'The clamp has a 0.2 mm diametral stem allowance and a 1.2 mm split. '
+            'Its lower ear follows the installed screw with 0.025 mm nominal radial relief.',
+            'The ISO 4762 screw is built from the pinned bd_warehouse catalog. '
+            'The clamp is custom. STEP and meshes use the same detailed solids.',
+            'Physical fit, clamping force and the final mounting height require verification.',
+        ] + (design['limits'] if len(components) > 2 else [])
     interface_errors = [] if _skip_work_interfaces else work_interface_issues(design)
     if interface_errors:
         raise ValueError('\n'.join(interface_errors))
@@ -1148,6 +1180,17 @@ def _mesh_parts(design, component_key):
         if not components:
             raise ValueError('Unknown component model key.')
     for c in components:
+        if c.get('threaded_mount'):
+            from app.concept_cad import ConceptCADUnavailable
+            from app.threaded_mount import component_mesh
+            try:
+                vertices, faces = component_mesh(c['threaded_mount'], c['key'])
+            except ImportError as exc:
+                raise ConceptCADUnavailable('Install the CAD extra for threaded models.') from exc
+            if component_key is None:
+                vertices = [_add(v, c['position_mm']) for v in vertices]
+            yield c['key'], vertices, faces
+            continue
         for index, primitive in enumerate(c['primitives']):
             vertices, faces = _primitive_mesh(primitive)
             if component_key is None:
@@ -1176,6 +1219,8 @@ def concept_stl(design: dict, component_key: str | None = None) -> bytes:
             u, v = [b[i] - a[i] for i in range(3)], [c[i] - a[i] for i in range(3)]
             n = [u[1]*v[2] - u[2]*v[1], u[2]*v[0] - u[0]*v[2], u[0]*v[1] - u[1]*v[0]]
             norm = math.sqrt(sum(t * t for t in n))
+            if not norm:
+                continue
             n = [t / norm for t in n]
             triangles.append(struct.pack('<12fH', *n, *a, *b, *c, 0))
     header = b'AutoLab concept; units mm; Y up; not fabrication validated'.ljust(80, b' ')

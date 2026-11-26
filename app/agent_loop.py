@@ -36,6 +36,7 @@ _TOOL_STAGES = {
     "develop_bench_station": "designing",
     "develop_custom_equipment": "designing",
     "configure_standalone_fixture": "designing",
+    "configure_threaded_mount": "designing",
     "record_build_log": "inspecting",
     "apply_build_feedback": "repairing",
     "approve_machine": "verifying",
@@ -87,6 +88,10 @@ CORE PRINCIPLES
   comparison was saved, use configure_standalone_fixture directly. Use fastener_spec=none for
   a freestanding piece. Revise an existing fixture with its native tool.
   An unknown printer envelope leaves print fit unchecked and allows draft STEP/STL export.
+  For a requested threaded stem clamp with an explicit metric size use configure_threaded_mount.
+  Read the stem measurement from the saved comparison. A mounting interface may be built or
+  revised while the full stand position remains undecided. This tool imports detailed catalog
+  screw geometry locally and cuts its mating thread; use it without a separate source search.
   For original geometry use develop_custom_equipment or configure_standalone_fixture.
   A route is applied when the tool succeeds. Bind purchased components to exact BOM identities.
   When a constraint changes, refresh the comparison before changing the geometry. Routine edits to
