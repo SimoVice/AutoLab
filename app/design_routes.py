@@ -471,14 +471,14 @@ _METRIC_THREAD = re.compile(
 )
 
 
-def explicitly_requested_thread(message, diameter, pitch):
+def requested_metric_threads(message):
     from app.part_choices import _affirmative
 
-    return any(
-        tuple(float(n.replace(",", ".")) for n in match.groups()) == (diameter, pitch)
-        and _affirmative(match.group(), message)
+    return {
+        tuple(float(n.replace(",", ".")) for n in match.groups())
         for match in _METRIC_THREAD.finditer(message)
-    )
+        if _affirmative(match.group(), message)
+    }
 
 
 def _metric_thread_matches(measurement):

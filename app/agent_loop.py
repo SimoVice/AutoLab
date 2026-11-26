@@ -65,6 +65,8 @@ CORE PRINCIPLES
   ONLY when liquid pipetting, aliquoting, or dilution is explicitly part of the task.
 - For a new equipment design, or a change to the operations, interfaces or constraints underlying
   a proposed design, record the brief, search for relevant equipment and call compare_design_routes.
+  A metric size edit to an installed threaded_mount is a local part revision. Apply it directly
+  with configure_threaded_mount, keeping the saved broader comparison and stem measurement.
   State the material, required performance, interface and available equipment in the user's words.
   Use arbitrary operation IDs for the task. Map them to the recorded design_capabilities or manual.
   Compare reusing existing equipment or open CAD, buying equipment and fabricating a design.

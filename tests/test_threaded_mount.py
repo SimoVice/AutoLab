@@ -4,7 +4,7 @@ from copy import deepcopy
 
 import pytest
 
-from app.agent_tools import ToolContext, execute_tool
+from app.agent_tools import ToolContext, execute_tool, planning_tool_schemas
 from app.concept_cad import concept_step
 from app.concept_design import compile_concept, concept_stl
 from app.domain import new_project
@@ -25,6 +25,9 @@ def test_mount_changes_require_requested_dimensions_and_preserve_catalog_binding
     first, result = install(new_project(), "Fit an M5 × 0.8 screw to the 9 mm shaft.", 5, .8)
     assert result.ok and result.mutated
     reopened, _ = restore_snapshot(make_snapshot(first, []))
+    tools = planning_tool_schemas(ToolContext(reopened, "Passa a M6 × 1,0."))
+    assert {t["function"]["name"] for t in tools} == {
+        "configure_threaded_mount", "inspect_project_state", "load_tools"}
     for message, size, pitch in [("Do not install M6 x 1.", 6, 1), ("Fit M4 x 0.7.", 6, 1)]:
         original, result = install(reopened, message, size, pitch)
         assert not result.ok and original == reopened

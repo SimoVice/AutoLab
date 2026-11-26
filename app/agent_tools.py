@@ -665,6 +665,11 @@ def openai_tool_schemas(
 
 def planning_tool_schemas(ctx: ToolContext) -> list[dict[str, Any]]:
     """Offer planning tools, the selected design adapter and any tools requested this turn."""
+    recipe = (ctx.project.get("concept_design") or {}).get("proposal") or {}
+    if recipe.get("threaded_mount") and design_routes.requested_metric_threads(ctx.user_message):
+        return openai_tool_schemas(ctx.project, ctx.lab_profile, names=ctx.loaded_tools | {
+            "load_tools", "inspect_project_state", "configure_threaded_mount",
+        })
     if ctx.project.get("standalone_fixture") and not design_routes.needs_review(ctx.project):
         return openai_tool_schemas(ctx.project, ctx.lab_profile, names=ctx.loaded_tools | {
             "load_tools", "inspect_project_state", "configure_standalone_fixture",
@@ -2049,8 +2054,8 @@ async def _tool_threaded_mount(args: MountDimensions, ctx: ToolContext) -> ToolR
             or (old.get("workflow") or {}).get("kind") == "liquid_preparation"
             or design and (not prior or {c["key"] for c in design["components"]} != {BODY, SCREW})):
         return _fail(tool, "inspecting", "An existing assembly requires an explicit mating frame.")
-    if not design_routes.explicitly_requested_thread(
-            ctx.user_message, args.thread_diameter_mm, args.thread_pitch_mm):
+    if ((args.thread_diameter_mm, args.thread_pitch_mm)
+            not in design_routes.requested_metric_threads(ctx.user_message)):
         return _fail(tool, "inspecting", "Use the metric thread requested in the current message.")
     options = (old.get("design_plan") or {}).get("options", [])
     recorded = {float(m["value"].replace(",", ".")) for opt in options
