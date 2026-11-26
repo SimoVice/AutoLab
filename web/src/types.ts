@@ -609,7 +609,7 @@ export type StandaloneFixture = {
   schema_version: '1';
   kind: 'standalone_fixture_v1';
   spec: {
-    schema_version: '1';
+    schema_version: '1' | '2';
     title: string;
     fixture_kind: 'locating_base' | 'sample_holder' | 'imaging_rig';
     object_reference_id: string;

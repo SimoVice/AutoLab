@@ -120,6 +120,31 @@ def test_fixture_endpoints_downloads_and_build_feedback_loop(monkeypatch, tmp_pa
         assert logs_list.json()["build_feedback"]["tested_revision"] == rev1
 
 
+def test_rectangular_holder_exports_closed_manifold_rim(tmp_path):
+    import numpy as np
+    from build123d import export_stl
+
+    from app.fixture_adapter import compile_standalone_fixture
+    from app.fixture_cad import build_locating_base_solid
+
+    # A corner relief and a tactile datum used to touch along a zero-thickness edge.
+    parameters = dict(object_label="Test block", object_length_mm=51, object_width_mm=34,
+                      fastener_spec="none")
+    fixture = compile_standalone_fixture(parameters)
+    legacy = compile_standalone_fixture({**parameters, "schema_version": "1"})
+    assert fixture["part_signatures"]["locating-base"] != legacy["part_signatures"]["locating-base"]
+    assert fixture["derived"]["pocket_width_mm"] == legacy["derived"]["pocket_width_mm"]
+    file = tmp_path / "base.stl"
+    export_stl(build_locating_base_solid(fixture), str(file))
+    records = np.dtype([("normal", "<f4", 3), ("vertices", "<f4", (3, 3)), ("flags", "<u2")])
+    triangles = np.frombuffer(file.read_bytes(), dtype=records, offset=84)["vertices"]
+    _, ids = np.unique(triangles.reshape(-1, 3), axis=0, return_inverse=True)
+    faces = ids.reshape(-1, 3)
+    edges = np.concatenate([faces[:, [0, 1]], faces[:, [1, 2]], faces[:, [2, 0]]])
+    _, counts = np.unique(np.sort(edges, axis=1), axis=0, return_counts=True)
+    assert np.all(counts == 2)
+
+
 def test_labware_drawing_endpoints():
     plate_proj = source_project()
     plate_proj, _run = select_plate(

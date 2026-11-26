@@ -324,11 +324,11 @@ async def run_agent_turn(
     tool_calls_used = 0
     force_text = False
     assistant_text = ""
-    first_cad: tuple[int, str] | None = None
+    committed_fixture: tuple[int, str] | None = None
     started = time.monotonic()
 
     async def execute_loop(active_client: httpx.AsyncClient) -> None:
-        nonlocal repairs_used, tool_calls_used, force_text, assistant_text, first_cad
+        nonlocal repairs_used, tool_calls_used, force_text, assistant_text, committed_fixture
 
         for step in range(1, limits.max_steps + 1):
             elapsed = time.monotonic() - started
@@ -473,8 +473,10 @@ async def run_agent_turn(
                     continue
 
                 result = await execute_tool(fn_name, parsed_args, ctx)
-                if result.ok and result.data.get("first_cad"):
-                    first_cad = (result.data["first_cad"]["revision"], result.summary)
+                if result.ok and result.mutated and (
+                    result.data.get("first_cad") or fn_name == "configure_standalone_fixture"
+                ):
+                    committed_fixture = (ctx.project["revision"], result.summary)
                 tool_trace.append(
                     {
                         "step": step,
@@ -544,10 +546,11 @@ async def run_agent_turn(
     except ModelClientError as exc:
         # A failed presentation step must not discard an already exportable project revision.
         if (
-            exc.failure_kind == "provider_unavailable" and first_cad and ctx.mutated
-            and ctx.project["revision"] == first_cad[0]
+            exc.failure_kind == "provider_unavailable" and committed_fixture
+            and ctx.mutated
+            and ctx.project["revision"] == committed_fixture[0]
         ):
-            assistant_text = first_cad[1]
+            assistant_text = committed_fixture[1]
         else:
             ctx.project = deepcopy(project)
             if not getattr(exc, "usage", None):

@@ -163,7 +163,7 @@ class FixtureSpec(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["1", "2"] = "2"
     title: str = Field(default="Standalone bench fixture", min_length=1, max_length=140)
     fixture_kind: Literal["locating_base", "sample_holder", "imaging_rig"] = "locating_base"
     object_reference_id: Literal[
@@ -674,6 +674,8 @@ def compile_standalone_fixture(
     base_sig = _stable_signature(
         {
             "part_id": "locating-base",
+            **({"datum_notch_revision": 2} if spec.schema_version == "2" and
+               spec.object_shape == "rectangular" and spec.include_alignment_stops else {}),
             "fixture_kind": spec.fixture_kind,
             "object_shape": spec.object_shape,
             "pocket_l": pocket_l,

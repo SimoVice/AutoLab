@@ -658,6 +658,11 @@ def openai_tool_schemas(
 
 def planning_tool_schemas(ctx: ToolContext) -> list[dict[str, Any]]:
     """Offer planning tools, the selected design adapter and any tools requested this turn."""
+    if ctx.project.get("standalone_fixture") and not design_routes.needs_review(ctx.project):
+        return openai_tool_schemas(ctx.project, ctx.lab_profile, names=ctx.loaded_tools | {
+            "load_tools", "inspect_project_state", "configure_standalone_fixture",
+            "check_spatial_fit",
+        })
     names = ctx.loaded_tools | {
         "load_tools", "inspect_project_state", "update_project_brief", "check_spatial_fit",
         "lookup_reviewed_references", "discover_open_hardware_projects", "compare_design_routes",

@@ -176,8 +176,15 @@ def build_locating_base_solid(fixture: dict[str, Any]):
 
     # Asymmetric A1 tactile datum notch on top rim wall near (-X, +Y).
     if spec.get("include_alignment_stops"):
-        notch = Pos(-(pocket_l / 2.0 + wall * 0.5), pocket_w / 2.0 - 2.0, base_h - 0.8) * Box(
-            max(1.2, wall * 0.55), 5.0, 1.4, align=align_bottom
+        notch_width = max(1.2, wall * 0.55)
+        notch_x = wall * 0.5
+        if spec.get("schema_version") == "2" and spec["object_shape"] == "rectangular":
+            # Keep material between the corner relief and the tactile notch.
+            inset = relief_r - 0.3 + 0.4
+            notch_width = min(notch_width, wall - 0.3 - inset)
+            notch_x = max(notch_x, inset + notch_width / 2)
+        notch = Pos(-(pocket_l / 2.0 + notch_x), pocket_w / 2.0 - 2.0, base_h - 0.8) * Box(
+            notch_width, 5.0, 1.4, align=align_bottom
         )
         solid = solid - notch
 
